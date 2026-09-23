@@ -1,0 +1,35 @@
+version: 1
+tracker:
+  adapter: youtrack
+  project: AL
+  status_map:
+    in_work: In Work
+    in_review: Waiting for review
+    done: Finished
+forge:
+  adapter: github
+lang: [ts]
+workspace:
+  base: "release/*:latest"
+  branch: "task/{id}"
+  worktree: optional
+  setup: pnpm install
+  submodules:
+    - path: omix
+      readonly: true
+  integration: squash
+  protected: [master, "release/*"]
+verify:
+  typecheck: pnpm check-types
+  test: pnpm test
+  lint: { cmd: "pnpm lint", criterion: zero-diagnostics }
+  e2e: { cmd: "pnpm e2e", criterion: rerun-compare-set, background: true, when: [i18n, styles, mocks] }
+artifacts:
+  dir: .tasks
+  tracked: true
+limits:
+  coder_iterations: 7
+  review_passes: 3
+multitask:
+  parallel_per_owner: 1
+  push: true

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "omixflow",
+  "version": "0.1.0",
+  "description": "OMIXFlow: spec-driven development pipeline for Claude Code with pluggable adapters for trackers, forges, languages and workspaces",
+  "author": {
+    "name": "Swarga Core",
+    "email": "swarga.core@gmail.com"
+  },
+  "repository": "https://github.com/swarga-core/omixflow",
+  "keywords": ["pipeline", "sdd", "workflow", "multitask", "youtrack", "github"]
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "swarga-core",
+  "owner": {
+    "name": "Swarga Core",
+    "email": "swarga.core@gmail.com"
+  },
+  "metadata": {
+    "description": "Swarga Core plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "omixflow",
+      "source": "./",
+      "description": "OMIXFlow: spec-driven development pipeline with pluggable adapters",
+      "version": "0.1.0",
+      "category": "workflow"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+[submodule "omix"]
+	path = omix
+	url = git@github.com:example/omix-lib.git

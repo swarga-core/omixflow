@@ -1,0 +1,80 @@
+# OMIXFlow: конфиг проекта. Только значения; правила живут в адаптерах плагина
+# и в .claude/omixflow/{port}/ проекта. Схема: schema/flow.schema.json в плагине.
+# Проверка: /omixflow:doctor
+
+version: 1
+
+# plugin:
+#   min_version: 0.1.0
+
+# Источник задач. Адаптеры плагина: youtrack, local, none. Свой: файл
+# .claude/omixflow/tracker/{name}.md с port: tracker.
+tracker:
+  adapter: none
+  # project: AL                        # ключ проекта (youtrack)
+  # id_pattern: "^[A-Z]+-\\d+$"        # переопределение шаблона id адаптера
+  # status_map:                        # абстрактный статус → статус трекера
+  #   in_work: In Work
+  #   in_review: Waiting for review
+  #   done: Finished
+  # create_defaults:                   # поля при создании задачи
+  #   Type: Task
+  # dir: .tasks/backlog                # каталог задач адаптера local
+
+# Хостинг кода. Адаптеры: github, none.
+forge:
+  adapter: none
+
+# Языки проекта. Адаптеры: ts. Несколько языков: [ts, go].
+lang: [ts]
+
+# Репозиторий и git-флоу. Адаптер по умолчанию git.
+workspace:
+  base: auto                           # main | release/*:latest | auto (default-ветка remote)
+  branch: "task/{id}"                  # часть мультизадачи получает {branch}-{part}
+  worktree: optional                   # off | optional | always
+  # setup: pnpm install                # установка зависимостей (worktree, doctor)
+  # submodules:
+  #   - path: omix
+  #     readonly: true
+  integration: squash                  # squash | merge (интеграция части мультизадачи)
+  # protected: [master, "release/*"]   # ветки, куда нельзя коммитить напрямую
+
+# Гейты проверки. Строка = команда с критерием exit-code; объект даёт критерий,
+# фон и условия обязательности. Имена фиксированы: typecheck, test, lint, build, e2e.
+verify:
+  test: "echo 'configure verify.test'"
+  # typecheck: pnpm check-types
+  # lint: { cmd: "pnpm lint", criterion: zero-diagnostics }
+  # build: { cmd: "pnpm build", background: true }
+  # e2e: { cmd: "pnpm e2e", criterion: rerun-compare-set, background: true, when: [i18n, styles, mocks] }
+
+# Артефакты задач.
+artifacts:
+  dir: .tasks
+  tracked: true                        # версионировать вместе с кодом (для мультизадачи обязательно)
+
+# Лимиты протокола.
+limits:
+  coder_iterations: 7                  # попыток coder на шаг до эскалации
+  review_passes: 3                     # проходов ревью до эскалации
+  agent_rotation_steps: 10             # шагов плана до смены continuation-агента
+
+# Пороги тиров.
+tiers:
+  s_max_files: 5
+  m_max_files: 15
+
+# Модели агентов: сильная и облегчённая; используются таблицей в protocol/tiers.md.
+models:
+  strong: opus
+  light: sonnet
+
+# Мультизадача.
+multitask:
+  parallel_per_owner: 1                # активных частей на одного исполнителя
+  push: true                           # пушить ветки мультизадачи и частей (несколько исполнителей)
+
+# Замена агентов ядра агентами проекта (.claude/agents/{name}.md).
+# agents:
+#   coder: my-coder

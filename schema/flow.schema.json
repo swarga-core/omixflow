@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/swarga-core/omixflow/schema/flow.schema.json",
+  "title": "OMIXFlow project config",
+  "description": "Схема .claude/omixflow/flow.yaml. Только значения проекта; правила живут в адаптерах и protocol/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tracker", "forge", "lang", "workspace", "verify"],
+  "properties": {
+    "version": { "type": "integer", "enum": [1], "description": "версия схемы конфига" },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "description": "минимальная версия плагина, с которой проект совместим" }
+      }
+    },
+    "tracker": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "project": { "type": "string" },
+        "id_pattern": { "type": "string" },
+        "status_map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "properties": {
+            "in_work": { "type": "string" },
+            "in_review": { "type": "string" },
+            "done": { "type": "string" }
+          }
+        },
+        "create_defaults": { "type": "object", "additionalProperties": true },
+        "dir": { "type": "string" }
+      }
+    },
+    "forge": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["adapter"],
+      "properties": {
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+      }
+    },
+    "lang": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "branch"],
+      "properties": {
+        "adapter": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$", "default": "git" },
+        "base": { "type": "string", "description": "main | release/*:latest | auto" },
+        "branch": { "type": "string", "pattern": "\\{id\\}", "default": "task/{id}" },
+        "worktree": { "type": "string", "enum": ["off", "optional", "always"], "default": "optional" },
+        "setup": { "type": "string" },
+        "submodules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "readonly": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "integration": { "type": "string", "enum": ["squash", "merge"], "default": "squash" },
+        "protected": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["test"],
+      "properties": {
+        "typecheck": { "$ref": "#/definitions/gate" },
+        "test": { "$ref": "#/definitions/gate" },
+        "lint": { "$ref": "#/definitions/gate" },
+        "build": { "$ref": "#/definitions/gate" },
+        "e2e": { "$ref": "#/definitions/gate" }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dir": { "type": "string", "default": ".tasks" },
+        "tracked": { "type": "boolean", "default": true }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coder_iterations": { "type": "integer", "minimum": 1, "default": 7 },
+        "review_passes": { "type": "integer", "minimum": 1, "default": 3 },
+        "agent_rotation_steps": { "type": "integer", "minimum": 1, "default": 10 }
+      }
+    },
+    "tiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "s_max_files": { "type": "integer", "minimum": 1, "default": 5 },
+        "m_max_files": { "type": "integer", "minimum": 1, "default": 15 }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strong": { "type": "string", "default": "opus" },
+        "light": { "type": "string", "default": "sonnet" }
+      }
+    },
+    "multitask": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parallel_per_owner": { "type": "integer", "minimum": 1, "default": 1 },
+        "push": { "type": "boolean", "default": true }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "description": "маппинг роли на агента проекта: coder: my-coder",
+      "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    }
+  },
+  "definitions": {
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cmd"],
+      "properties": {
+        "cmd": { "type": "string" },
+        "criterion": { "type": "string", "enum": ["exit-code", "zero-diagnostics", "rerun-compare-set"], "default": "exit-code" },
+        "scope": { "type": "string", "enum": ["root", "package"], "default": "root" },
+        "background": { "type": "boolean", "default": false },
+        "when": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
