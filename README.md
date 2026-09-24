@@ -26,20 +26,33 @@ Refine, Start, Research, Spec, Plan, Implement, Review, Finalize; каждую �
 
 ```
 omixflow/
-├── skills/        скилы фаз и утилит (пока только doctor)
-├── agents/        агенты (переносятся следующим шагом)
-├── protocol/      канон процесса: фазы, тиры, диалог, ревью-цикл, артефакты, мультизадача
+├── skills/        develop, create, refine, start, research, spec, plan, implement,
+│                  review, finalize, pr-review, doctor
+├── agents/        researcher, architect, coder, tester, reviewer, web-fetcher
+├── protocol/      канон: словарь, фазы, тиры, диалог, ревью-цикл, артефакты,
+│                  worktree, мультизадача, адаптеры, рантайм скила
 ├── adapters/      порты и адаптеры
-│   ├── tracker/   PORT.md + youtrack, local, none
-│   ├── forge/     PORT.md + github, none
+│   ├── tracker/   PORT.md + youtrack, local (+ backlog-index.py), none
+│   ├── forge/     PORT.md + github (+ pr.py), none
 │   ├── lang/      PORT.md + ts
 │   └── workspace/ PORT.md + git
 ├── schema/        JSON-схема конфига проекта
 ├── templates/     шаблон flow.yaml
-├── scripts/       doctor, resolve, cfg, wt-setup, общая библиотека
+├── scripts/       doctor, resolve, cfg, state, multitask, wt-setup, общая библиотека
 ├── hooks/         hooks.json
-└── tests/         тесты скриптов и фикстуры
+└── tests/         тесты скриптов, линт терминологии и слоёв, фикстуры
 ```
+
+## Скилы
+
+| Скил | Что делает |
+|---|---|
+| `/omixflow:develop {id}` | весь пайплайн: триаж тира, фазы по очереди, резюм по `state.yaml`, мультизадача по частям |
+| `/omixflow:create` | задача в трекере из черновика или из файла локального бэклога |
+| `/omixflow:refine {id} [--multitask]` | уточнение постановки; декомпозиция на части с картой зависимостей |
+| `/omixflow:start`, `research`, `spec`, `plan`, `implement`, `review`, `finalize` | фазы по отдельности; каждая единственный источник своей логики |
+| `/omixflow:pr-review {pr}` | ревью PR или ветки с публикацией через адаптер forge |
+| `/omixflow:doctor [--init]` | проверка и настройка проекта |
 
 Три слоя:
 
@@ -95,18 +108,22 @@ claude plugin install omixflow@swarga-core
 
 ```bash
 python3 scripts/doctor.py [--project DIR] [--json] [--init [--force]]
-python3 scripts/resolve.py adapter tracker      # цепочка файлов адаптера, base → leaf
-python3 scripts/resolve.py agent coder          # агент и проектные правила к нему
-python3 scripts/resolve.py script gate.sh       # проектный скрипт затеняет плагинный
-python3 scripts/resolve.py base                 # разрешённая base-ветка
-python3 scripts/cfg.py workspace.setup          # значение из flow.yaml
+python3 scripts/resolve.py adapter tracker        # цепочка файлов адаптера, base → leaf
+python3 scripts/resolve.py adapter-script forge pr  # скрипт, объявленный адаптером
+python3 scripts/resolve.py agent coder            # subagent_type, файл агента, проектные правила
+python3 scripts/resolve.py script gate.sh         # проектный скрипт затеняет плагинный
+python3 scripts/resolve.py base                   # разрешённая base-ветка
+python3 scripts/cfg.py workspace.setup            # значение из flow.yaml
+python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/complete/next/step)
+python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/waves/ready/set/seed/file
 ```
 
 ## Статус
 
-`0.1.0`: скелет. Перенос скилов фаз, агентов и review-машинерии из
-`eps-omix-lib/.claude/` и `~/.claude/skills/omix-pr-review` идёт следующим шагом,
-с одновременной чисткой терминологии и закрытием известных дефектов.
+`0.2.0`: скилы, агенты и протокол перенесены из `eps-omix-lib/.claude/`
+и `~/.claude/skills/omix-pr-review` с чисткой терминологии и закрытием известных
+дефектов. Следующий шаг: миграция проектов на `flow.yaml` и первый прогон реальной
+задачи через `/omixflow:develop`.
 
 ## Разработка
 

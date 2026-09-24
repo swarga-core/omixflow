@@ -116,11 +116,29 @@ class AdapterTests(unittest.TestCase):
         cfg = lib.load_config(FIXTURE)
         info = lib.resolve_agent("coder", FIXTURE, cfg)
         self.assertEqual(info["layer"], "plugin")
+        self.assertEqual(info["subagent_type"], "omixflow:coder")
         self.assertFalse(info["replaced"])
+        self.assertTrue(info["agent"].endswith("agents/coder.md"))
         cfg["agents"] = {"coder": "my-coder"}
         info = lib.resolve_agent("coder", FIXTURE, cfg)
-        self.assertTrue(info["replaced"])
+        self.assertEqual(info["subagent_type"], "omixflow:my-coder")
         self.assertIsNone(info["agent"])  # fixture has no .claude/agents/my-coder.md
+
+    def test_same_name_project_agent_overrides_plugin_agent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / lib.CONFIG_REL).parent.mkdir(parents=True)
+            (root / lib.CONFIG_REL).write_text("version: 1\n", encoding="utf-8")
+            (root / ".claude" / "agents").mkdir(parents=True)
+            (root / ".claude" / "agents" / "coder.md").write_text("---\nname: coder\n---\n", encoding="utf-8")
+            info = lib.resolve_agent("coder", root, {})
+            self.assertTrue(info["replaced"])
+            self.assertEqual(info["subagent_type"], "coder")
+            self.assertEqual(info["layer"], "project")
+
+    def test_plugin_agents_exist_for_all_roles(self):
+        for role in lib.ROLES:
+            self.assertTrue((lib.PLUGIN_ROOT / "agents" / f"{role}.md").exists(), role)
 
 
 class ScriptTests(unittest.TestCase):

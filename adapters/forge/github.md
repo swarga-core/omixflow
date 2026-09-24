@@ -4,14 +4,17 @@ name: github
 capabilities: [current_user, pr_create, pr_get, pr_files, pr_reviews, pr_threads, review_publish, reply, permalink]
 requires:
   tools: []
-  bin: [gh, jq, python3]
-scripts: {}
+  bin: [gh, python3]
+scripts:
+  pr: github/pr.py
 ---
 
 # Адаптер forge: GitHub
 
-Через `gh` CLI с авторизацией и scope `repo`. Скрипты сборки payload, валидации
-hunks и выборки тредов появятся вместе со скилом ревью и будут объявлены в `scripts`.
+Через `gh` CLI с авторизацией и scope `repo`. Скрипт `pr` (`resolve.py
+adapter-script forge pr`) реализует все операции ниже; JSON разбирается в Python,
+не в переменных оболочки. Команды: `user`, `view`, `files`, `reviews-mine`,
+`threads`, `build-payload`, `validate`, `submit`, `reply`, `permalink`.
 
 ## current_user
 

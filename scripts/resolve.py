@@ -2,6 +2,7 @@
 """Resolve OMIXFlow adapters, agents, scripts and the base branch for a project.
 
     resolve.py adapter <port> [<name>] [--project DIR] [--json]
+    resolve.py adapter-script <port> <key> [--project DIR]   # script declared by the port's adapter
     resolve.py agent <role>            [--project DIR] [--json]
     resolve.py script <name>           [--project DIR]
     resolve.py base                    [--project DIR]
@@ -21,7 +22,7 @@ import omixflow_lib as lib  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("kind", choices=["adapter", "agent", "script", "base"])
+    ap.add_argument("kind", choices=["adapter", "adapter-script", "agent", "script", "base"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--json", action="store_true")
@@ -48,6 +49,19 @@ def main(argv=None) -> int:
 
         cfg = lib.load_config(root)
 
+        if ns.kind == "adapter-script":
+            if len(ns.args) < 2:
+                raise lib.OmixflowError("укажи порт и ключ скрипта: adapter-script forge pr")
+            port, key = ns.args[0], ns.args[1]
+            names = lib.adapters_for(cfg, port)
+            if not names:
+                raise lib.OmixflowError(f"в конфиге нет адаптера для порта {port}")
+            path = lib.resolve_adapter_script(port, names[0], key, root)
+            if path is None:
+                raise lib.OmixflowError(f"адаптер {port}/{names[0]} не объявляет скрипт {key!r}")
+            print(path)
+            return 0
+
         if ns.kind == "agent":
             if not ns.args:
                 raise lib.OmixflowError("укажи роль агента")
@@ -55,6 +69,7 @@ def main(argv=None) -> int:
             if ns.json:
                 print(json.dumps(info, ensure_ascii=False, indent=2))
             else:
+                print(info["subagent_type"])
                 if info["agent"]:
                     print(info["agent"])
                 for r in info["rules"]:

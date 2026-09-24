@@ -5,7 +5,8 @@ capabilities: [identify, get, update_description, comment, set_status, current_u
 requires:
   tools: []
   bin: [git]
-scripts: {}
+scripts:
+  index: local/backlog-index.py
 ---
 
 # Адаптер tracker: local
@@ -77,8 +78,9 @@ Id это kebab-slug: `^[a-z0-9]+(-[a-z0-9]+)*$`, совпадает с имен
 ## create
 
 Создать файл с фронтматтером и телом из постановки. Индекс каталога
-(`{tracker.dir}/README.md` с таблицей) генерируется скриптом, руками не ведётся;
-скрипт появится вместе со скилом create.
+(`{tracker.dir}/README.md` с таблицей) генерируется скриптом `index`
+(`resolve.py adapter-script tracker index`) после каждого изменения файлов;
+руками не ведётся.
 
 ## link
 

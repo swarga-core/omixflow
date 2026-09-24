@@ -57,13 +57,29 @@ class TerminologyLint(unittest.TestCase):
         self.assertEqual(hits, [], "запрещённые термины:\n" + "\n".join(hits))
 
     def test_core_does_not_name_tools(self):
+        """Agent frontmatter is exempt: its `tools:` allowlist must name real tool ids."""
         hits = []
         for path in iter_files(*CORE_DIRS):
             rel = path.relative_to(ROOT).as_posix()
-            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            text = path.read_text(encoding="utf-8")
+            offset = 0
+            if rel.startswith("agents/"):
+                _, body = lib.parse_frontmatter(path)
+                offset = text.count("\n") - body.count("\n")
+                text = body
+            for n, line in enumerate(text.splitlines(), 1 + offset):
                 if TOOL_NAMES.search(line):
                     hits.append(f"{rel}:{n}: {line.strip()}")
         self.assertEqual(hits, [], "инструменты адаптеров в ядре:\n" + "\n".join(hits))
+
+    def test_agents_declare_frontmatter(self):
+        for path in sorted((ROOT / "agents").glob("*.md")):
+            meta, _ = lib.parse_frontmatter(path)
+            with self.subTest(agent=path.stem):
+                self.assertEqual(meta.get("name"), path.stem)
+                self.assertTrue(meta.get("description"))
+                self.assertIn("tools", meta)
+                self.assertIn("model", meta)
 
 
 class AdapterLint(unittest.TestCase):

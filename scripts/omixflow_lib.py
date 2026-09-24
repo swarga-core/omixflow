@@ -343,19 +343,28 @@ def adapters_for(cfg: Dict[str, Any], port: str) -> List[str]:
 # --------------------------------------------------------------------- agents
 
 def resolve_agent(role: str, root: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Which agent file serves a role, and which project rules extend it.
+
+    Replacement happens two ways: an explicit mapping in flow.yaml
+    (`agents: {coder: my-coder}` → .claude/agents/my-coder.md) or, as Claude Code
+    itself does, a project agent with the same name (.claude/agents/coder.md
+    overrides the plugin's omixflow:coder). `subagent_type` is the scoped plugin
+    name for plugin agents and the bare name for project agents."""
     mapping = cfg.get("agents") or {}
     target = str(mapping.get(role, role))
-    replaced = target != role
-    if replaced:
-        agent = root / ".claude" / "agents" / f"{target}.md"
-        layer = "project"
+    project_agent = root / ".claude" / "agents" / f"{target}.md"
+    plugin_agent = PLUGIN_ROOT / "agents" / f"{target}.md"
+    if project_agent.exists():
+        agent, layer, replaced = project_agent, "project", True
+        subagent_type = target
     else:
-        agent = PLUGIN_ROOT / "agents" / f"{target}.md"
-        layer = "plugin"
+        agent, layer, replaced = plugin_agent, "plugin", False
+        subagent_type = f"omixflow:{target}"
     rules = root / OVERRIDE_REL / "agents" / f"{role}.md"
     return {
         "role": role,
         "agent": str(agent) if agent.exists() else None,
+        "subagent_type": subagent_type,
         "layer": layer,
         "replaced": replaced,
         "rules": [str(rules)] if rules.exists() else [],
@@ -368,6 +377,22 @@ def resolve_script(name: str, root: Path) -> Optional[Path]:
         return project
     plugin = PLUGIN_ROOT / "scripts" / name
     return plugin if plugin.exists() else None
+
+
+def resolve_adapter_script(port: str, name: str, key: str, root: Path) -> Optional[Path]:
+    """A script declared in an adapter's `scripts:` map, resolved relative to that
+    adapter file. The leaf of the chain wins, so a project adapter can shadow a
+    plugin script by declaring the same key."""
+    chain = resolve_adapter(port, name, root)
+    for adapter in reversed(chain):
+        scripts = adapter.meta.get("scripts") or {}
+        rel = scripts.get(key)
+        if rel:
+            path = (adapter.path.parent / str(rel)).resolve()
+            if not path.exists():
+                raise OmixflowError(f"{adapter.path}: scripts.{key} указывает на несуществующий {path}")
+            return path
+    return None
 
 
 # ---------------------------------------------------------------- base branch

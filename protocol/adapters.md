@@ -96,9 +96,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter tracker
 - **добавить правила** файлом `.claude/omixflow/agents/{role}.md` с
   `extends: omixflow:{role}`; оркестратор передаёт путь агенту при спавне, потому что
   субагент не получает CLAUDE.md проекта автоматически;
-- **заменить агента** через маппинг в конфиге: `agents: { coder: my-coder }`, где
-  `my-coder` это `.claude/agents/my-coder.md` проекта. Скилы обращаются к агентам
-  через маппинг, а не по жёсткому имени.
+- **заменить агента** двумя способами: проектный агент с тем же именем
+  (`.claude/agents/coder.md` перекрывает `omixflow:coder`, так работает сам Claude
+  Code) или маппинг в конфиге `agents: { coder: my-coder }` на
+  `.claude/agents/my-coder.md`. Скилы получают `subagent_type` из
+  `resolve.py agent {role}`, а не пишут имя жёстко.
 
 Замена агента снимает с плагина ответственность за его контракт вывода. Заменяющий
 агент обязан выдавать тот же формат, что описан в ядре, иначе оркестратор не сможет

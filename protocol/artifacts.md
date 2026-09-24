@@ -34,15 +34,19 @@
 schema: 1
 id: AL-822
 kind: task                 # task | multitask | part
+mode: pipeline             # pipeline (ведёт develop) | manual (standalone-скилы)
 tier: M
 tier_forced: false
-phase: implement           # refine | start | research | spec | plan | implement | review | finalize | done
+phase: implement           # текущая фаза: refine | start | research | spec | plan | implement | review | finalize | done
+completed: [refine, start, research, spec, plan]
 step: 3                    # текущий шаг плана, только в implement
 steps_total: 6
+steps_done: [1, 2]
 iteration: 1               # номер доработки после возврата; 1 = первая реализация
-agents:                    # живые continuation-агенты
+agents:                    # живые continuation-агенты этой сессии
   coder: coder-AL-822
   reviewer: reviewer-AL-822
+session: 3f2a…             # id сессии, в которой созданы agents
 branch: task/AL-822
 base: release/2.3.0
 multitask:                 # только для kind: part
@@ -51,12 +55,15 @@ multitask:                 # только для kind: part
 updated: 2026-09-23T16:00:00Z
 ```
 
+Управляется скриптом `state.py` (`init`, `get`, `set`, `complete`, `next`);
+скилы не редактируют файл руками.
+
 Правила:
 
-- Резюм читает `phase` и `step`, не угадывает по наличию файлов. Если файла фазы нет,
-  а `state.yaml` говорит, что фаза пройдена, это рассинхрон: остановиться и показать.
-- `agents` сверяются при резюме в новой сессии: агенты предыдущей сессии не существуют,
-  их имена очищаются, спавн заново.
+- Резюм читает `phase`, `completed`, `step`, не угадывает по наличию файлов. Если
+  файла фазы нет, а `completed` её содержит, это рассинхрон: остановиться и показать.
+- `agents` действительны только в сессии `session`: в новой сессии агентов
+  предыдущей не существует, `state.py` их очищает при несовпадении, спавн заново.
 - Форсированный тир хранится здесь и переживает резюм.
 
 ## log.md
