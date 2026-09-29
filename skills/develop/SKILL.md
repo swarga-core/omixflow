@@ -1,6 +1,6 @@
 ---
 name: develop
-description: Full OMIXFlow development pipeline for a task — triages the tier, then runs Refine, Start, Research, Spec, Plan, Implement, Review, Finalize by invoking the phase skills, resuming from state.yaml; handles multitasks part by part with the dependency map. Use when the user says "сделай задачу", "develop AL-822", "запусти пайплайн", or gives a task id / free-form task to implement end to end.
+description: Full OMIXFlow development pipeline for a task — picks the pipeline profile (full by default, research for read-only investigations), triages the tier when the profile does, then runs the profile's phases (Refine, Start, Research, Spec, Plan, Implement, Review, Finalize for full) by invoking the phase skills, resuming from state.yaml; handles multitasks part by part with the dependency map, or delegates a research multitask to the research scheduler. Use when the user says "сделай задачу", "develop AL-822", "запусти пайплайн", or gives a task id / free-form task to implement end to end.
 ---
 
 # OMIXFlow develop
@@ -12,7 +12,8 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Фазы и инварианты:
 `${CLAUDE_PLUGIN_ROOT}/protocol/phases.md`. Тиры:
 `${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Диалог:
+`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
+`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Диалог:
 `${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`.
 
 ## Активация
@@ -21,7 +22,9 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 - `/omixflow:develop "{описание}"`: свободная формулировка.
 - `--from={phase}`: перезапуск с фазы (артефакты фазы и последующих будут
   перезаписаны, предупредить).
-- `--tier=S|M|L`: форсированный тир.
+- `--profile=NAME`: профиль одиночной задачи (`full` по умолчанию); для мультизадачи
+  профиль задаёт маркер блока.
+- `--tier=S|M|L`: форсированный тир; с профилем `triage: false` ошибка.
 - `--worktree`: изолировать задачу в worktree.
 - `{id} --part {part}`: взять конкретную часть мультизадачи.
 
@@ -67,7 +70,8 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 `get` задачи. Если описание содержит блок мультизадачи (`multitask.py has`),
 перейти к разделу «Мультизадача». Иначе:
 
-**Триаж.** Оценить тир по критериям tiers.md (порог файлов из `tiers.*`).
+**Триаж.** Профиль с `triage: false` не триажится: шаг пропускается, тира нет.
+Иначе оценить тир по критериям tiers.md (порог файлов из `tiers.*`).
 Сомнение → больший. `--tier` форсирует и помечается `forced`; вскрывшийся масштаб
 для форсированного тира не повышается молча: показать и спросить. Тир
 подтверждается после Refine и может только расти.
@@ -76,27 +80,40 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 
 1. `refine {id}`: только для адаптеров с описанием в трекере; для `none`
    пропускается (уточнение фиксируется в task.md на Start).
-2. `start {id} --tier={tier} --mode=pipeline [--worktree]`.
-3. `research`, `spec`, `plan`, `implement`, `review`, `finalize` через
-   `state.py next`, пока фаза не станет `done`.
+2. `start {id} --profile={profile} [--tier={tier}] --mode=pipeline [--worktree]`.
+3. Фазы профиля после start через `state.py next`, пока фаза не станет `done`.
 
-Правило одного репозитория: если Start или Research вскрыли, что задача требует
+Инвариант 7: одна задача мутирует один репозиторий, немутирующие фазы читают
+репозитории из `workspace.repos`. Если Start или Research вскрыли, что задача требует
 изменений в нескольких репозиториях, СТОП и предложить декомпозицию.
 
 ## Мультизадача
 
 ### M0. Детект и резюм
 
-Свежее описание → файл; `multitask.py validate`. Ошибка валидации или нет
-блока при заявленной мультизадаче: СТОП, предложить `refine --multitask`.
-`TASK_DIR/state.yaml` с `kind: multitask` нет → M1, есть → M2.
+Свежее описание → файл; `multitask.py meta` (профиль) и `multitask.py validate`.
+Ошибка маркера или валидации или нет блока при заявленной мультизадаче: СТОП,
+предложить `refine --multitask`. `--profile`, противоречащий маркеру: СТОП.
+`TASK_DIR/state.yaml` с `kind: multitask` нет → M1, есть → M2 (или MS).
+
+Профиль с `part_runner: scheduler` ведётся делегированием, M2–M3 к нему не
+применяются:
+
+- **MS.** `start {id}` (если мультизадача не стартована), затем по
+  `state.py next TASK_DIR` состояния мультизадачи:
+  - `research` → `research {id} --parts` (планировщик, `multitask.md`
+    «Планировщик»); после него снова `state.py next`: фаза `research` не закрыта
+    (не все части терминальны) → показать сводку планировщика и остановиться;
+  - `finalize` → `finalize {id} --multitask`;
+  - `done` → как в резюме одиночной задачи (шаг 2, `phase == done`): мультизадача
+    завершалась, сообщить об этом.
 
 ### M1. Старт мультизадачи
 
 `start {id} --mode=pipeline` (ветка мультизадачи, multitask.md, состояние,
 статус, комментарий). → M2.
 
-### M2. Выбор части
+### M2. Выбор части (`part_runner: sequential`)
 
 `me` из `current_user`. `multitask.py ready --from {desc} --owner {me}`, строго
 в этом порядке:
@@ -110,13 +127,13 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 4. `--part {part}` указан и часть в `ready`: → M3 fresh.
 5. `ready` не пуст: показать волну, занятые части других владельцев как занятые,
    AskUserQuestion: взять первую готовую (Recommended) / другую из готовых /
-   остановить. → M3 fresh. Активных частей у владельца не больше
-   `multitask.parallel_per_owner`.
+   остановить. → M3 fresh. Лимит активных частей владельца
+   `multitask.parallel_per_owner` (`ready --parallel`, `slots`).
 6. `all_terminal`: → M4.
 7. Иначе (всё занято другими или ждёт зависимостей): сообщить, чего ждём,
    остановиться.
 
-### M3. Часть
+### M3. Часть (`part_runner: sequential`)
 
 - fresh: триаж части по её постановке из multitask.md → `start {id} --part {part}
   --tier={tier} --mode=pipeline`.
@@ -144,7 +161,7 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
 | Часть `blocked` | СТОП на ней, разработчик решает |
 | Пустая часть (0 изменений) | не коммитить, `skipped` |
 | Конфликт при интеграции части | СТОП, блок остаётся `in-review` |
-| Задача затрагивает несколько репозиториев | СТОП, декомпозиция |
+| Задача меняет несколько репозиториев | СТОП: одна задача мутирует один репозиторий, немутирующие фазы читают `workspace.repos`; декомпозиция |
 | coder или reviewer исчерпали лимит | СТОП, эскалация |
 | CLI хостинга не настроен | PR пропускается с инструкцией |
 
@@ -154,10 +171,11 @@ description: Full OMIXFlow development pipeline for a task — triages the tier,
   Implement и Review во всех тирах только через агентов. Код оркестратор не пишет.
 - Масштаб по тиру, инварианты нет: след каждой фазы, дельта до кода, обязательный
   Review, лимиты, подтверждения внешних действий.
-- Фазы строго последовательно; параллельны только researcher и web-fetcher внутри
-  Research.
+- Фазы строго последовательно; параллельные агенты только внутри Research:
+  web-fetcher рядом с researcher и researcher'ы частей в планировщике.
 - Резюм по `state.yaml`; все решения разработчика попадают в log.md.
 - Мультизадача аддитивна: одиночный поток от неё не меняется; часть = тот же
-  одиночный пайплайн под `{artifacts.dir}/{id}/{part}/`.
-- Одна активная часть на владельца; канон состояния мультизадачи в блоке
+  пайплайн профиля мультизадачи под `{artifacts.dir}/{id}/{part}/`.
+- Лимит параллельности по `part_runner`: `parallel_per_owner` для `sequential`,
+  `multitask.parallel_parts` для `scheduler`; канон состояния мультизадачи в блоке
   описания, не в файлах и не в комментариях.

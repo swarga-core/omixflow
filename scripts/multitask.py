@@ -2,18 +2,31 @@
 """Multitask block and dependency map (see protocol/multitask.md).
 
 The block lives inside a task description between
-<!-- omixflow:multitask:start --> and <!-- omixflow:multitask:end -->.
+<!-- omixflow:multitask:start --> and <!-- omixflow:multitask:end -->. Both
+markers occupy a whole line; a marker quoted inline in prose is not a marker, and a
+second start-marker line is an error. The start marker may carry attributes
+` key=value` (known key: `profile`, absent = full):
+<!-- omixflow:multitask:start profile=research -->. Unknown or duplicate keys and an
+unknown profile are marker errors: validate, meta, ready and file reject them;
+extract, has, set and waves tolerate them (a declared known profile is used, full
+otherwise) and keep the marker line verbatim.
+The optional `repo` column names a repository from workspace.repos (`—` = home);
+it is emitted after `title` only when some row uses it, is valid only in a
+non-mutating profile and can be set only while the part is `pending`.
+--repos is the comma-separated list of workspace.repos names to check against.
 All commands read text from --from FILE (or stdin) and never touch the tracker:
 the skill fetches the description, runs the script, writes the result back
 through the tracker adapter.
 
     multitask.py extract  --from F                 # rows as JSON
-    multitask.py validate --from F                 # DAG + format checks, exit 1 on error
+    multitask.py meta     --from F                 # {profile, attrs, repos} as JSON
+    multitask.py validate --from F [--repos a,b]   # DAG + format checks, exit 1 on error
     multitask.py waves    --from F [--json]        # topological waves
-    multitask.py ready    --from F [--owner U]     # parts whose deps are done
-    multitask.py set      --from F --part P k=v... # update a row; prints the whole text
-    multitask.py render   --rows ROWS.json         # block from rows
-    multitask.py seed     --parts "slug — title" ... [--from F]   # new block (all pending)
+    multitask.py ready    --from F [--owner U] [--parallel N]   # parts whose deps are done
+    multitask.py set      --from F --part P k=v... [--repos a,b]  # rewrite only that row
+    multitask.py render   --rows ROWS.json [--profile NAME]     # block from rows
+    multitask.py seed     --parts "slug — title" ... [--depends D ...] [--repo R ...]
+                          [--profile NAME] [--repos a,b] [--from F]  # new block (all pending)
     multitask.py file     --from F --id ID --title T   # multitask.md skeleton
     multitask.py has      --from F                 # exit 0 if the text contains a block
 """
@@ -28,15 +41,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
+from state import DEFAULT_PROFILE, PROFILES, check_profile  # noqa: E402
 
 MARK_START = "<!-- omixflow:multitask:start -->"
 MARK_END = "<!-- omixflow:multitask:end -->"
+# Whole-line markers; group 1 of START_RE holds the raw attribute tokens.
+# `\r` counts as trailing whitespace so CRLF texts match (`$` under re.M sits before `\n`).
+START_RE = re.compile(r"^[ \t]*<!--[ \t]*omixflow:multitask:start((?:[ \t]+[^\s>]+)*)[ \t]*-->[ \t\r]*$", re.M)
+END_RE = re.compile(r"^[ \t]*<!--[ \t]*omixflow:multitask:end[ \t]*-->[ \t\r]*$", re.M)
+ATTR_RE = re.compile(r"^([a-z][a-z0-9_-]*)=([^\s>]+)$")
+MARKER_KEYS = ("profile",)
+EDITABLE = ("status", "owner", "branch", "commit", "title", "depends", "repo")
 COLUMNS = ["#", "part", "title", "depends", "owner", "status", "branch", "commit"]
 STATUSES = ("pending", "in-work", "in-review", "done", "blocked", "skipped")
 TERMINAL = ("done", "skipped")
 ACTIVE = ("in-work", "in-review")
 EMPTY = "—"
-SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+SLUG_RE = lib.SLUG_RE
 
 Row = Dict[str, Any]
 
@@ -49,14 +70,69 @@ def read_text(path: Optional[str]) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def _start_match(text: str) -> Optional["re.Match[str]"]:
+    starts = list(START_RE.finditer(text))
+    if len(starts) > 1:
+        raise lib.OmixflowError("больше одного блока omixflow:multitask в тексте")
+    return starts[0] if starts else None
+
+
 def find_block(text: str) -> Optional[Tuple[int, int]]:
-    s = text.find(MARK_START)
-    if s < 0:
+    start = _start_match(text)
+    if start is None:
         return None
-    e = text.find(MARK_END, s)
-    if e < 0:
+    end = END_RE.search(text, start.end())
+    if end is None:
         raise lib.OmixflowError("найден маркер начала блока, но нет маркера конца")
-    return s, e + len(MARK_END)
+    return start.start(), end.end()
+
+
+def _attr_tokens(text: str) -> List[str]:
+    start = _start_match(text)
+    return start.group(1).split() if start else []
+
+
+def marker_attrs(text: str) -> Dict[str, str]:
+    """Well-formed attributes of the start marker; the first occurrence of a key wins."""
+    attrs: Dict[str, str] = {}
+    for token in _attr_tokens(text):
+        m = ATTR_RE.match(token)
+        if m and m.group(1) not in attrs:
+            attrs[m.group(1)] = m.group(2)
+    return attrs
+
+
+def marker_errors(text: str) -> List[str]:
+    errors: List[str] = []
+    seen: List[str] = []
+    for token in _attr_tokens(text):
+        m = ATTR_RE.match(token)
+        if not m:
+            errors.append(f"атрибут маркера {token!r}: ожидается key=value")
+            continue
+        key, value = m.groups()
+        if key in seen:
+            errors.append(f"атрибут маркера {key!r} повторяется")
+        seen.append(key)
+        if key not in MARKER_KEYS:
+            errors.append(f"неизвестный атрибут маркера {key!r}; известные: {', '.join(MARKER_KEYS)}")
+        elif key == "profile" and value not in PROFILES:
+            errors.append(f"неизвестный профиль {value}")
+    return errors
+
+
+def declared_profile(text: str) -> str:
+    """Profile for row validation under tolerance: a declared known profile, else full."""
+    value = marker_attrs(text).get("profile", DEFAULT_PROFILE)
+    return value if value in PROFILES else DEFAULT_PROFILE
+
+
+def strict_profile(text: str) -> str:
+    """Profile of a block whose marker must be clean; raises on marker errors."""
+    errors = marker_errors(text)
+    if errors:
+        raise lib.OmixflowError("; ".join(errors))
+    return marker_attrs(text).get("profile", DEFAULT_PROFILE)
 
 
 def slugify(value: str) -> str:
@@ -101,8 +177,18 @@ def parse_rows(block: str) -> List[Row]:
             "status": data.get("status", "") or "pending",
             "branch": None if data.get("branch", "") in (EMPTY, "-", "") else data.get("branch"),
             "commit": None if data.get("commit", "") in (EMPTY, "-", "") else data.get("commit"),
+            "repo": None if data.get("repo", "") in (EMPTY, "-", "") else data.get("repo"),
         })
     return rows
+
+
+def block_header(text: str) -> List[str]:
+    """Lower-cased column names of the block's table header (empty when there is none)."""
+    span = find_block(text)
+    if span is None:
+        return []
+    lines = [ln for ln in text[span[0]:span[1]].splitlines() if ln.strip().startswith("|")]
+    return [h.lower() for h in _split_row(lines[0])] if lines else []
 
 
 def extract(text: str) -> List[Row]:
@@ -114,21 +200,30 @@ def extract(text: str) -> List[Row]:
 
 # ------------------------------------------------------------------ render
 
-def render(rows: List[Row]) -> str:
-    out = [MARK_START, "| " + " | ".join(COLUMNS) + " |", "|" + "|".join("---" for _ in COLUMNS) + "|"]
+def start_marker(profile: str = DEFAULT_PROFILE) -> str:
+    if profile == DEFAULT_PROFILE:
+        return MARK_START
+    return f"<!-- omixflow:multitask:start profile={profile} -->"
+
+
+def render(rows: List[Row], profile: str = DEFAULT_PROFILE) -> str:
+    with_repo = any(r.get("repo") for r in rows)
+    columns = COLUMNS[:3] + ["repo"] + COLUMNS[3:] if with_repo else COLUMNS
+    out = [start_marker(profile), "| " + " | ".join(columns) + " |", "|" + "|".join("---" for _ in columns) + "|"]
     for i, r in enumerate(rows, 1):
         depends = ", ".join(r.get("depends") or []) or EMPTY
-        out.append("| " + " | ".join([
-            str(i), r["part"], r.get("title", ""), depends,
-            r.get("owner") or EMPTY, r.get("status") or "pending",
-            r.get("branch") or EMPTY, r.get("commit") or EMPTY,
-        ]) + " |")
+        cells = [str(i), r["part"], r.get("title", "")]
+        if with_repo:
+            cells.append(r.get("repo") or EMPTY)
+        cells += [depends, r.get("owner") or EMPTY, r.get("status") or "pending",
+                  r.get("branch") or EMPTY, r.get("commit") or EMPTY]
+        out.append("| " + " | ".join(cells) + " |")
     out.append(MARK_END)
     return "\n".join(out)
 
 
-def replace_block(text: str, rows: List[Row]) -> str:
-    block = render(rows)
+def replace_block(text: str, rows: List[Row], profile: str = DEFAULT_PROFILE) -> str:
+    block = render(rows, profile)
     span = find_block(text)
     if span is None:
         sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
@@ -138,7 +233,18 @@ def replace_block(text: str, rows: List[Row]) -> str:
 
 # ---------------------------------------------------------------- validate
 
-def validate(rows: List[Row]) -> List[str]:
+def parse_repos(raw: Optional[str]) -> Optional[List[str]]:
+    if raw is None:
+        return None
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def validate(rows: List[Row], profile: str = DEFAULT_PROFILE,
+             repos: Optional[List[str]] = None) -> List[str]:
+    """Row checks; `repos` (workspace.repos names), when given, bounds the `repo` column."""
+    if profile not in PROFILES:
+        raise lib.OmixflowError(f"неизвестный профиль {profile}")
+    mutates = PROFILES[profile]["mutates"]
     errors: List[str] = []
     if not rows:
         return ["блок пуст: нет ни одной части"]
@@ -160,6 +266,14 @@ def validate(rows: List[Row]) -> List[str]:
             errors.append(f"часть {p!r}: статус {r['status']!r} не из {STATUSES}")
         if r["status"] in ACTIVE and not r.get("owner"):
             errors.append(f"часть {p!r}: статус {r['status']} без owner")
+        repo = r.get("repo")
+        if repo is not None:
+            if not SLUG_RE.match(repo):
+                errors.append(f"часть {p!r}: repo {repo!r} должен быть slug")
+            elif repos is not None and repo not in repos:
+                errors.append(f"часть {p!r}: repo {repo!r} нет в workspace.repos ({', '.join(repos) or 'пусто'})")
+            if mutates:
+                errors.append(f"часть {p!r}: repo {repo!r} недопустим в мутирующем профиле {profile}")
     dupes = {n for n in names if names.count(n) > 1}
     for n in sorted(dupes):
         errors.append(f"дубликат части {n!r}")
@@ -185,7 +299,7 @@ def waves(rows: List[Row]) -> List[List[str]]:
     return result
 
 
-def ready(rows: List[Row], owner: Optional[str] = None) -> Dict[str, Any]:
+def ready(rows: List[Row], owner: Optional[str] = None, parallel: Optional[int] = None) -> Dict[str, Any]:
     by = {r["part"]: r for r in rows}
     ready_parts: List[str] = []
     blocked_by_skip: List[str] = []
@@ -198,6 +312,17 @@ def ready(rows: List[Row], owner: Optional[str] = None) -> Dict[str, Any]:
         elif all(d["status"] == "done" for d in deps):
             ready_parts.append(r["part"])
     mine_active = [r["part"] for r in rows if r["status"] in ACTIVE and owner and r.get("owner") == owner]
+    repo_key = {r["part"]: r.get("repo") or EMPTY for r in rows}
+    ready_keys = {repo_key[p] for p in ready_parts}
+    order: List[str] = []  # repos in order of first appearance in the block
+    for r in rows:
+        if repo_key[r["part"]] not in order:
+            order.append(repo_key[r["part"]])
+    ready_by_repo = {k: [p for p in ready_parts if repo_key[p] == k] for k in order if k in ready_keys}
+    active_repos: List[str] = []
+    for part in mine_active:
+        if repo_key[part] not in active_repos:
+            active_repos.append(repo_key[part])
     return {
         "ready": ready_parts,
         "blocked": [r["part"] for r in rows if r["status"] == "blocked"],
@@ -205,6 +330,9 @@ def ready(rows: List[Row], owner: Optional[str] = None) -> Dict[str, Any]:
         "active": [{"part": r["part"], "owner": r.get("owner"), "status": r["status"]} for r in rows if r["status"] in ACTIVE],
         "mine_active": mine_active,
         "all_terminal": all(r["status"] in TERMINAL for r in rows),
+        "slots": max(0, parallel - len(mine_active)) if parallel is not None else None,
+        "ready_by_repo": ready_by_repo,
+        "active_repos": active_repos,
     }
 
 
@@ -220,7 +348,100 @@ def render_waves(rows: List[Row]) -> str:
     return "\n".join(lines)
 
 
-def multitask_file(rows: List[Row], task_id: str, title: str) -> str:
+def block_meta(text: str) -> Dict[str, Any]:
+    """Profile, attributes and non-home repos of the block; rejects marker errors."""
+    rows = extract(text)
+    profile = strict_profile(text)
+    repos: List[str] = []
+    for r in rows:
+        repo = r.get("repo")
+        if repo and repo not in repos:
+            repos.append(repo)
+    return {"profile": profile, "attrs": marker_attrs(text), "repos": repos}
+
+
+def _cell_value(key: str, cell: str) -> Any:
+    if key == "depends":
+        return [] if cell in (EMPTY, "-", "") else [d.strip() for d in cell.split(",") if d.strip()]
+    return None if cell in (EMPTY, "-", "") else cell
+
+
+def _cell_text(key: str, value: Any) -> str:
+    if key == "depends":
+        return ", ".join(value) or EMPTY
+    return value if value is not None else EMPTY
+
+
+def set_row(text: str, part: str, pairs: List[str]) -> str:
+    """Rewrite only the target row line; everything else stays byte-for-byte.
+
+    Changed cells take the new value, the rest keep their stripped original content;
+    when no cell value changes the text is returned unchanged.
+    """
+    span = find_block(text)
+    if span is None:
+        raise lib.OmixflowError("в тексте нет блока omixflow:multitask")
+    changes: Dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise lib.OmixflowError(f"ожидается key=value, получено {pair!r}")
+        k, v = pair.split("=", 1)
+        if k not in EDITABLE:
+            raise lib.OmixflowError(f"нельзя менять колонку {k!r}")
+        if k == "status" and v not in STATUSES:
+            raise lib.OmixflowError(f"статус {v!r} не из {STATUSES}")
+        if "|" in v or "\n" in v or "\r" in v:
+            raise lib.OmixflowError(f"значение {k}={v!r}: символы «|» и перевод строки недопустимы в ячейке")
+        if k == "title" and v in (EMPTY, "-", ""):
+            raise lib.OmixflowError(f"часть {part!r}: пустой title")
+        changes[k] = v
+    block = text[span[0]:span[1]]
+    lines = block.splitlines(keepends=True)
+    table = [i for i, ln in enumerate(lines) if ln.strip().startswith("|")]
+    if len(table) < 2:
+        raise lib.OmixflowError(f"части {part!r} нет в блоке")
+    header = [h.lower() for h in _split_row(lines[table[0]])]
+    for k in changes:
+        if k not in header:
+            raise lib.OmixflowError(f"колонки {k!r} нет в заголовке блока")
+    if "part" not in header:
+        raise lib.OmixflowError(f"части {part!r} нет в блоке")
+    part_col = header.index("part")
+    target = None
+    for i in table[2:]:
+        cells = _split_row(lines[i])
+        if part_col < len(cells) and cells[part_col] == part:
+            target = i
+            break
+    if target is None:
+        raise lib.OmixflowError(f"части {part!r} нет в блоке")
+    cells = _split_row(lines[target])
+    cells += [""] * (len(header) - len(cells))
+    if "repo" in changes:
+        status = (cells[header.index("status")] if "status" in header else "") or "pending"
+        if status != "pending":
+            raise lib.OmixflowError(f"часть {part!r} в статусе {status}: repo меняется только у pending")
+    changed = False
+    for k, v in changes.items():
+        col = header.index(k)
+        new = _cell_value(k, v)
+        if new != _cell_value(k, cells[col]):
+            cells[col] = _cell_text(k, new)
+            changed = True
+    if not changed:
+        return text
+    line = lines[target]
+    eol = line[len(line.rstrip("\r\n")):]
+    lines[target] = "| " + " | ".join(cells) + " |" + eol
+    return text[:span[0]] + "".join(lines) + text[span[1]:]
+
+
+def multitask_file(rows: List[Row], task_id: str, title: str, profile: str = DEFAULT_PROFILE,
+                   repo_column: Optional[bool] = None) -> str:
+    """multitask.md skeleton; `repo_column` says whether the block has a `repo` column
+    (default: some row names a repo)."""
+    if repo_column is None:
+        repo_column = any(r.get("repo") for r in rows)
     out = [f"# Мультизадача {task_id}: {title}", "",
            "Определение частей и их постановки. Статусы живут только в блоке описания задачи",
            "(`protocol/multitask.md`).", "",
@@ -228,14 +449,21 @@ def multitask_file(rows: List[Row], task_id: str, title: str) -> str:
     for r in rows:
         deps = ", ".join(r["depends"]) or "нет"
         out += [f"### {r['part']} — {r['title']}", "",
-                f"- Зависит от: {deps}", "",
+                f"- Зависит от: {deps}"]
+        if repo_column:
+            out.append(f"- Репозиторий: {r.get('repo') or 'домашний'}")
+        out += ["",
                 "#### Постановка", "", "{что делает часть; из описания задачи или refine}", "",
                 "#### Критерии приёмки", "", "- {критерий}", ""]
     out += ["## Граф", "", "```", render_waves(rows), "```", "",
-            "## Интеграция", "",
-            "- Стратегия: по `workspace.integration` (squash в ветку мультизадачи одним коммитом).",
-            "- Ветка мультизадачи: `task/" + task_id + "`; ветки частей: `task/" + task_id + "-{part}`.",
-            "- Порядок: по волнам; внутри волны части независимы.", ""]
+            "## Интеграция", ""]
+    if PROFILES[profile]["part_integration"] == "commit":
+        out += ["- Стратегия: части коммитятся по пути `.tasks/" + task_id + "/{part}/` в `task/" + task_id
+                + "`, веток и worktree частей нет, сообщение `docs(" + task_id + "): research {part} — {title}`."]
+    else:
+        out += ["- Стратегия: по `workspace.integration` (squash в ветку мультизадачи одним коммитом).",
+                "- Ветка мультизадачи: `task/" + task_id + "`; ветки частей: `task/" + task_id + "-{part}`."]
+    out += ["- Порядок: по волнам; внутри волны части независимы.", ""]
     return "\n".join(out)
 
 
@@ -248,8 +476,9 @@ def cmd_extract(ns) -> int:
 
 
 def cmd_validate(ns) -> int:
-    rows = extract(read_text(ns.from_))
-    errors = validate(rows)
+    text = read_text(ns.from_)
+    rows = extract(text)
+    errors = marker_errors(text) + validate(rows, declared_profile(text), parse_repos(ns.repos))
     if errors:
         for e in errors:
             print(f"ошибка: {e}")
@@ -259,8 +488,9 @@ def cmd_validate(ns) -> int:
 
 
 def cmd_waves(ns) -> int:
-    rows = extract(read_text(ns.from_))
-    errors = validate(rows)
+    text = read_text(ns.from_)
+    rows = extract(text)
+    errors = validate(rows, declared_profile(text))
     if errors:
         raise lib.OmixflowError("; ".join(errors))
     if ns.json:
@@ -271,34 +501,19 @@ def cmd_waves(ns) -> int:
 
 
 def cmd_ready(ns) -> int:
-    rows = extract(read_text(ns.from_))
-    print(json.dumps(ready(rows, ns.owner), ensure_ascii=False, indent=2))
+    text = read_text(ns.from_)
+    rows = extract(text)
+    strict_profile(text)
+    print(json.dumps(ready(rows, ns.owner, ns.parallel), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_set(ns) -> int:
     text = read_text(ns.from_)
-    rows = extract(text)
-    target = [r for r in rows if r["part"] == ns.part]
-    if not target:
-        raise lib.OmixflowError(f"части {ns.part!r} нет в блоке")
-    row = target[0]
-    for pair in ns.pairs:
-        if "=" not in pair:
-            raise lib.OmixflowError(f"ожидается key=value, получено {pair!r}")
-        k, v = pair.split("=", 1)
-        if k not in ("status", "owner", "branch", "commit", "title", "depends"):
-            raise lib.OmixflowError(f"нельзя менять колонку {k!r}")
-        if k == "status" and v not in STATUSES:
-            raise lib.OmixflowError(f"статус {v!r} не из {STATUSES}")
-        if k == "depends":
-            row["depends"] = [] if v in (EMPTY, "-", "") else [d.strip() for d in v.split(",") if d.strip()]
-        else:
-            row[k] = None if v in (EMPTY, "-", "") else v
-    errors = validate(rows)
+    out = set_row(text, ns.part, ns.pairs)
+    errors = validate(extract(out), declared_profile(out), parse_repos(ns.repos))
     if errors:
         raise lib.OmixflowError("; ".join(errors))
-    out = replace_block(text, rows)
     if ns.in_place and ns.from_ not in (None, "-"):
         Path(ns.from_).write_text(out, encoding="utf-8")
     else:
@@ -308,7 +523,7 @@ def cmd_set(ns) -> int:
 
 def cmd_render(ns) -> int:
     rows = json.loads(Path(ns.rows).read_text(encoding="utf-8"))
-    print(render(rows))
+    print(render(rows, check_profile(ns.profile)))
     return 0
 
 
@@ -326,27 +541,37 @@ def cmd_seed(ns) -> int:
                      "owner": None, "status": "pending", "branch": None, "commit": None})
     for r, deps in zip(rows, ns.depends or []):
         r["depends"] = [] if deps in (EMPTY, "-", "") else [d.strip() for d in deps.split(",") if d.strip()]
+    for r, repo in zip(rows, ns.repo or []):
+        r["repo"] = None if repo in (EMPTY, "-", "") else repo
     for r in rows:
         r["depends_raw"] = ", ".join(r["depends"]) or EMPTY
-    errors = validate(rows)
+    profile = check_profile(ns.profile)
+    errors = validate(rows, profile, parse_repos(ns.repos))
     if errors:
         raise lib.OmixflowError("; ".join(errors))
     if ns.from_:
         text = read_text(ns.from_)
         if find_block(text) is not None:
             raise lib.OmixflowError("в тексте уже есть блок; сидинг повторно не выполняется")
-        sys.stdout.write(replace_block(text, rows))
+        sys.stdout.write(replace_block(text, rows, profile))
     else:
-        print(render(rows))
+        print(render(rows, profile))
+    return 0
+
+
+def cmd_meta(ns) -> int:
+    print(json.dumps(block_meta(read_text(ns.from_)), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_file(ns) -> int:
-    rows = extract(read_text(ns.from_))
-    errors = validate(rows)
+    text = read_text(ns.from_)
+    rows = extract(text)
+    profile = strict_profile(text)
+    errors = validate(rows, profile)
     if errors:
         raise lib.OmixflowError("; ".join(errors))
-    print(multitask_file(rows, ns.id, ns.title))
+    print(multitask_file(rows, ns.id, ns.title, profile, repo_column="repo" in block_header(text)))
     return 0
 
 
@@ -361,16 +586,25 @@ def main(argv=None) -> int:
     def add_from(p):
         p.add_argument("--from", dest="from_", default=None, help="файл с текстом описания или - для stdin")
 
-    for name, fn in (("extract", cmd_extract), ("validate", cmd_validate), ("has", cmd_has)):
+    def add_repos(p):
+        p.add_argument("--repos", default=None, help="имена workspace.repos через запятую")
+
+    for name, fn in (("extract", cmd_extract), ("has", cmd_has), ("meta", cmd_meta)):
         p = sub.add_parser(name); add_from(p); p.set_defaults(fn=fn)
+    p = sub.add_parser("validate"); add_from(p); add_repos(p); p.set_defaults(fn=cmd_validate)
 
     p = sub.add_parser("waves"); add_from(p); p.add_argument("--json", action="store_true"); p.set_defaults(fn=cmd_waves)
-    p = sub.add_parser("ready"); add_from(p); p.add_argument("--owner", default=None); p.set_defaults(fn=cmd_ready)
-    p = sub.add_parser("set"); add_from(p); p.add_argument("--part", required=True)
+    p = sub.add_parser("ready"); add_from(p); p.add_argument("--owner", default=None)
+    p.add_argument("--parallel", type=int, default=None, help="лимит одновременных частей владельца")
+    p.set_defaults(fn=cmd_ready)
+    p = sub.add_parser("set"); add_from(p); add_repos(p); p.add_argument("--part", required=True)
     p.add_argument("pairs", nargs="+"); p.add_argument("--in-place", action="store_true"); p.set_defaults(fn=cmd_set)
-    p = sub.add_parser("render"); p.add_argument("--rows", required=True); p.set_defaults(fn=cmd_render)
-    p = sub.add_parser("seed"); add_from(p); p.add_argument("--parts", nargs="+", required=True)
+    p = sub.add_parser("render"); p.add_argument("--rows", required=True)
+    p.add_argument("--profile", default=DEFAULT_PROFILE); p.set_defaults(fn=cmd_render)
+    p = sub.add_parser("seed"); add_from(p); add_repos(p); p.add_argument("--parts", nargs="+", required=True)
     p.add_argument("--depends", nargs="*", default=None, help="по одному значению на часть, в том же порядке; «—» = нет")
+    p.add_argument("--repo", nargs="*", default=None, help="по одному значению на часть, в том же порядке; «—» = домашний")
+    p.add_argument("--profile", default=DEFAULT_PROFILE)
     p.set_defaults(fn=cmd_seed)
     p = sub.add_parser("file"); add_from(p); p.add_argument("--id", required=True); p.add_argument("--title", required=True)
     p.set_defaults(fn=cmd_file)

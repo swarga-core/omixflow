@@ -192,9 +192,14 @@ def cmd_files(ns) -> int:
     return 0
 
 
+def current_login() -> str:
+    # `--jq .login` prints a bare string (jq -r semantics), not JSON.
+    return gh("api", "user", "--jq", ".login").strip()
+
+
 def cmd_reviews_mine(ns) -> int:
     owner, repo, n = parse_pr_ref(ns.pr)
-    me = gh_json("api", "user", "--jq", ".login")
+    me = current_login()
     reviews = paginate(f"repos/{owner}/{repo}/pulls/{n}/reviews")
     mine = real_reviews(reviews, me)
     print(json.dumps({
@@ -230,7 +235,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 
 def cmd_threads(ns) -> int:
     owner, repo, n = parse_pr_ref(ns.pr)
-    me = gh_json("api", "user", "--jq", ".login") if ns.mine else None
+    me = current_login() if ns.mine else None
     threads: List[Dict[str, Any]] = []
     after: Optional[str] = None
     while True:

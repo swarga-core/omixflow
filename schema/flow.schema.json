@@ -72,7 +72,12 @@
           }
         },
         "integration": { "type": "string", "enum": ["squash", "merge"], "default": "squash" },
-        "protected": { "type": "array", "items": { "type": "string" } }
+        "protected": { "type": "array", "items": { "type": "string" } },
+        "repos": {
+          "type": "object",
+          "description": "внешние репозитории для исследования: имя (slug, проверяет doctor) → запись",
+          "additionalProperties": { "$ref": "#/definitions/repo" }
+        }
       }
     },
     "verify": {
@@ -84,7 +89,8 @@
         "test": { "$ref": "#/definitions/gate" },
         "lint": { "$ref": "#/definitions/gate" },
         "build": { "$ref": "#/definitions/gate" },
-        "e2e": { "$ref": "#/definitions/gate" }
+        "e2e": { "$ref": "#/definitions/gate" },
+        "visual": { "$ref": "#/definitions/gate" }
       }
     },
     "artifacts": {
@@ -124,7 +130,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "parallel_per_owner": { "type": "integer", "minimum": 1, "default": 1 },
+        "parallel_per_owner": { "type": "integer", "minimum": 1, "default": 1, "description": "активных частей на исполнителя при part_runner: sequential" },
+        "parallel_parts": { "type": "integer", "minimum": 1, "default": 4, "description": "одновременных researcher'ов при part_runner: scheduler" },
         "push": { "type": "boolean", "default": true }
       }
     },
@@ -135,13 +142,24 @@
     }
   },
   "definitions": {
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "remote"],
+      "properties": {
+        "path": { "type": "string", "description": "путь относительно корня домашнего проекта" },
+        "remote": { "type": "string", "description": "URL remote; doctor сверяет его с origin (ssh и https равны)" },
+        "ref": { "type": "string", "default": "auto", "description": "ветка, тег, sha или auto (базовая ветка чужого проекта)" },
+        "setup": { "type": "boolean", "default": false, "description": "выполнять workspace.setup чужого проекта в research-worktree" }
+      }
+    },
     "gate": {
       "type": "object",
       "additionalProperties": false,
       "required": ["cmd"],
       "properties": {
         "cmd": { "type": "string" },
-        "criterion": { "type": "string", "enum": ["exit-code", "zero-diagnostics", "rerun-compare-set"], "default": "exit-code" },
+        "criterion": { "type": "string", "enum": ["exit-code", "zero-diagnostics", "no-new-diagnostics", "rerun-compare-set"], "default": "exit-code" },
         "scope": { "type": "string", "enum": ["root", "package"], "default": "root" },
         "background": { "type": "boolean", "default": false },
         "when": { "type": "array", "items": { "type": "string" } }

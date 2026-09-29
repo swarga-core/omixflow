@@ -26,8 +26,9 @@ OVERRIDE_REL = Path(".claude") / "omixflow"
 CONFIG_REL = OVERRIDE_REL / "flow.yaml"
 SCHEMA_PATH = PLUGIN_ROOT / "schema" / "flow.schema.json"
 TEMPLATE_PATH = PLUGIN_ROOT / "templates" / "flow.yaml"
-GATES = ("typecheck", "test", "lint", "build", "e2e")
+GATES = ("typecheck", "test", "lint", "build", "e2e", "visual")
 ROLES = ("researcher", "architect", "coder", "tester", "reviewer", "web-fetcher")
+SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # part slugs, workspace.repos names
 
 
 class OmixflowError(Exception):
@@ -443,6 +444,66 @@ def resolve_base_branch(cfg: Dict[str, Any], root: Path) -> Optional[str]:
 def branch_exists(root: Path, name: str) -> bool:
     return (git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}") is not None
             or git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{name}") is not None)
+
+
+# ------------------------------------------------------------ foreign repos
+
+def _commit_of(root: Path, ref: str) -> Optional[str]:
+    return git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") or None
+
+
+def resolve_repo_ref(repo_root: Path, ref: Optional[str],
+                     fallback_cfg: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Full commit sha of `ref` in a foreign repository (workspace.repos), or None.
+
+    `auto`/absent means the foreign project's base branch: its own flow.yaml via
+    resolve_base_branch, else `fallback_cfg` (default: none, i.e. the remote default
+    branch, then main/master). A branch prefers `origin/{name}` over the local branch
+    so that the snapshot is reproducible for other executors; tags and shas resolve as
+    given. No fetch."""
+    if not ref or ref == "auto":
+        cfg = load_config(repo_root) if config_path(repo_root).exists() else (fallback_cfg or {})
+        ref = resolve_base_branch(cfg, repo_root)
+        if not ref:
+            return None
+    if ref.startswith("-"):
+        return None
+    for candidate in (f"refs/remotes/origin/{ref}", f"refs/heads/{ref}", ref):
+        sha = _commit_of(repo_root, candidate)
+        if sha:
+            return sha
+    return None
+
+
+def repo_checkout_state(repo_root: Path) -> Dict[str, Any]:
+    """HEAD sha and whether tracked files differ from it. Untracked files and
+    `.claude/worktrees/` (research-worktrees live there) do not make a checkout dirty."""
+    head = _commit_of(repo_root, "HEAD")
+    status = git(repo_root, "status", "--porcelain", "--untracked-files=no", "--",
+                 ".", ":(exclude).claude/worktrees")
+    return {"head": head, "dirty": bool(status)}
+
+
+_SCP_RE = re.compile(r"^(?:[^@/:]+@)?([^:/]+):(?!//)(.+)$")
+
+
+def normalize_remote(url: str) -> str:
+    """`host/owner/repo` identity of a remote URL: ssh and https forms of the same
+    repository compare equal (scheme, user, port, trailing `.git` and `/` dropped,
+    host lower-cased)."""
+    u = url.strip()
+    m = re.match(r"^[a-z][a-z0-9+.-]*://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.*)$", u, re.I)
+    if m:
+        host, path = m.groups()
+    else:
+        m = _SCP_RE.match(u)
+        if not m:
+            return u.rstrip("/")
+        host, path = m.groups()
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    return f"{host.lower()}/{path.strip('/')}"
 
 
 # -------------------------------------------------------------- mcp discovery

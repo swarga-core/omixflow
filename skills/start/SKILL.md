@@ -1,6 +1,6 @@
 ---
 name: start
-description: Starts development of a task — resolves the base branch, creates the task branch or worktree, writes task.md, state.yaml and log.md, moves the tracker status to in_work; starts a multitask (branch + multitask.md) or claims a part of it. Use when the user says "начни задачу", "start AL-822", "возьми часть". Prefer /omixflow:develop for the full pipeline.
+description: Starts development of a task — resolves the base branch, creates the task branch or worktree, writes task.md, state.yaml (with the pipeline profile) and log.md, moves the tracker status to in_work; starts a multitask (branch, multitask.md, snapshot of foreign repos for a research profile) or claims a part of it (worktree or shared part directory by profile). Use when the user says "начни задачу", "start AL-822", "возьми часть". Prefer /omixflow:develop for the full pipeline.
 ---
 
 # OMIXFlow start
@@ -11,7 +11,8 @@ Setup разработки: ветка или worktree, артефакты, ст
 Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Порты: tracker, workspace.
 Артефакты и состояние: `${CLAUDE_PLUGIN_ROOT}/protocol/artifacts.md`. Worktree:
 `${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`.
+`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
+`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`.
 
 ## Активация
 
@@ -19,7 +20,9 @@ Setup разработки: ветка или worktree, артефакты, ст
 - `/omixflow:start "{описание}"`: свободная формулировка (адаптер `none` или
   slug для `local`).
 - `--worktree`: изолировать задачу в worktree (при `workspace.worktree: optional`).
-- `--tier=S|M|L`: тир; без флага и без `develop` пишется M.
+- `--profile=NAME`: профиль одиночной задачи (`full` по умолчанию).
+- `--tier=S|M|L`: тир; без флага и без `develop` пишется M. Профиль с
+  `triage: false` тира не получает: `--tier` вместе с ним ошибка.
 - `--mode=pipeline`: ставит `develop`, скил не печатает «следующий шаг».
 - `{id} --part {part}`: старт части мультизадачи (обычно вызывает `develop`).
 
@@ -64,12 +67,13 @@ scope, tier с обоснованием в одну строку). Затем:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" init "{TASK_DIR}" --id {id} --kind task \
-  --tier {tier} [--forced] --mode {manual|pipeline} --branch {branch} --base {base} --session {session}
+  --profile {profile} [--tier {tier} [--forced]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session}
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" complete "{TASK_DIR}" refine
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" complete "{TASK_DIR}" start
 ```
 
-`log.md`: секция `## Start ✅` с веткой, базой, статусом трекера. Коммит артефактов
+`--tier` не передаётся при `triage: false`. `log.md`: секция `## Start ✅` с веткой,
+базой, профилем, статусом трекера. Коммит артефактов
 (`artifacts.tracked: true`).
 
 ### 4. Трекер
@@ -88,41 +92,63 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
 
 ### Старт мультизадачи (`{id}` с блоком, без `--part`)
 
-1. Сохранить описание в файл, `multitask.py validate`; ошибки → СТОП, предложить
-   `refine --multitask`.
+1. Сохранить описание в файл. Профиль `multitask.py meta --from {desc}` (ошибка
+   маркера → СТОП); `multitask.py validate --from {desc} --repos {resolve.py repo
+   --list}`; ошибки → СТОП, предложить `refine --multitask`.
 2. Ветка мультизадачи `{workspace.branch}` с `{id}` от base, идемпотентно,
    с подтверждением. При `multitask.push: true` запушить сразу.
 3. `TASK_DIR = {artifacts.dir}/{id}`: `multitask.md` из блока
    (`multitask.py file --from {desc} --id {id} --title "{summary}"`), постановки
    частей дополнить из описания и уточнённой формулировки; `state.py init --kind
-   multitask`; `log.md`. Коммит.
-4. Статус трекера in_work с подтверждением; `comment`: «Мультизадача стартована:
+   multitask --profile {profile}`; `log.md`.
+4. Снимок (раздел «Кросс-репо» multitask.md): для каждого имени из `meta.repos`
+   `resolve.py repo {name} --json`; `sha: null` → СТОП с причиной. Запись одним
+   JSON-объектом, чтобы sha остался строкой:
+   `state.py set {TASK_DIR} 'repos.{name}={"ref":"{ref}","sha":"{sha}"}'`.
+   Репозиторий, впервые появившийся в части после старта, снимается при старте его
+   первой части.
+5. `state.py complete` refine и start. Коммит; при `part_isolation: shared` пути
+   явно (`state.yaml`, `multitask.md`, `log.md` мультизадачи), никогда не «все
+   изменения».
+6. Статус трекера in_work с подтверждением; `comment`: «Мультизадача стартована:
    N частей, ветка `{branch}`, волн: K».
-5. Ветки частей здесь не создаются.
+7. Ветки частей здесь не создаются.
 
 ### Старт части (`{id} --part {part}`)
 
 Предусловие: ветка мультизадачи существует; текущий пользователь известен
 (`current_user`).
 
-1. Свежее описание из трекера → файл; `multitask.py ready --from {desc} --owner {me}`.
-   Часть не в `ready` → СТОП с причиной (зависимости не `done`, часть занята,
-   `blocked`). Активных частей у владельца не больше `multitask.parallel_per_owner`.
+Профиль и его свойства из `state.py get {artifacts.dir}/{id} profile` и таблицы
+`profiles.md`.
+
+1. Свежее описание из трекера → файл; `multitask.py ready --from {desc} --owner {me}
+   --parallel {лимит}`, лимит по `part_runner`: `multitask.parallel_per_owner` для
+   `sequential`, `multitask.parallel_parts` для `scheduler`. Часть не в `ready` → СТОП
+   с причиной (зависимости не `done`, часть занята, `blocked`); `slots: 0` → СТОП:
+   лимит активных частей исчерпан.
 2. **Взять часть** одной записью: `multitask.py set --from {desc} --part {part}
-   status=in-work owner={me} branch={branch}-{part}` → `update_description` с
-   дисциплиной записи. `comment`: «{part} → in-work ({me}, ветка …)».
-3. Worktree части от ветки мультизадачи по адаптеру workspace: явный
+   status=in-work owner={me} branch={branch}-{part}` (при `part_isolation: shared`
+   без `branch`, ячейка остаётся `—`) → `update_description` с дисциплиной записи.
+   `comment`: «{part} → in-work ({me}, …)». Часть с `repo`, которого нет в снимке
+   мультизадачи: снять его, как в шаге 4 старта мультизадачи.
+3. `part_isolation: worktree`: worktree части от ветки мультизадачи по адаптеру
+   workspace: явный
    `git worktree add {root}/.claude/worktrees/{id}-{part} -b {branch}-{part} {branch}`,
    идемпотентно (существующий worktree или ветка переиспользуются), вход по `path`.
    При `multitask.push: true` ветка части пушится при первом коммите.
+   `part_isolation: shared`: ни ветки, ни worktree; каталог части в основном дереве
+   на `task/{id}`.
 4. `TASK_DIR = {artifacts.dir}/{id}/{part}`: `task.md` из секции части
    в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}`
-   с тиром части; `log.md`. Коммит.
+   (профиль наследуется из состояния мультизадачи, `--tier` только при
+   `triage: true`); затем `state.py complete` refine и start; `log.md`. Коммит; при
+   `part_isolation: shared` только пути каталога части.
 5. Статус самой задачи не трогать: он уровня мультизадачи.
 
-Резюм части (`in-work` с моим owner): worktree и артефакты уже есть, ничего не
-создавать заново, войти по `path`; если worktree исчез, а ветка есть, пересоздать
-из ветки.
+Резюм части (`in-work` с моим owner): артефакты уже есть, ничего не создавать
+заново; при `part_isolation: worktree` войти по `path`, если worktree исчез, а ветка
+есть, пересоздать из ветки.
 
 ## Ошибки
 
@@ -132,7 +158,9 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
 | Задача не найдена | проверить ключ проекта, предложить поиск |
 | Base не разрешается | СТОП: поправить `workspace.base`, `doctor` |
 | `--part`, но ветки мультизадачи нет | СТОП: сначала старт мультизадачи |
-| Задача затрагивает несколько репозиториев | СТОП: декомпозиция по одному репозиторию |
+| Задача меняет несколько репозиториев | СТОП: одна задача мутирует один репозиторий, немутирующие фазы читают `workspace.repos`; декомпозиция |
+| `--tier` с профилем `triage: false` | СТОП: профиль не триажится |
+| Ref репозитория из `workspace.repos` не разрешается | СТОП: поправить `ref` или fetch в том репозитории, `doctor` |
 | Статус недоступен | пропустить, предупредить |
 
 ## Правила

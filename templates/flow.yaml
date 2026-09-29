@@ -39,15 +39,22 @@ workspace:
   #     readonly: true
   integration: squash                  # squash | merge (интеграция части мультизадачи)
   # protected: [master, "release/*"]   # ветки, куда нельзя коммитить напрямую
+  # repos:                             # чужие репозитории для исследования (профиль research)
+  #   omix-lib:                        # имя: slug, им ссылается колонка repo блока мультизадачи
+  #     path: ../eps-omix-lib          # путь относительно корня этого проекта
+  #     remote: git@github.com:org/eps-omix-lib.git   # identity, doctor сверяет с origin
+  #     ref: auto                      # ветка | тег | sha | auto (базовая ветка того проекта)
+  #     setup: false                   # выполнять его workspace.setup в research-worktree
 
 # Гейты проверки. Строка = команда с критерием exit-code; объект даёт критерий,
-# фон и условия обязательности. Имена фиксированы: typecheck, test, lint, build, e2e.
+# фон и условия обязательности. Имена фиксированы: typecheck, test, lint, build, e2e, visual.
 verify:
   test: "echo 'configure verify.test'"
   # typecheck: pnpm check-types
   # lint: { cmd: "pnpm lint", criterion: zero-diagnostics }
   # build: { cmd: "pnpm build", background: true }
   # e2e: { cmd: "pnpm e2e", criterion: rerun-compare-set, background: true, when: [i18n, styles, mocks] }
+  # visual: { cmd: "pnpm test:visual", background: true, when: [styles, uikit] }
 
 # Артефакты задач.
 artifacts:
@@ -74,6 +81,7 @@ models:
 multitask:
   parallel_per_owner: 1                # активных частей на одного исполнителя
   push: true                           # пушить ветки мультизадачи и частей (несколько исполнителей)
+  parallel_parts: 4                    # одновременных researcher'ов в немутирующем профиле
 
 # Замена агентов ядра агентами проекта (.claude/agents/{name}.md).
 # agents:

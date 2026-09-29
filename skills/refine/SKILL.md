@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Clarifies a tracker task before development — finds gaps, ambiguities and missing acceptance criteria, discusses them with the developer, writes the refined statement back to the tracker; with --multitask decomposes the task into parts with an explicit dependency map. No local files, no branches. Use when the user says "уточни задачу", "refine", "разбей на части", "декомпозируй".
+description: Clarifies a tracker task before development — finds gaps, ambiguities and missing acceptance criteria, discusses them with the developer, writes the refined statement back to the tracker; with --multitask decomposes the task into parts with an explicit dependency map, a pipeline profile and, for a research profile, the repository of each part. No local files, no branches. Use when the user says "уточни задачу", "refine", "разбей на части", "декомпозируй".
 ---
 
 # OMIXFlow refine
@@ -11,7 +11,8 @@ description: Clarifies a tracker task before development — finds gaps, ambigui
 
 Пролог и диалог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`,
 `${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`. Порт: tracker. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`.
+`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
+`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`.
 
 ## Активация
 
@@ -78,23 +79,33 @@ description: Clarifies a tracker task before development — finds gaps, ambigui
 
 Дополняет шаги 3–6.
 
+0. **Профиль.** Один раз AskUserQuestion: `full` (Recommended) / `research`
+   (исследование без изменения кода, части параллельно) / другой из `profiles.md`
+   через Other.
 1. **Декомпозиция.** Обсудить с разработчиком части: slug (kebab-case, уникален,
    после старта не меняется), title, краткая постановка каждой части. Каждая часть
-   это самостоятельный квант: свой полный пайплайн, ветка, worktree. Часть, требующая
-   изменений в двух репозиториях, разбивается.
+   это самостоятельный квант: проходит пайплайн выбранного профиля, своя ветка
+   и worktree только при `part_isolation: worktree`. В мутирующем профиле часть,
+   требующая изменений в двух репозиториях, разбивается; в немутирующем часть читает
+   ровно один репозиторий.
+1a. **Репозиторий части** (немутирующий профиль): по каждой части спросить репозиторий
+   из `workspace.repos` (`resolve.py repo --list`) или домашний (`—`).
 2. **Карта зависимостей, обязательна и явная.** По каждой части спросить, от каких
    частей она зависит; ответ «ни от чего» тоже ответ и пишется как «—». Пустых ячеек
    не бывает. Помочь разработчику: части, которые меняют один и тот же контракт или
    читают результат друг друга, зависимы.
 3. **Валидация.** Сохранить текущее описание во временный файл в scratchpad и:
    ```bash
+   repos=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" repo --list)
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" seed --from {desc.md} \
-     --parts "{slug} — {title}" ... --depends "{deps}" ... > {desc.new.md}
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" validate --from {desc.new.md}
+     --parts "{slug} — {title}" ... --depends "{deps}" ... \
+     --profile {profile} [--repo "{repo|—}" ...] --repos "$repos" > {desc.new.md}
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" validate --from {desc.new.md} --repos "$repos"
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" waves --from {desc.new.md}
    ```
    Показать волны разработчику: это ответ на вопрос, что можно делать параллельно.
-   Цикл или неизвестная зависимость: вернуться к п. 2.
+   Цикл или неизвестная зависимость: вернуться к п. 2; неизвестный репозиторий:
+   к п. 1a.
 4. **Запись.** Превью блока и волн, затем AskUserQuestion. `update_description`
    всем текстом из `desc.new.md`; блок оказывается в хвосте описания. Если адаптер
    поддерживает `tag`, добавить тег `multitask` (отказ не критичен).

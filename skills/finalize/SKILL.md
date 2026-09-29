@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Finalize phase of the OMIXFlow pipeline — records the outcome in log.md, routes gotchas, comments in the tracker, proposes a pull request via the forge adapter, moves the status, offers worktree exit; with --part integrates a multitask part (squash into the multitask branch), with --multitask closes a multitask. Use after /omixflow:review or when the user says "финализируй", "закрой задачу", "интегрируй часть".
+description: Finalize phase of the OMIXFlow pipeline — records the outcome in log.md, routes gotchas, comments in the tracker, proposes a pull request via the forge adapter (code, or research.md with artifacts for a research profile), moves the status, offers worktree exit; with --part integrates a multitask part (squash into the multitask branch, or a path-scoped commit of the part directory for a research profile), with --multitask closes a multitask (and tears down research-worktrees). Use after /omixflow:review or when the user says "финализируй", "закрой задачу", "интегрируй часть".
 ---
 
 # OMIXFlow finalize
@@ -10,7 +10,8 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Маршрутизация гочей:
 `${CLAUDE_PLUGIN_ROOT}/protocol/phases.md`. Worktree:
 `${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Порты: tracker, forge, workspace.
+`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
+`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Порты: tracker, forge, workspace.
 
 ## Активация
 
@@ -22,7 +23,9 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 
 ## Одиночная задача
 
-Предусловие: `state.py next` даёт `finalize`.
+Предусловие: `state.py next` даёт `finalize`. Свойство `finalize_artifact` профиля
+(`state.py get TASK_DIR profile`, таблица `profiles.md`): `code` → шаги ниже;
+`research` → раздел «Задача с `finalize_artifact: research`».
 
 ### 1. Статистика
 
@@ -105,7 +108,22 @@ CLI хостинга не настроен: инструкция, не ошиб�
 ветка {branch}, worktree {оставлен/снесён/н/д}.
 ```
 
+## Задача с `finalize_artifact: research`
+
+Кода нет, статистики diff и тестов нет.
+
+1. log.md: `## Finalize ✅` с числом файлов в карте, вопросов (отвечено, отложено).
+2. Гочи как в шаге 3.
+3. Коммит research.md и артефактов задачи.
+4. Трекер: комментарий с итогами исследования (гибрид, как в шаге 4).
+5. PR с артефактами из ветки задачи: предложить по шагу 5 (Summary из task.md,
+   ключевые findings вместо Changes, без Test plan), решает разработчик.
+6. Статус и worktree как в шагах 6–7; `state.py complete TASK_DIR finalize`.
+
 ## Часть мультизадачи (`--part`)
+
+По `part_integration` профиля мультизадачи: `integrate` → шаги ниже; `commit` →
+раздел «Часть с `part_integration: commit`».
 
 Предусловие: сессия в worktree части или ветка части доступна; implement и
 review части завершены по её состоянию.
@@ -135,23 +153,56 @@ review части завершены по её состоянию.
 Отказ разработчика: оставить `in-review`, worktree и ветку. Конфликт при squash:
 СТОП, разрешение за разработчиком, блок остаётся `in-review`.
 
+## Часть с `part_integration: commit`
+
+Правила в `multitask.md`, «Часть профиля research» (явные пути, push на общей
+ветке). Обычно вызывается планировщиком в шаге завершения части, пока другие
+researcher'ы работают. Предусловие: research.md части существует, фаза `research`
+части закрыта. Rebase и squash нет.
+
+**Реконсиляция.** Блок говорит `in-work`, а в истории `task/{id}` есть коммит с темой,
+начинающейся на `docs({id}): research {part} — `: довести блок до `done` с его хешем,
+комментарий. Выход.
+
+1. Открытые вопросы `### Open Questions for Dependents` из `## Handoff` research.md
+   части: диалог (текст или AUQ по характеру вопроса), ответы записать в Handoff
+   research.md части.
+2. log.md части: `## Finalize ✅`; `state.py complete {PART_DIR} finalize`.
+3. Коммит только каталога части: пути `.tasks/{id}/{part}/` явно, сообщение
+   `docs({id}): research {part} — {title}`. Никогда не «все изменения».
+4. Push при `multitask.push` по правилу общей ветки: fetch; если `origin/task/{id}`
+   не предок HEAD, rebase с autostash на него; конфликт → СТОП, блок как есть.
+5. После коммита, а при `multitask.push` — после успешного push: блок → `done`
+   с коротким хешем коммита (после rebase, если он был), `comment`: «{part} → done. Коммит `{sha}` → `task/{id}`.» При трекере
+   `none` коммит `multitask.md` по пути сразу после записи блока.
+
 ## Мультизадача (`--multitask`)
 
 Предусловие: `multitask.py ready` на свежем описании даёт `all_terminal: true`.
 
 1. log.md мультизадачи: частей N (done, skipped), суммарно коммитов, тестов,
-   файлов по log.md частей.
+   файлов по log.md частей. При `finalize_artifact: research` вместо коммитов
+   и тестов число findings и отложенных вопросов сводного research.md (синтез уже
+   выполнен планировщиком).
 2. `comment`: «Мультизадача завершена: {done}/{N} частей done{, {skipped} skipped}.
    Ветка `{branch}` готова.»
 3. Статус с подтверждением (in_review по умолчанию).
 4. PR из ветки мультизадачи в base: предложить по шагу 5 одиночного потока,
-   решает разработчик.
-5. `state.py complete` для мультизадачи до `done`.
+   решает разработчик. При `finalize_artifact: research` PR несёт сводный
+   research.md и артефакты частей.
+5. При `finalize_artifact: research`: для каждого репозитория из `repos` состояния
+   мультизадачи проверить research-worktree по детерминированному пути
+   `{repo_path}/.claude/worktrees/research-{id}` и снести существующие
+   с подтверждением в порядке адаптера workspace.
+6. `state.py complete` для мультизадачи до `done`. При `part_isolation: shared`
+   коммиты называют пути явно (`state.yaml`, `log.md`, `research.md` мультизадачи),
+   push по правилу общей ветки.
 
 ## Правила
 
 - Всё внешнее с подтверждением: комментарий, PR, статус, выход из worktree.
 - Код не менять.
 - PR body из артефактов, не выдумывать.
-- Часть: squash в один коммит, без PR и без смены статуса задачи.
+- Часть: при `part_integration: integrate` squash в один коммит, при `commit` коммит
+  каталога части по пути; без PR и без смены статуса задачи.
 - Артефакты коммитить до сноса worktree: иначе они пропадут вместе с ним.

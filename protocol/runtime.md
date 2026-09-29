@@ -22,10 +22,14 @@
    |---|---|---|---|---|
    | create, refine | да | | | |
    | start | да | | | да |
-   | research, spec, plan | | | да | |
+   | research | да | | да | да |
+   | spec, plan | | | да | |
    | implement, review | | | да | да |
    | finalize | да | да | | да |
    | doctor | все | все | все | все |
+
+   В research tracker нужен в режиме планировщика (блок и комментарии), workspace
+   для кросс-репо ресёрча (research-worktree, `multitask.md`).
 
 5. **Состояние**: `.tasks/{id}/state.yaml` через `state.py`. Резюм читает `phase`
    и `completed`, не угадывает по файлам.
@@ -41,7 +45,11 @@
 Каждый спавн architect, coder, tester и reviewer **обязан иметь `name`**:
 `{role}-{id}` для задачи, `{role}-{id}-{part}` для части. Дальше общение
 с агентом идёт через SendMessage по имени (continuation, см. `review-cycle.md`).
-Researcher и web-fetcher одноразовые, имя не обязательно.
+**Researcher именуется, когда его продолжают**: каждый researcher, которого спавнит
+скил `research` для задачи или части, получает имя (`researcher-{id}`,
+`researcher-{id}-{part}`; синтез идёт под `researcher-{id}`) и параметр
+`CONTINUABLE: yes`. Researcher скила `create`, standalone `research "{тема}"`
+и web-fetcher одноразовые, имя не обязательно.
 
 Шаблон промпта:
 
@@ -65,6 +73,39 @@ Agent tool:
 
 В worktree все пути абсолютные внутри worktree, с явным запретом читать основное
 дерево (`protocol/worktree.md`).
+
+Параметры researcher (все необязательные):
+
+| Параметр | Значение |
+|---|---|
+| `MODE` | `task` (дефолт) или `synthesis`: сводный research.md мультизадачи по отчётам частей |
+| `REPO` | `{name} ref={ref} sha={sha}` для части в чужом репозитории |
+| `INPUTS` | абсолютные пути research.md частей-зависимостей (в синтезе всех частей) |
+| `HANDOFF` | `required`, если от части зависят другие, иначе `optional` |
+| `ANSWERS` | уже отвеченные блокирующие вопросы при перезапуске |
+| `CONTINUABLE` | `yes` только у именованного спавна скила `research`; иначе `no` |
+| `PARTS_IN_FLIGHT` | файлы незавершённых частей; только в мутирующих профилях |
+
+Кросс-репо спавн (часть с `repo` из `workspace.repos`):
+
+```
+Agent tool:
+  subagent_type: "{агент researcher домашнего проекта}"
+  name: "researcher-{id}-{part}"
+  model: "{models.strong}"
+  prompt: |
+    PROJECT_ROOT: {абсолютный корень чужого репозитория или его research-worktree; только чтение}
+    TASK_DIR: {абсолютный путь к .tasks/{id}/{part} в домашнем проекте}
+    ADAPTERS:
+      lang: {resolve.py adapter lang --project {чужой} --fallback-project {домашний}}
+    RULES: {resolve.py agent researcher --project {чужой} --fallback-project {домашний}}
+    REPO: {name} ref={ref} sha={sha}
+    CONTINUABLE: yes
+    {INPUTS, HANDOFF, ANSWERS}
+```
+
+Агент берётся из домашнего проекта (сессия регистрирует только его агентов),
+правила из чужого репозитория. Пишет агент только в `TASK_DIR`.
 
 ## Модели
 

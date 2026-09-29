@@ -22,6 +22,20 @@
   `~/.claude/omixflow-wt-setup.log`.
 - Артефакты, коммиты и спавн агентов cwd-relative, в worktree изолируются сами.
 
+## Research-worktree
+
+Отдельный вид worktree для кросс-репо ресёрча (`multitask.md`, «Кросс-репо»):
+
+- Корень: `{repo_path}/.claude/worktrees/research-{id}` в чужом репозитории, detached
+  на sha снимка. Один на чужой репозиторий в мультизадаче, общий для всех его частей.
+- В него не входят: сессия остаётся в домашнем проекте, путь передаётся researcher'у
+  как `PROJECT_ROOT`, хук worktree не срабатывает.
+- Создание, setup и снос ведёт оркестратор по адаптеру workspace, создание и снос
+  с подтверждением.
+- Путь детерминирован и в `state.yaml` не пишется (состояние общее для машин, пути
+  нет): существование проверяется по месту.
+- Накопление предупреждает doctor.
+
 Детект «сессия уже в worktree»:
 
 ```bash
@@ -66,4 +80,8 @@ git worktree add .claude/worktrees/{id} -b task/{id} {base}
   падении гейта с «module not found» повторить `workspace.setup` в самом worktree.
 - **Submodule.** Worktree не наследует объекты submodule; без инициализации workspace-пакеты
   из него не резолвятся, и падение гейта выглядит как дефект задачи. Инициализация
-  входит в setup хука; для ручного worktree выполнить её самому.
+  входит в setup хука; для ручного worktree выполнить её самому. Обратная сторона:
+  worktree с инициализированным submodule нельзя снести через `git worktree remove`,
+  пока существует `{gitdir}/modules` worktree; и нельзя делать `submodule deinit`
+  из worktree, он деинициализирует submodule основного дерева через общий конфиг.
+  Порядок сноса описан в адаптере workspace.

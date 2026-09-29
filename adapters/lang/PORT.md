@@ -2,7 +2,7 @@
 port: lang
 required: [verify, test_conventions, suppressions, navigation, deps_setup]
 optional: [workspace_layout, long_running]
-config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e]
+config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e, verify.visual]
 ---
 
 # Порт lang
@@ -27,14 +27,16 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 
 ## Гейты
 
-Фиксированный словарь имён: `typecheck`, `test`, `lint`, `build`, `e2e`. Проект задаёт
-команды в `verify.*`, адаптер задаёт дефолты и критерии. Гейт `test` обязателен, остальные
-по наличию в проекте. Критерии чтения результата:
+Фиксированный словарь имён: `typecheck`, `test`, `lint`, `build`, `e2e`, `visual`
+(визуальная регрессия в браузере, снимки). Проект задаёт команды в `verify.*`, адаптер
+задаёт дефолты и критерии. Гейт `test` обязателен, остальные по наличию в проекте.
+Критерии чтения результата:
 
 | Критерий | Значение |
 |---|---|
 | exit-code | ноль это зелёный |
 | zero-diagnostics | ноль диагностик в выводе, даже если код возврата ноль; учесть обрезку вывода линтера |
+| no-new-diagnostics | число и состав диагностик не хуже baseline, замеренного на базовой ветке в начале задачи; для репозиториев с накопленным долгом линтера |
 | rerun-compare-set | красный прогон повторяется без изменений; совпавший набор упавших имён это дефект, изменившийся или пустой это прогрев |
 
 Форма записи гейта в конфиге: строка команды (критерий exit-code) или объект
@@ -54,6 +56,9 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 чтение символа, поиск ссылок, переименование. Адаптер добавляет языковые бустеры
 с условием применимости (например, инструмент рефакторинга, требующий конфиг
 компилятора в корне пакета).
+
+Инструменты навигации активируются на абсолютном `PROJECT_ROOT` из промпта спавна,
+а не на cwd: сессия может находиться в другом репозитории.
 
 ## Конфиг
 

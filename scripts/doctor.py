@@ -6,6 +6,8 @@
 Exit code: 0 all OK or WARN, 1 at least one FAIL, 2 usage/config error.
 --init writes a draft .claude/omixflow/flow.yaml from the template plus
 auto-detected values (never overwrites without --force) and then runs checks.
+Each workspace.repos entry gets a `repo:{name}` section (slug, path, git, remote,
+ref, flow.yaml, research worktrees).
 """
 from __future__ import annotations
 
@@ -21,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
 
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
+REVIEW_WORKTREE_WARN = 3  # review worktrees (.claude/worktrees/pr-*) tolerated before a warning
+RESEARCH_WORKTREE_WARN = 3  # research-worktrees (.claude/worktrees/research-*) of one foreign repo
 
 
 @dataclass
@@ -161,6 +165,97 @@ class Doctor:
 
         wt = lib.config_get(self.cfg, "workspace.worktree") or "optional"
         self.add("workspace", "worktree", OK, str(wt))
+
+        if inside:
+            listing = lib.git(self.root, "worktree", "list", "--porcelain") or ""
+            review = [line.split(" ", 1)[1] for line in listing.splitlines()
+                      if line.startswith("worktree ") and "/.claude/worktrees/pr-" in line]
+            if review:
+                names = ", ".join(Path(p).name for p in review)
+                if len(review) > REVIEW_WORKTREE_WARN:
+                    self.add("workspace", "review worktrees", WARN,
+                             f"{len(review)} ({names}); влитые PR снести: git worktree remove .claude/worktrees/pr-N")
+                else:
+                    self.add("workspace", "review worktrees", OK, f"{len(review)} ({names})")
+
+        repos = lib.config_get(self.cfg, "workspace.repos") or {}
+        for name, entry in repos.items():
+            self.check_repo(str(name), entry if isinstance(entry, dict) else {})
+
+    def task_phase(self, task_id: str) -> Optional[str]:
+        """Phase of a home task: working tree first, then the task branch; None = unknown."""
+        assert self.cfg is not None
+        rel = f"{str(lib.config_get(self.cfg, 'artifacts.dir') or '.tasks').rstrip('/')}/{task_id}/state.yaml"
+        text: Optional[str] = None
+        if (self.root / rel).exists():
+            text = (self.root / rel).read_text(encoding="utf-8")
+        else:
+            branch = str(lib.config_get(self.cfg, "workspace.branch") or "task/{id}").replace("{id}", task_id)
+            for ref in (branch, f"origin/{branch}"):
+                text = lib.git(self.root, "show", f"{ref}:{rel}")
+                if text is not None:
+                    break
+        if text is None:
+            return None
+        try:
+            data = lib.yaml.safe_load(text)
+        except lib.yaml.YAMLError:
+            return None
+        return str(data.get("phase")) if isinstance(data, dict) and data.get("phase") else None
+
+    def check_repo(self, name: str, entry: Dict[str, Any]) -> None:
+        sec = f"repo:{name}"
+        self.add(sec, "slug", OK if lib.SLUG_RE.match(name) else FAIL,
+                 name if lib.SLUG_RE.match(name) else f"{name!r} не kebab-case: колонка repo его не примет")
+        path = (self.root / str(entry.get("path", ""))).resolve()
+        home = self.root.resolve()
+        if not path.is_dir():
+            self.add(sec, "path", FAIL, f"нет каталога {path}")
+            return
+        if path == home or home in path.parents:
+            self.add(sec, "path", FAIL, f"{path} внутри домашнего проекта {home}")
+            return
+        self.add(sec, "path", OK, str(path))
+        top = lib.git(path, "rev-parse", "--show-toplevel")
+        if top is None or Path(top).resolve() != path:
+            self.add(sec, "git", FAIL, f"{path} не git-репозиторий" if top is None
+                     else f"{path} не корень git-репозитория ({top})")
+            return
+        self.add(sec, "git", OK)
+        remote = str(entry.get("remote", ""))
+        origin = lib.git(path, "remote", "get-url", "origin")
+        if not origin:
+            self.add(sec, "remote", FAIL, f"нет origin; ожидается {remote}")
+        else:
+            same = lib.normalize_remote(origin) == lib.normalize_remote(remote)
+            self.add(sec, "remote", OK if same else FAIL,
+                     f"origin {origin}" + (" = " if same else " ≠ ") + f"конфиг {remote}")
+        ref = str(entry.get("ref") or "auto")
+        try:
+            sha = lib.resolve_repo_ref(path, ref)
+        except lib.OmixflowError as e:
+            sha, ref = None, f"{ref}: {e}"
+        self.add(sec, "ref", OK if sha else FAIL, f"{ref} → {sha[:12]}" if sha else f"{ref} не разрешается")
+        self.add(sec, "flow.yaml", OK, "flow.yaml есть" if lib.config_path(path).exists()
+                 else "flow.yaml нет, фолбэк на цепочку домашнего проекта")
+        research = sorted(d for d in (path / ".claude" / "worktrees").glob("research-*") if d.is_dir())
+        if not research:
+            return
+        done, unknown = [], []
+        for d in research:
+            phase = self.task_phase(d.name[len("research-"):])
+            if phase is None:
+                unknown.append(d.name)
+            elif phase == "done":
+                done.append(d.name)
+        detail = f"{len(research)} ({', '.join(d.name for d in research)})"
+        if unknown:
+            detail += "; состояние неизвестно: " + ", ".join(unknown)
+        if done:
+            detail += ("; задачи завершены: " + ", ".join(done)
+                       + "; снести в порядке адаптера workspace (worktree с submodule: сначала submodule)")
+        warn = bool(done) or len(research) > RESEARCH_WORKTREE_WARN
+        self.add(sec, "research worktrees", WARN if warn else OK, detail)
 
     # --------------------------------------------------------------- verify
     def check_verify(self) -> None:

@@ -1,9 +1,12 @@
 # OMIXFlow
 
-Плагин Claude Code с пайплайном spec-driven разработки. Одна задача проходит фазы
-Refine, Start, Research, Spec, Plan, Implement, Review, Finalize; каждую фазу ведут
-специализированные агенты, а всё, что зависит от проекта (трекер задач, хостинг кода,
-язык, устройство репозитория), вынесено в адаптеры и конфиг проекта.
+Плагин Claude Code с пайплайном spec-driven разработки. Задача проходит фазы своего
+профиля в одном глобальном порядке: профиль `full` (по умолчанию) это Refine, Start,
+Research, Spec, Plan, Implement, Review, Finalize; немутирующий `research` это Refine,
+Start, Research, Finalize, код он не меняет. Профили и их свойства:
+[protocol/profiles.md](protocol/profiles.md). Каждую фазу ведут специализированные
+агенты, а всё, что зависит от проекта (трекер задач, хостинг кода, язык, устройство
+репозитория), вынесено в адаптеры и конфиг проекта.
 
 Обкатан на семействе проектов omix (`eps-omix-lib`, `eps-eal-omix`), отсюда имя.
 Проектируется как общий инструмент: разные языки, разные трекеры, несколько
@@ -15,7 +18,7 @@ Refine, Start, Research, Spec, Plan, Implement, Review, Finalize; каждую �
 без которых не читается остальное:
 
 - **мультизадача** (multitask): задача, части которой выполняются как самостоятельные
-  задачи, каждая со своим полным пайплайном, веткой и артефактами;
+  задачи, каждая с пайплайном профиля мультизадачи и своими артефактами;
 - **часть** (part): единица мультизадачи. Части образуют граф зависимостей,
   независимые части могут выполняться параллельно разными исполнителями.
 
@@ -30,7 +33,7 @@ omixflow/
 │                  review, finalize, pr-review, doctor
 ├── agents/        researcher, architect, coder, tester, reviewer, web-fetcher
 ├── protocol/      канон: словарь, фазы, тиры, диалог, ревью-цикл, артефакты,
-│                  worktree, мультизадача, адаптеры, рантайм скила
+│                  worktree, мультизадача, профили, адаптеры, рантайм скила
 ├── adapters/      порты и адаптеры
 │   ├── tracker/   PORT.md + youtrack, local (+ backlog-index.py), none
 │   ├── forge/     PORT.md + github (+ pr.py), none
@@ -47,9 +50,10 @@ omixflow/
 
 | Скил | Что делает |
 |---|---|
-| `/omixflow:develop {id}` | весь пайплайн: триаж тира, фазы по очереди, резюм по `state.yaml`, мультизадача по частям |
+| `/omixflow:develop {id} [--profile=NAME]` | весь пайплайн: профиль, триаж тира, фазы профиля по очереди, резюм по `state.yaml`, мультизадача по частям или через планировщик research |
 | `/omixflow:create` | задача в трекере из черновика или из файла локального бэклога |
-| `/omixflow:refine {id} [--multitask]` | уточнение постановки; декомпозиция на части с картой зависимостей |
+| `/omixflow:refine {id} [--multitask]` | уточнение постановки; декомпозиция на части с картой зависимостей, профилем и (для `research`) репозиторием части |
+| `/omixflow:research {id} --parts` | планировщик мультизадачи профиля `research`: параллельные researcher'ы частей в одной сессии, блокирующие вопросы, синтез сводного research.md; части могут исследовать чужие репозитории из `workspace.repos` на зафиксированном sha (кросс-репо ресёрч) |
 | `/omixflow:start`, `research`, `spec`, `plan`, `implement`, `review`, `finalize` | фазы по отдельности; каждая единственный источник своей логики |
 | `/omixflow:pr-review {pr}` | ревью PR или ветки с публикацией через адаптер forge |
 | `/omixflow:doctor [--init]` | проверка и настройка проекта |
@@ -113,9 +117,12 @@ python3 scripts/resolve.py adapter-script forge pr  # скрипт, объявл
 python3 scripts/resolve.py agent coder            # subagent_type, файл агента, проектные правила
 python3 scripts/resolve.py script gate.sh         # проектный скрипт затеняет плагинный
 python3 scripts/resolve.py base                   # разрешённая base-ветка
+python3 scripts/resolve.py repo omix-lib --json   # запись workspace.repos: ref → sha, HEAD, dirty
+python3 scripts/resolve.py repo --list            # имена workspace.repos через запятую
+python3 scripts/resolve.py adapter lang --project ../other --fallback-project .  # чужой репозиторий без flow.yaml
 python3 scripts/cfg.py workspace.setup            # значение из flow.yaml
-python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/complete/next/step)
-python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/waves/ready/set/seed/file
+python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/complete/next/step), фазы по профилю
+python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/meta/waves/ready/set/seed/file
 ```
 
 ## Статус

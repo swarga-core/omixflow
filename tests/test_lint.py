@@ -7,6 +7,7 @@
 - Every plugin adapter declares port/name matching its location.
 - Every SendMessage target mentioned in a skill has a named spawn in the same skill
   (activates once skills are transferred; passes vacuously until then).
+- The profiles table in protocol/profiles.md equals state.PROFILES.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 import omixflow_lib as lib  # noqa: E402
+import state  # noqa: E402
 
 TEXT_SUFFIXES = {".md", ".py", ".yaml", ".yml", ".json", ".sh"}
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "tests"}
@@ -116,6 +118,43 @@ class SkillLint(unittest.TestCase):
             with self.subTest(skill=path.parent.name):
                 self.assertEqual(missing, set(),
                                  f"{path.parent.name}: SendMessage адресатам {sorted(missing)} без именованного спавна")
+
+
+class ProfilesLint(unittest.TestCase):
+    HEADER = ("| profile | phases | mutates | part_isolation | part_integration "
+              "| finalize_artifact | triage | part_runner |")
+
+    @staticmethod
+    def cells(line: str):
+        return [c.strip() for c in line.strip().strip("|").split("|")]
+
+    @staticmethod
+    def typed(key: str, cell: str):
+        if key == "phases":
+            return [p.strip() for p in cell.split(",")]
+        return {"true": True, "false": False}.get(cell, cell)
+
+    def parse_table(self, text: str):
+        lines = text.splitlines()
+        starts = [i for i, line in enumerate(lines) if line.strip() == self.HEADER]
+        self.assertEqual(len(starts), 1, f"protocol/profiles.md: таблица с заголовком {self.HEADER!r}")
+        keys = self.cells(self.HEADER)[1:]
+        table = {}
+        for line in lines[starts[0] + 2:]:
+            if not line.strip().startswith("|"):
+                break
+            cells = self.cells(line)
+            self.assertEqual(len(cells), len(keys) + 1, line)
+            self.assertNotIn(cells[0], table, f"профиль {cells[0]} повторяется")
+            table[cells[0]] = {k: self.typed(k, c) for k, c in zip(keys, cells[1:])}
+        return table
+
+    def test_profiles_table_matches_canon(self):
+        table = self.parse_table((ROOT / "protocol" / "profiles.md").read_text(encoding="utf-8"))
+        self.assertEqual(list(table), list(state.PROFILES))
+        for name, props in state.PROFILES.items():
+            with self.subTest(profile=name):
+                self.assertEqual(table[name], props)
 
 
 if __name__ == "__main__":

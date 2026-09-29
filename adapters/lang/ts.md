@@ -19,9 +19,10 @@ scripts: {}
 |---|---|---|---|
 | typecheck | `pnpm check-types` | exit-code | в монорепо запускается через turbo; отдельный пакет: команда из каталога пакета |
 | test | `pnpm test` | exit-code | e2e и visual в него не входят |
-| lint | `pnpm exec biome check {path}` | zero-diagnostics | вывод biome обрезан на двадцати диагностиках: маленькое число из него это артефакт обрезки, не факт; критерий считается по дельте к baseline, замеренному на старте задачи |
+| lint | `pnpm exec biome check {path}` | zero-diagnostics или no-new-diagnostics | вывод biome обрезан на двадцати диагностиках: маленькое число из него это артефакт обрезки, не факт; для `no-new-diagnostics` baseline замеряется на базовой ветке в начале задачи с `--max-diagnostics` достаточного размера |
 | build | `pnpm build` | exit-code | долгий |
 | e2e | по проекту | rerun-compare-set | не входит в `test`; обязателен, когда правка тронула словарь, разметку, стили или моки API |
+| visual | по проекту | exit-code | снимки в браузере; не входит в `test`; обновление baseline только осознанно и только на хосте, где baseline воспроизводим |
 
 Ловушки:
 

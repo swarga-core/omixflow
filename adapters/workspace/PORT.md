@@ -2,7 +2,7 @@
 port: workspace
 required: [resolve_base, branch, setup, integrate]
 optional: [worktree, submodules, protected]
-config: [workspace.base, workspace.branch, workspace.worktree, workspace.setup, workspace.submodules, workspace.integration, workspace.protected, multitask.push]
+config: [workspace.base, workspace.branch, workspace.worktree, workspace.setup, workspace.submodules, workspace.integration, workspace.protected, workspace.repos, multitask.push]
 ---
 
 # Порт workspace
@@ -18,7 +18,7 @@ config: [workspace.base, workspace.branch, workspace.worktree, workspace.setup, 
 | branch | да | имя ветки задачи и части по шаблонам; создать идемпотентно | start |
 | setup | да | установить зависимости и подготовить дерево к гейтам | хук worktree, start |
 | integrate | да | влить часть мультизадачи в ветку мультизадачи по `workspace.integration` | finalize части |
-| worktree | нет | создать, войти, выйти, снести worktree | start, finalize |
+| worktree | нет | создать, войти, выйти, снести worktree; также создать, подготовить и снести research-worktree чужого репозитория (без входа) | start, finalize, research |
 | submodules | нет | инициализировать submodule'ы, соблюдать их правила | setup, coder, review |
 | protected | нет | список веток, куда коммитить напрямую запрещено | start, finalize |
 
@@ -53,6 +53,12 @@ workspace:
       readonly: true          # правки внутри запрещены, только bump указателя
   integration: squash         # squash | merge
   protected: [master, "release/*"]
+  repos:                      # чужие репозитории для исследования
+    omix-lib:
+      path: ../eps-omix-lib   # относительно корня домашнего проекта
+      remote: git@github.com:org/eps-omix-lib.git
+      ref: auto               # ветка | тег | sha | auto (базовая ветка того проекта)
+      setup: false            # выполнять его workspace.setup в research-worktree
 multitask:
   push: true                  # пушить ветки мультизадачи и частей
 ```

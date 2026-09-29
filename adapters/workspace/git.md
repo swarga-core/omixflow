@@ -56,10 +56,38 @@ git worktree remove ".claude/worktrees/{id}-{part}" && git branch -D "task/{id}-
 Если основное дерево оказалось на другой ветке, интегрировать во временном worktree
 на `task/{id}`. `merge` вместо `squash` сохраняет историю части; выбор проекта.
 
+Части с `part_integration: commit` (`protocol/profiles.md`) `integrate` не используют:
+каталог части коммитится по пути (`git add -- .tasks/{id}/{part}/` и коммит этих
+путей), никогда не `add -A`.
+
 ## worktree
 
 По `protocol/worktree.md`. Создание от произвольной базы явным
 `git worktree add {path} -b {branch} {base}` и вход по `path`.
+
+### research-worktree
+
+Worktree чужого репозитория из `workspace.repos` на sha снимка (`protocol/worktree.md`).
+Все команды через `git -C "{repo_path}"`, в worktree не входить.
+
+```bash
+wt="{repo_path}/.claude/worktrees/research-{id}"
+git -C "{repo_path}" worktree add --detach "$wt" "{sha}"      # с подтверждением
+```
+
+Setup:
+
+- submodule'ы инициализируются всегда: `git -C "$wt" submodule update --init --recursive`
+  (с `--reference` на локальный клон, если он известен, как в `setup`);
+- `workspace.setup` чужого проекта (из его flow.yaml) выполняется в `$wt` только при
+  `workspace.repos.{name}.setup: true`; без flow.yaml или без `workspace.setup`
+  предупредить и пропустить.
+
+Снос с подтверждением, порядок как у worktree с инициализированным submodule
+(раздел `submodules` ниже): проверить `git -C "$wt" status --porcelain`, удалить
+содержимое submodule и `{gitdir}/modules` этого worktree, затем
+`git -C "{repo_path}" worktree remove --force "$wt"`. Без submodule достаточно
+`git -C "{repo_path}" worktree remove "$wt"`.
 
 ## submodules
 
@@ -69,6 +97,23 @@ git worktree remove ".claude/worktrees/{id}-{part}" && git branch -D "task/{id}-
   может гейтить это pre-push хуком, ревью проверяет группой F.
 - В review-worktree submodule не инициализирован по умолчанию: без `setup` гейты
   падают на неразрешённых пакетах, и это выглядит как дефект PR.
+- **Снос worktree с инициализированным submodule.** `git worktree remove` отказывает
+  («working trees containing submodules cannot be moved or removed»), пока в gitdir
+  worktree есть каталог `modules` (там живёт клон submodule этого worktree, счёт идёт
+  на гигабайты) или в каталоге submodule есть `.git`. **`git submodule deinit` из
+  worktree не использовать:** он снимает `submodule.{name}.url` в общем `.git/config`
+  и деинициализирует submodule основного дерева (лечится `git submodule init {path}`
+  в основном дереве). Порядок:
+
+  ```bash
+  wt=.claude/worktrees/{name}
+  git -C "$wt" status --porcelain          # чисто, кроме самого submodule
+  rm -r "$wt/{sub}"                        # содержимое submodule, ничего уникального
+  rm -r "$(git -C "$wt" rev-parse --git-dir)/modules"
+  git worktree remove --force "$wt"        # --force только из-за удалённого submodule
+  ```
+
+  Это касается любого worktree, где отработал `setup` хука.
 
 ## protected
 

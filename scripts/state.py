@@ -2,17 +2,23 @@
 """Manage a task's state.yaml (see protocol/artifacts.md).
 
     state.py init DIR --id ID --kind task|multitask|part [--mode pipeline|manual]
-                      [--tier S|M|L] [--forced] [--branch B] [--base B]
+                      [--profile NAME] [--tier S|M|L] [--forced] [--branch B] [--base B]
                       [--multitask-id X --part P] [--session S] [--force]
     state.py get DIR [KEY]                 # whole state as JSON, or one value
+    state.py get DIR profile               # effective profile (full for legacy states)
     state.py set DIR KEY=VALUE ...         # dotted keys; JSON for lists/objects
     state.py unset DIR KEY ...
     state.py complete DIR PHASE            # add to completed, advance phase
-    state.py next DIR                      # print the next phase to run
+    state.py next DIR                      # print the next phase of the profile
     state.py step DIR done N | start N     # implement bookkeeping
     state.py agents DIR --session S        # drop agents from another session
 
 DIR is the task directory (.tasks/{id} or .tasks/{id}/{part}).
+
+Profiles (protocol/profiles.md) live in PROFILES; a state without `profile` is
+`full`. A part inherits the profile of its parent state DIR/../state.yaml, which
+must be `kind: multitask` with the id given by --multitask-id. A profile with
+`triage: false` stores `tier: null` and rejects --tier.
 """
 from __future__ import annotations
 
@@ -26,7 +32,30 @@ from typing import Any, Dict, List
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
 
-PHASES: List[str] = ["refine", "start", "research", "spec", "plan", "implement", "review", "finalize"]
+# The single canon of profiles; protocol/profiles.md mirrors it (tests/test_lint.py).
+PROFILES: Dict[str, Dict[str, Any]] = {
+    "full": {
+        "phases": ["refine", "start", "research", "spec", "plan", "implement", "review", "finalize"],
+        "mutates": True,
+        "part_isolation": "worktree",
+        "part_integration": "integrate",
+        "finalize_artifact": "code",
+        "triage": True,
+        "part_runner": "sequential",
+    },
+    "research": {
+        "phases": ["refine", "start", "research", "finalize"],
+        "mutates": False,
+        "part_isolation": "shared",
+        "part_integration": "commit",
+        "finalize_artifact": "research",
+        "triage": False,
+        "part_runner": "scheduler",
+    },
+}
+DEFAULT_PROFILE = "full"
+# Global phase order; every profile's phases are a subset in this order.
+PHASES: List[str] = PROFILES[DEFAULT_PROFILE]["phases"]
 KINDS = ("task", "multitask", "part")
 MODES = ("pipeline", "manual")
 TIERS = ("S", "M", "L")
@@ -99,12 +128,40 @@ def unset_dotted(obj: Dict[str, Any], dotted: str) -> None:
         cur.pop(keys[-1], None)
 
 
+def check_profile(name: Any) -> str:
+    if name not in PROFILES:
+        raise lib.OmixflowError(f"профиль должен быть одним из {list(PROFILES)}, получено {name!r}")
+    return name
+
+
+def profile_of(state: Dict[str, Any]) -> str:
+    return check_profile(state.get("profile") or DEFAULT_PROFILE)
+
+
+def phases_of(state: Dict[str, Any]) -> List[str]:
+    return PROFILES[profile_of(state)]["phases"]
+
+
 def next_phase(state: Dict[str, Any]) -> str:
     completed = [p for p in state.get("completed") or []]
-    for p in PHASES:
+    for p in phases_of(state):
         if p not in completed:
             return p
     return "done"
+
+
+def parent_profile(d: Path, multitask_id: str) -> str:
+    """Profile of the parent multitask state DIR/../state.yaml; errors if it is not one."""
+    parent_dir = d.parent
+    if not path_of(parent_dir).exists():
+        raise lib.OmixflowError(f"нет состояния мультизадачи: {path_of(parent_dir)}")
+    parent = load(parent_dir)
+    if parent.get("kind") != "multitask":
+        raise lib.OmixflowError(f"{path_of(parent_dir)}: kind={parent.get('kind')!r}, ожидается multitask")
+    if parent.get("id") != multitask_id:
+        raise lib.OmixflowError(
+            f"{path_of(parent_dir)}: id={parent.get('id')!r} не совпадает с --multitask-id {multitask_id!r}")
+    return profile_of(parent)
 
 
 # ---------------------------------------------------------------- commands
@@ -119,14 +176,31 @@ def cmd_init(ns: argparse.Namespace) -> int:
         raise lib.OmixflowError(f"mode должен быть одним из {MODES}")
     if ns.tier and ns.tier not in TIERS:
         raise lib.OmixflowError(f"tier должен быть одним из {TIERS}")
+    if ns.profile is not None:
+        check_profile(ns.profile)
+    if ns.kind == "part":
+        if not (ns.multitask_id and ns.part):
+            raise lib.OmixflowError("для kind=part нужны --multitask-id и --part")
+        profile = parent_profile(d, ns.multitask_id)
+        if ns.profile is not None and ns.profile != profile:
+            raise lib.OmixflowError(
+                f"--profile {ns.profile} противоречит профилю мультизадачи {profile}")
+    else:
+        profile = ns.profile or DEFAULT_PROFILE
+    tier = ns.tier
+    if not PROFILES[profile]["triage"]:
+        if ns.tier:
+            raise lib.OmixflowError(f"профиль {profile} не триажится: --tier не допускается")
+        tier = None
     state: Dict[str, Any] = {
         "schema": 1,
         "id": ns.id,
         "kind": ns.kind,
+        "profile": profile,
         "mode": ns.mode,
-        "tier": ns.tier,
+        "tier": tier,
         "tier_forced": bool(ns.forced),
-        "phase": PHASES[0],
+        "phase": PROFILES[profile]["phases"][0],
         "completed": [],
         "step": None,
         "steps_total": None,
@@ -138,8 +212,6 @@ def cmd_init(ns: argparse.Namespace) -> int:
         "base": ns.base,
     }
     if ns.kind == "part":
-        if not (ns.multitask_id and ns.part):
-            raise lib.OmixflowError("для kind=part нужны --multitask-id и --part")
         state["multitask"] = {"id": ns.multitask_id, "part": ns.part}
     save(d, state)
     print(path_of(d))
@@ -148,6 +220,9 @@ def cmd_init(ns: argparse.Namespace) -> int:
 
 def cmd_get(ns: argparse.Namespace) -> int:
     state = load(Path(ns.dir).resolve())
+    if ns.key == "profile":
+        print(profile_of(state))
+        return 0
     if ns.key:
         value = lib.config_get(state, ns.key)
         if value is None:
@@ -167,8 +242,13 @@ def cmd_set(ns: argparse.Namespace) -> int:
             raise lib.OmixflowError(f"ожидается KEY=VALUE, получено {pair!r}")
         key, raw = pair.split("=", 1)
         value = parse_value(raw)
-        if key == "phase" and value not in PHASES + ["done"]:
-            raise lib.OmixflowError(f"phase должна быть одной из {PHASES + ['done']}")
+        if key == "phase" and value not in phases_of(state) + ["done"]:
+            raise lib.OmixflowError(f"phase должна быть одной из {phases_of(state) + ['done']}")
+        if key == "profile":
+            check_profile(value)
+            outside = [p for p in state.get("completed") or [] if p not in PROFILES[value]["phases"]]
+            if outside:
+                raise lib.OmixflowError(f"completed содержит фазы вне профиля {value}: {outside}")
         if key == "tier" and value not in TIERS:
             raise lib.OmixflowError(f"tier должен быть одним из {TIERS}")
         if key == "mode" and value not in MODES:
@@ -191,12 +271,13 @@ def cmd_complete(ns: argparse.Namespace) -> int:
     d = Path(ns.dir).resolve()
     state = load(d)
     phase = ns.phase
-    if phase not in PHASES:
-        raise lib.OmixflowError(f"неизвестная фаза {phase!r}")
+    phases = phases_of(state)
+    if phase not in phases:
+        raise lib.OmixflowError(f"фаза {phase!r} вне профиля {profile_of(state)}: {phases}")
     completed = list(state.get("completed") or [])
     if phase not in completed:
         completed.append(phase)
-    state["completed"] = [p for p in PHASES if p in completed]
+    state["completed"] = [p for p in phases if p in completed]
     state["phase"] = next_phase(state)
     save(d, state)
     print(state["phase"])
@@ -250,6 +331,7 @@ def main(argv=None) -> int:
     p.add_argument("--id", required=True)
     p.add_argument("--kind", required=True)
     p.add_argument("--mode", default="manual")
+    p.add_argument("--profile", default=None)
     p.add_argument("--tier", default=None)
     p.add_argument("--forced", action="store_true")
     p.add_argument("--branch", default=None)

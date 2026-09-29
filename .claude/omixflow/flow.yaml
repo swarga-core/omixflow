@@ -1,0 +1,57 @@
+# OMIXFlow: конфиг проекта omixflow (плагин ведёт собственные задачи своим пайплайном).
+# Только значения; правила гейтов в .claude/omixflow/lang/py.md, протокол в самом плагине.
+# Проверка: /omixflow:doctor
+
+version: 1
+
+tracker:
+  adapter: youtrack
+  project: AL
+  status_map:
+    in_work: In Work
+    in_review: Waiting for review
+    done: Finished
+  create_defaults:
+    Type: Task
+    Task Type: Feature
+    Priority: Normal
+    Subsystems: [Frontend]
+
+forge:
+  adapter: github
+
+# Python-скрипты и Markdown; адаптера для Python в плагине нет, проект даёт замену
+# .claude/omixflow/lang/py.md без extends.
+lang: [py]
+
+workspace:
+  base: main
+  branch: "task/{id}"
+  worktree: optional
+  integration: squash
+  protected: [main]
+
+verify:
+  test: python3 -m unittest discover tests
+  lint: claude plugin validate .
+
+artifacts:
+  dir: .tasks
+  tracked: true
+
+limits:
+  coder_iterations: 7
+  review_passes: 3
+  agent_rotation_steps: 10
+
+tiers:
+  s_max_files: 5
+  m_max_files: 15
+
+models:
+  strong: opus
+  light: sonnet
+
+multitask:
+  parallel_per_owner: 1
+  push: true
