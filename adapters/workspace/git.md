@@ -1,7 +1,7 @@
 ---
 port: workspace
 name: git
-capabilities: [resolve_base, branch, setup, integrate, worktree, submodules, protected]
+capabilities: [resolve_base, branch, setup, integrate, worktree, submodules, protected, sync]
 requires:
   tools: []
   bin: [git]
@@ -38,6 +38,35 @@ else git checkout -b "{branch}" "{base}"; fi
 `git submodule update --init --recursive`; для worktree ускоряет `--reference`
 на локальный клон, если он известен проекту.
 
+## sync
+
+Контракт и порядок в `PORT.md`, раздел «sync». При remote, на котором движется база,
+сначала `git fetch`. Команды по одной, пути буквально (изолированная worktree-сессия
+отклоняет переменные shell и подстановки):
+
+```bash
+python3 "{plugin_root}/scripts/sync.py" check "{TASK_DIR}"   # moved, strategy, ref, dirty
+git status --porcelain                                     # пусто, иначе сначала коммит шага
+```
+
+rebase (ветка только с артефактами):
+
+```bash
+git rebase "{ref}"
+# конфликт (база тоже правила файл трекера local): git rebase --abort, затем merge
+```
+
+merge (ветка с кодом):
+
+```bash
+git merge --no-ff --no-commit "{ref}"
+git diff --name-only --diff-filter=U        # CONFLICTS для coder (MODE: sync)
+# coder разрешил и сделал git add: список снова пуст
+git commit -F "{scratch}/merge-msg.txt"     # «merge {base} @ {short} в {branch}» + «файл — как разрешено»
+git rev-parse --short HEAD                  # хеш для записи
+python3 "{plugin_root}/scripts/sync.py" record "{TASK_DIR}" --how merge --base-sha {sha} --commit {hash}
+```
+
 ## integrate
 
 `workspace.integration: squash` (дефолт):
@@ -55,6 +84,19 @@ git worktree remove ".claude/worktrees/{id}-{part}" && git branch -D "task/{id}-
 
 Если основное дерево оказалось на другой ветке, интегрировать во временном worktree
 на `task/{id}`. `merge` вместо `squash` сохраняет историю части; выбор проекта.
+
+Одиночная задача (`workspace.delivery: integrate`), в дереве на базе или во временном
+worktree на ней, если основное дерево на другой ветке:
+
+```bash
+git merge --squash "{branch}"           # integration: merge → git merge --no-ff "{branch}"
+git diff --cached --name-only           # сверить с git diff --name-only {base}...{branch}; лишнее → СТОП
+git commit -m "feat({id}): {title}"
+git rev-parse --short HEAD              # хеш для комментария трекера и log.md
+```
+
+Push базы только при наличии remote и после подтверждения в той же точке
+`workspace.integrate`.
 
 Части с `part_integration: commit` (`protocol/profiles.md`) `integrate` не используют:
 каталог части коммитится по пути (`git add -- .tasks/{id}/{part}/` и коммит этих

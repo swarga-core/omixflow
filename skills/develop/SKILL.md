@@ -26,6 +26,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
   профиль задаёт маркер блока.
 - `--tier=S|M|L`: форсированный тир; с профилем `triage: false` ошибка.
 - `--worktree`: изолировать задачу в worktree.
+- `--lead=NAME`: сессия задачи под лидом `NAME` (`protocol/lead.md`).
 - `{id} --part {part}`: взять конкретную часть мультизадачи.
 
 ## Вызов фазового скила
@@ -47,6 +48,18 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 `identify` адаптера tracker: id или slug из свободной формулировки.
 `TASK_DIR = {artifacts.dir}/{id}`.
 
+### 1a. Лид
+
+`--lead=NAME`, либо `lead.name` в существующем состоянии: до любой фазы регистрация
+по `lead.md` («Регистрация»): `register` с задачей, каталогом артефактов, фазой
+и открытыми вопросами (`state.py get TASK_DIR lead.open`), будильник на `brief`.
+По `brief`: путь журнала и номер вопроса в состояние, если оно есть
+(`state.py set TASK_DIR lead.journal=… lead.asked=…`, номер берётся наибольший);
+интеграционная ветка из `brief` становится базой задачи (`start --base=…`);
+повторённые `decision` и `ack` по открытым вопросам применить. Дальше все точки
+решения во всех фазах идут по `lead.md`, «Порядок действий сессии»; `refine` и `start`
+получают `--lead=NAME`; `done` шлёт `finalize`.
+
 ### 2. Резюм
 
 `TASK_DIR/state.yaml` существует:
@@ -60,7 +73,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
   completed='["refine","start"]' phase=research steps_done='[]' step=null`
   и продолжить с research. Артефакты дополняются секциями итерации, не
   пересоздаются. Если статус не `in_work`: сообщить, что доработка не требуется.
-- Иначе показать состояние текстом (фаза, тир, шаг) и AskUserQuestion:
+- Иначе показать состояние текстом (фаза, тир, шаг) и спросить в точке `resume`:
   Продолжить с {next} (Recommended) / Перезапустить с другой фазы / Начать заново.
 - `--from={phase}`: `state.py set completed=[фазы до неё]`, предупреждение
   о перезаписи.
@@ -73,19 +86,22 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 **Триаж.** Профиль с `triage: false` не триажится: шаг пропускается, тира нет.
 Иначе оценить тир по критериям tiers.md (порог файлов из `tiers.*`).
 Сомнение → больший. `--tier` форсирует и помечается `forced`; вскрывшийся масштаб
-для форсированного тира не повышается молча: показать и спросить. Тир
+для форсированного тира не повышается молча: показать и спросить в точке
+`scope-change`. Тир
 подтверждается после Refine и может только расти.
 
 **Фазы.**
 
-1. `refine {id}`: только для адаптеров с описанием в трекере; для `none`
+1. `refine {id} [--lead=NAME]`: только для адаптеров с описанием в трекере; для `none`
    пропускается (уточнение фиксируется в task.md на Start).
-2. `start {id} --profile={profile} [--tier={tier}] --mode=pipeline [--worktree]`.
+2. `start {id} --profile={profile} [--tier={tier}] --mode=pipeline [--worktree]
+   [--lead=NAME --base={интеграционная ветка из brief}]`.
 3. Фазы профиля после start через `state.py next`, пока фаза не станет `done`.
 
 Инвариант 7: одна задача мутирует один репозиторий, немутирующие фазы читают
 репозитории из `workspace.repos`. Если Start или Research вскрыли, что задача требует
-изменений в нескольких репозиториях, СТОП и предложить декомпозицию.
+изменений в нескольких репозиториях, СТОП и предложить декомпозицию в точке
+`scope-change`.
 
 ## Мультизадача
 
@@ -118,16 +134,16 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 `me` из `current_user`. `multitask.py ready --from {desc} --owner {me}`, строго
 в этом порядке:
 
-1. `blocked` не пуст: СТОП. Показать причину из комментариев текстом,
-   AskUserQuestion: разблокировать (→ `pending` через `multitask.py set`) /
+1. `blocked` не пуст: СТОП. Показать причину из комментариев и спросить в точке
+   `part-blocked`: разблокировать (→ `pending` через `multitask.py set`) /
    `skipped` / обсудить. Другую часть не брать.
-2. `blocked_by_skipped_dependency` не пуст: показать, спросить: снять
-   зависимость / пропустить часть.
+2. `blocked_by_skipped_dependency` не пуст: показать и спросить в точке
+   `part-blocked`: снять зависимость / пропустить часть.
 3. `mine_active` не пуст: продолжить эту часть → M3 в режиме resume.
 4. `--part {part}` указан и часть в `ready`: → M3 fresh.
 5. `ready` не пуст: показать волну, занятые части других владельцев как занятые,
-   AskUserQuestion: взять первую готовую (Recommended) / другую из готовых /
-   остановить. → M3 fresh. Лимит активных частей владельца
+   и спросить в точке `part-take`: взять первую готовую (Recommended) / другую
+   из готовых / остановить. → M3 fresh. Лимит активных частей владельца
    `multitask.parallel_per_owner` (`ready --parallel`, `slots`).
 6. `all_terminal`: → M4.
 7. Иначе (всё занято другими или ждёт зависимостей): сообщить, чего ждём,
@@ -136,7 +152,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 ### M3. Часть (`part_runner: sequential`)
 
 - fresh: триаж части по её постановке из multitask.md → `start {id} --part {part}
-  --tier={tier} --mode=pipeline`.
+  --tier={tier} --mode=pipeline [--lead=NAME]`.
 - resume: войти в worktree части по `path` (пересоздать из ветки, если исчез),
   `PART_DIR = {artifacts.dir}/{id}/{part}`, `state.py next PART_DIR`.
 
@@ -144,8 +160,8 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 `finalize {id} --part {part}`. → M2.
 
 **Эскалация внутри части** (лимиты coder или review, critical без решения):
-блок → `blocked` (`multitask.py set … status=blocked`), `comment` с причиной,
-СТОП. Следующую часть не брать.
+блок → `blocked` (`multitask.py set … status=blocked`), `comment` с причиной
+(точка `tracker.comment`), СТОП. Следующую часть не брать.
 
 ### M4. Финал
 
@@ -158,11 +174,11 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 | Трекер недоступен | работать как со свободной формулировкой |
 | Конфига нет | предложить `/omixflow:doctor --init`, не продолжать |
 | Мультизадача без блока | СТОП → `refine --multitask` |
-| Часть `blocked` | СТОП на ней, разработчик решает |
+| Часть `blocked` | СТОП на ней, точка `part-blocked` |
 | Пустая часть (0 изменений) | не коммитить, `skipped` |
-| Конфликт при интеграции части | СТОП, блок остаётся `in-review` |
-| Задача меняет несколько репозиториев | СТОП: одна задача мутирует один репозиторий, немутирующие фазы читают `workspace.repos`; декомпозиция |
-| coder или reviewer исчерпали лимит | СТОП, эскалация |
+| Конфликт при интеграции части | СТОП, точка `deadlock`, блок остаётся `in-review` |
+| Задача меняет несколько репозиториев | СТОП: одна задача мутирует один репозиторий, немутирующие фазы читают `workspace.repos`; декомпозиция в точке `scope-change` |
+| coder или reviewer исчерпали лимит | СТОП, эскалация в точке `deadlock` (coder) или `finding` (review) |
 | CLI хостинга не настроен | PR пропускается с инструкцией |
 
 ## Правила

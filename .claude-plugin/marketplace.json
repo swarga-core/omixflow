@@ -13,7 +13,7 @@
       "name": "omixflow",
       "source": "./",
       "description": "OMIXFlow: spec-driven development pipeline with pluggable adapters",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "workflow"
     }
   ]

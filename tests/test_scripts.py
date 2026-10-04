@@ -294,6 +294,15 @@ class WorkspaceReposSchemaTests(unittest.TestCase):
                 errors = lib.validate_config(self.cfg(repos={"lib": entry}))
                 self.assertTrue(any("workspace.repos.lib" in e and message in e for e in errors), errors)
 
+    def test_delivery_and_sync_values(self):
+        for key, good, bad in (("delivery", ("pr", "integrate", "lead"), "push"),
+                               ("sync", ("auto", "merge", "rebase"), "squash")):
+            for value in good:
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(lib.validate_config(self.cfg(**{key: value})), [])
+            with self.subTest(key=key, value=bad):
+                self.assertTrue(any(f"workspace.{key}" in e for e in lib.validate_config(self.cfg(**{key: bad}))))
+
     def test_parallel_parts_minimum(self):
         cfg = self.cfg()
         cfg["multitask"] = {"parallel_parts": 0}
@@ -303,6 +312,161 @@ class WorkspaceReposSchemaTests(unittest.TestCase):
         data = lib.yaml.safe_load(lib.TEMPLATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(data["multitask"]["parallel_parts"], 4)
         self.assertIn("# repos:", lib.TEMPLATE_PATH.read_text(encoding="utf-8"))
+
+
+class ManagedBlockTests(unittest.TestCase):
+    def test_append_and_replace(self):
+        text = lib.replace_managed_block("Описание задачи.\n", "lead", "v1")
+        self.assertEqual(text, "Описание задачи.\n\n<!-- omixflow:lead:start -->\nv1\n<!-- omixflow:lead:end -->\n")
+        again = lib.replace_managed_block(text + "\nХвост.\n", "lead", "v2\nстрока")
+        self.assertIn("<!-- omixflow:lead:start -->\nv2\nстрока\n<!-- omixflow:lead:end -->", again)
+        self.assertTrue(again.startswith("Описание задачи.\n") and again.endswith("Хвост.\n"))
+        self.assertEqual(lib.replace_managed_block("", "lead", "x"),
+                         "<!-- omixflow:lead:start -->\nx\n<!-- omixflow:lead:end -->\n")
+
+    def test_marker_attributes_kept_and_other_kinds_untouched(self):
+        text = ("<!-- omixflow:multitask:start -->\nm\n<!-- omixflow:multitask:end -->\n"
+                "<!-- omixflow:lead:start  key=v -->\nold\n<!-- omixflow:lead:end -->\n")
+        out = lib.replace_managed_block(text, "lead", "new")
+        self.assertIn("<!-- omixflow:lead:start  key=v -->\nnew\n", out)
+        self.assertIn("<!-- omixflow:multitask:start -->\nm\n", out)
+
+    def test_inline_marker_is_prose_and_errors(self):
+        prose = "Маркер `<!-- omixflow:lead:start -->` в тексте не маркер.\n"
+        self.assertIn("<!-- omixflow:lead:end -->", lib.replace_managed_block(prose, "lead", "x"))
+        for bad in ("<!-- omixflow:lead:start -->\nx\n",
+                    "<!-- omixflow:lead:start -->\n<!-- omixflow:lead:start -->\n<!-- omixflow:lead:end -->\n"):
+            with self.subTest(bad=bad), self.assertRaises(lib.OmixflowError):
+                lib.replace_managed_block(bad, "lead", "y")
+
+
+class LeadConfigTests(unittest.TestCase):
+    def cfg(self, lead):
+        cfg = lib.normalize_config(lib.yaml.safe_load(HOME_CFG))
+        cfg["lead"] = lead
+        return cfg
+
+    def test_valid_lead_section(self):
+        cfg = self.cfg({"default": "developer", "timeout": "15m",
+                        "notify": ["visible-behaviour"],
+                        "policy": {"design-question": "lead", "tracker.describe": "developer", "resume": "direct",
+                                   "statement": "precedent", "finding": "lead-notify"}})
+        self.assertEqual(lib.validate_config(cfg), [])
+
+    def test_bad_lead_values_rejected(self):
+        cases = {
+            "unknown point": ({"policy": {"design-questions": "lead"}}, "lead.policy.design-questions (ключ)"),
+            "unknown mode": ({"policy": {"finding": "autopilot"}}, "lead.policy.finding"),
+            "unknown notify flag": ({"notify": ["everything"]}, "lead.notify"),
+            "bad default": ({"default": "auto"}, "lead.default"),
+            "bad timeout": ({"timeout": "10 min"}, "lead.timeout"),
+            "unknown key": ({"veto": True}, "неизвестный ключ 'veto'"),
+        }
+        for label, (lead, message) in cases.items():
+            with self.subTest(label):
+                errors = lib.validate_config(self.cfg(lead))
+                self.assertTrue(any(message in e for e in errors), errors)
+
+    def test_config_get_reads_policy_keys_with_dots(self):
+        cfg = self.cfg({"policy": {"tracker.comment": "developer", "finding": "lead"}})
+        self.assertEqual(lib.config_get(cfg, "lead.policy.tracker.comment"), "developer")
+        self.assertEqual(lib.config_get(cfg, "lead.policy.finding"), "lead")
+        self.assertIsNone(lib.config_get(cfg, "lead.policy.tracker"))
+        self.assertIsNone(lib.config_get(cfg, "lead.policy.forge.pr"))
+
+    def test_cfg_prints_policy_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_cfg(Path(tmp), HOME_CFG + "lead:\n  policy:\n    tracker.comment: direct\n")
+            proc = run("cfg.py", "lead.policy.tracker.comment", "--project", tmp)
+            self.assertEqual(proc.stdout.strip(), "direct", proc.stderr)
+
+    def test_decision_points_parse(self):
+        points = lib.decision_points()
+        self.assertIn(("finding", "содержание"), points)
+        self.assertIn(("resume", "маршрут"), points)
+        self.assertIn(("tracker.describe", "внешнее"), points)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "dialog.md"
+            for text in ("без таблицы\n",
+                         lib.POINTS_HEADER + "\n|---|---|---|---|\n| finding | содержание | x | y |\n"):
+                path.write_text(text, encoding="utf-8")
+                with self.subTest(text=text), self.assertRaises(lib.OmixflowError):
+                    lib.decision_points(path)
+
+    def test_doctor_warns_when_lead_confirms_external_actions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_cfg(Path(tmp), HOME_CFG + "lead:\n  default: lead\n  policy:\n    tracker.describe: developer\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            checks = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(checks[("lead", "policy")]["status"], "OK")
+            warned = {name for (section, name), c in checks.items() if section == "lead" and c["status"] == "WARN"}
+            self.assertEqual(warned, {"forge.pr", "workspace.integrate"})
+            routine = checks[("lead", "external")]
+            self.assertEqual(routine["status"], "OK")
+            self.assertEqual(routine["detail"], "лид подтверждает без разработчика: "
+                             "tracker.comment, tracker.status, workspace.branch, workspace.exit")
+
+    def test_template_lead_section_is_valid_when_uncommented(self):
+        lines = lib.TEMPLATE_PATH.read_text(encoding="utf-8").splitlines()
+        start = lines.index("# lead:")
+        block = []
+        for line in lines[start:]:
+            if not line.startswith("#"):
+                break
+            block.append(line[2:] if line.startswith("# ") else line[1:])
+        lead = lib.yaml.safe_load("\n".join(block))["lead"]
+        self.assertEqual(lib.validate_config(self.cfg(lead)), [])
+        self.assertEqual(lead["policy"]["tracker.describe"], "developer")
+
+    def test_route_resolution(self):
+        cfg = self.cfg({"default": "lead", "timeout": "90s", "policy": {"tracker.describe": "developer"}})
+        self.assertEqual(lib.lead_route(cfg, "tracker.describe"),
+                         {"point": "tracker.describe", "kind": "внешнее", "mode": "developer", "timeout": 90})
+        self.assertEqual(lib.lead_route(cfg, "finding")["mode"], "lead")
+        bare = lib.normalize_config(lib.yaml.safe_load(HOME_CFG))
+        self.assertEqual(lib.lead_route(bare, "resume"),
+                         {"point": "resume", "kind": "маршрут", "mode": "developer", "timeout": 600})
+        with self.assertRaises(lib.OmixflowError):
+            lib.lead_route(bare, "findings")
+
+    def test_lead_settings(self):
+        bare = lib.normalize_config(lib.yaml.safe_load(HOME_CFG))
+        actions = {"backlog": "lead", "memory": "lead"}
+        self.assertEqual(lib.lead_settings(bare), {"default": "developer", "timeout": 600, "stall": 900,
+                                                   "actions": actions, "notify": []})
+        cfg = self.cfg({"default": "lead", "timeout": "1m", "stall": "30m", "actions": {"memory": "developer"}})
+        self.assertEqual(lib.lead_settings(cfg), {"default": "lead", "timeout": 60, "stall": 1800,
+                                                  "actions": {"backlog": "lead", "memory": "developer"},
+                                                  "notify": []})
+        self.assertTrue(any("lead.actions" in e for e in lib.validate_config(self.cfg({"actions": {"tracker": "lead"}}))))
+        self.assertTrue(any("lead.stall" in e for e in lib.validate_config(self.cfg({"stall": "soon"}))))
+        with tempfile.TemporaryDirectory() as tmp:
+            write_cfg(Path(tmp), HOME_CFG + "lead:\n  stall: 20m\n")
+            proc = run("resolve.py", "lead", "--project", tmp)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout), {"default": "developer", "timeout": 600, "stall": 1200,
+                                                       "actions": {"backlog": "lead", "memory": "lead"},
+                                                       "notify": []})
+
+    def test_duration_seconds(self):
+        self.assertEqual([lib.duration_seconds(x) for x in ("45s", "10m", "2h")], [45, 600, 7200])
+        for bad in ("10", "0m", "10 m", "1d", "m"):
+            with self.subTest(bad=bad), self.assertRaises(lib.OmixflowError):
+                lib.duration_seconds(bad)
+
+    def test_resolve_route_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_cfg(Path(tmp), HOME_CFG + "lead:\n  timeout: 2m\n  policy:\n    resume: lead\n")
+            proc = run("resolve.py", "route", "resume", "--project", tmp)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout),
+                             {"point": "resume", "kind": "маршрут", "mode": "lead", "timeout": 120})
+            self.assertEqual(run("resolve.py", "route", "nope", "--project", tmp).returncode, 2)
+
+    def test_doctor_is_silent_without_lead_section(self):
+        proc = run("doctor.py", "--project", str(FIXTURE), "--json")
+        sections = {c["section"] for c in json.loads(proc.stdout)["checks"]}
+        self.assertNotIn("lead", sections)
 
 
 class ForeignRepoTests(unittest.TestCase):

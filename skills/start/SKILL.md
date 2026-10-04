@@ -25,6 +25,10 @@ Setup разработки: ветка или worktree, артефакты, ст
   `triage: false` тира не получает: `--tier` вместе с ним ошибка.
 - `--mode=pipeline`: ставит `develop`, скил не печатает «следующий шаг».
 - `{id} --part {part}`: старт части мультизадачи (обычно вызывает `develop`).
+- `--lead=NAME`: сессия под лидом; состояние получает `--lead NAME --asked {K}`,
+  где K последний номер вопроса к лиду до появления состояния.
+- `--base=BRANCH`: база задачи вместо `resolve.py base`; под лидом это интеграционная
+  ветка из `brief` (её передаёт `develop`).
 
 ## Алгоритм: одиночная задача
 
@@ -32,14 +36,14 @@ Setup разработки: ветка или worktree, артефакты, ст
 
 `identify` адаптера: id или свободная формулировка. `get`, `comments`, связи.
 Если в описании есть `## Уточнённая формулировка`, использовать её; иначе
-AskUserQuestion: «Сначала /omixflow:refine (Recommended) / Продолжить с исходным
-описанием». Если в описании есть блок мультизадачи, это мультизадача: перейти
+спросить в точке `resume`: Сначала /omixflow:refine (Recommended) / Продолжить
+с исходным описанием. Если в описании есть блок мультизадачи, это мультизадача: перейти
 к разделу «Мультизадача».
 
 ### 2. База и ветвление
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" base
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" base      # при --base не нужен
 git branch --show-current
 [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ] && echo in-worktree
 ```
@@ -52,12 +56,12 @@ git branch --show-current
   ветка задачи уже есть → «переключиться?»; другая ветка → спросить. Защищённые
   ветки из `workspace.protected` для коммитов запрещены.
 
-Всегда AskUserQuestion: Создать (Recommended) / Работать в текущей / другое имя
-через Other. Ветку создаёт адаптер (`branch`, идемпотентно).
+Всегда спросить в точке `workspace.branch`: Создать (Recommended) / Работать
+в текущей / другое имя. Ветку создаёт адаптер (`branch`, идемпотентно).
 
 **Предмет задачи в базе.** По правилу адаптера workspace проверить, что ключевой
-символ или файл из постановки существует в базе; если нет, остановиться и показать:
-задача могла ответвиться не от той линии.
+символ или файл из постановки существует в базе; если нет, остановиться и спросить
+в точке `deadlock`: задача могла ответвиться не от той линии.
 
 ### 3. Артефакты
 
@@ -67,9 +71,10 @@ scope, tier с обоснованием в одну строку). Затем:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" init "{TASK_DIR}" --id {id} --kind task \
-  --profile {profile} [--tier {tier} [--forced]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session}
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" complete "{TASK_DIR}" refine
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" complete "{TASK_DIR}" start
+  --profile {profile} [--tier {tier} [--forced]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session} \
+  [--lead {NAME} --asked {K}]
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" refine
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
 ```
 
 `--tier` не передаётся при `triage: false`. `log.md`: секция `## Start ✅` с веткой,
@@ -78,7 +83,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" complete "{TASK_DIR}" start
 
 ### 4. Трекер
 
-AskUserQuestion «Перевести {id} в работу?» (Перевести (Recommended) / Пропустить).
+Спросить в точке `tracker.status`: «Перевести {id} в работу?» (Перевести
+(Recommended) / Пропустить).
 `set_status in_work`. Статус недоступен: предупредить, продолжить.
 
 ### 5. Итог (mode manual)
@@ -96,7 +102,8 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
    маркера → СТОП); `multitask.py validate --from {desc} --repos {resolve.py repo
    --list}`; ошибки → СТОП, предложить `refine --multitask`.
 2. Ветка мультизадачи `{workspace.branch}` с `{id}` от base, идемпотентно,
-   с подтверждением. При `multitask.push: true` запушить сразу.
+   с подтверждением в точке `workspace.branch`. При `multitask.push: true`
+   запушить сразу.
 3. `TASK_DIR = {artifacts.dir}/{id}`: `multitask.md` из блока
    (`multitask.py file --from {desc} --id {id} --title "{summary}"`), постановки
    частей дополнить из описания и уточнённой формулировки; `state.py init --kind
@@ -107,11 +114,11 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
    `state.py set {TASK_DIR} 'repos.{name}={"ref":"{ref}","sha":"{sha}"}'`.
    Репозиторий, впервые появившийся в части после старта, снимается при старте его
    первой части.
-5. `state.py complete` refine и start. Коммит; при `part_isolation: shared` пути
+5. `state.py finish` refine и start. Коммит; при `part_isolation: shared` пути
    явно (`state.yaml`, `multitask.md`, `log.md` мультизадачи), никогда не «все
    изменения».
-6. Статус трекера in_work с подтверждением; `comment`: «Мультизадача стартована:
-   N частей, ветка `{branch}`, волн: K».
+6. Статус трекера in_work в точке `tracker.status`; `comment` в точке
+   `tracker.comment`: «Мультизадача стартована: N частей, ветка `{branch}`, волн: K».
 7. Ветки частей здесь не создаются.
 
 ### Старт части (`{id} --part {part}`)
@@ -140,9 +147,10 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
    `part_isolation: shared`: ни ветки, ни worktree; каталог части в основном дереве
    на `task/{id}`.
 4. `TASK_DIR = {artifacts.dir}/{id}/{part}`: `task.md` из секции части
-   в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}`
+   в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}
+   [--lead {NAME} --asked {K}]`
    (профиль наследуется из состояния мультизадачи, `--tier` только при
-   `triage: true`); затем `state.py complete` refine и start; `log.md`. Коммит; при
+   `triage: true`); затем `state.py finish` refine и start; `log.md`. Коммит; при
    `part_isolation: shared` только пути каталога части.
 5. Статус самой задачи не трогать: он уровня мультизадачи.
 
@@ -167,6 +175,7 @@ AskUserQuestion «Перевести {id} в работу?» (Перевести
 
 - task.md и state.yaml обязательны: без них пайплайн не двигается.
 - Исходная формулировка сохраняется as-is.
-- Ветвление и статус только с подтверждением.
+- Ветвление и статус только с подтверждением в точках `workspace.branch`
+  и `tracker.status`.
 - Постановку здесь не анализировать: для этого `refine`.
 - Одиночный путь не меняется от существования мультизадач.

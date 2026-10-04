@@ -23,6 +23,12 @@ lang, workspace.
 
 ## Алгоритм
 
+### 0. Синхронизация с базой
+
+`sync.py check TASK_DIR`; `moved: true` → синхронизация по возможности `sync` порта
+workspace до гейтов и до ревью: ревью видит итоговое дерево, и разрешения конфликтов
+входят в его предмет. Порядок как в `implement`, «Синхронизация с базой».
+
 ### 1. Полный прогон гейтов
 
 Все гейты адаптера lang: typecheck, test, lint, плюс build и e2e, если заданы
@@ -46,22 +52,23 @@ SendMessage живому `reviewer-{id}` или спавн с `name: reviewer-{i
 
 `ARTIFACT_PATHS`: spec.md, plan.md (если есть), все изменённые файлы ветки.
 Категории: code, tests, spec-sync, architecture.
+`FINDINGS_PATH: {TASK_DIR}/review/review-pass{N}.json`: findings читаются из файла.
 
 ### 3. Findings
 
 По review-cycle.md: `suggestion` auto-accept; `warning` категорий code, tests,
 spec-sync с понятным фиксом auto-accept; `warning [architecture]` и `critical`
-эскалация пакетами до четырёх по dialog.md. Low-confidence findings показывать
-разработчику, а не молча принимать.
+эскалация в точке `finding`. Low-confidence findings тоже идут в точку `finding`,
+а не принимаются молча.
 
 ### 4. FIX
 
 По исполнителю категории: code и spec-sync → coder (SendMessage `coder-{id}`
 или спавн с `name: coder-{id}`), tests → tester (спавн с `name: tester-{id}`,
 после coder), spec и plan → architect (SendMessage `architect-{id}` или спавн
-с `name: architect-{id}`), architecture → решение разработчика. Re-review: SendMessage
-тому же reviewer по тем же id. Не больше `limits.review_passes` проходов, затем
-эскалация с нерешёнными findings.
+с `name: architect-{id}`), architecture → решение в точке `finding`. Re-review:
+SendMessage тому же reviewer по тем же id. Не больше `limits.review_passes` проходов,
+затем эскалация нерешённых findings в точке `finding`.
 
 ### 5. Коммит и состояние
 
@@ -69,7 +76,7 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 fix: address review findings for {id}
 ```
 
-`state.py complete TASK_DIR review`; log.md:
+`state.py finish TASK_DIR review`; log.md:
 
 ```markdown
 ## Review ✅
@@ -78,8 +85,8 @@ fix: address review findings for {id}
 - Проходов: {M}
 ```
 
-Отклонённые и отложенные findings записываются с причиной: это решения
-разработчика, они трассируются.
+Отклонённые и отложенные findings записываются с причиной строкой решения
+(`artifacts.md`, «log.md»): они трассируются.
 
 ## Итог (mode manual)
 
@@ -91,6 +98,6 @@ Review завершён: findings {N}, проходов {M}, ревью approved
 ## Правила
 
 - Ревью обязателен.
-- Critical без решения разработчика останавливает фазу.
+- Critical без решения в точке `finding` останавливает фазу.
 - Reviewer в MODE fix только когда у finding'а нет своего исполнителя.
 - Фиксы не расширяют scope: bonus-улучшения не принимаются.

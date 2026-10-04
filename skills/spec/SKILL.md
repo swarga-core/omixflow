@@ -19,8 +19,8 @@ Task spec: дельта, а не полное состояние. Что мен�
 ## Предусловия
 
 `task.md`; `research.md` для M и L (для S секция `## Research` в spec.md);
-`state.py next` даёт `spec`. Если `spec.md` уже полный: показать резюме,
-AskUserQuestion «Пропустить (Recommended) / Создать заново».
+`state.py next` даёт `spec`. Если `spec.md` уже полный: показать резюме и спросить
+в точке `resume`: Пропустить (Recommended) / Создать заново.
 
 ## Алгоритм по тирам
 
@@ -40,7 +40,8 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
 2. Один спавн `reviewer` с `name: reviewer-{id}`, `MODE: review`, ASPECTS обоих
    артефактов (completeness, clarity, consistency, dependencies; coverage, ordering,
    granularity, test checkpoints, files), `ARTIFACT_PATHS: task.md, research.md,
-   spec.md, plan.md`, категории spec, plan, architecture.
+   spec.md, plan.md`, категории spec, plan, architecture,
+   `FINDINGS_PATH: {TASK_DIR}/review/spec-pass{N}.json`.
 3. Findings и FIX-цикл по review-cycle.md; фиксы идут architect'у по имени.
 4. Состояние: `complete spec`, `complete plan`. log.md: обе секции с числом findings
    и проходов. Фаза plan затем пропускается.
@@ -53,9 +54,9 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    completeness (покрывает ли spec требования task.md), clarity (каждое изменение
    однозначно), consistency (изменения между слайсами согласованы), dependencies
    (все затронутые пакеты найдены). `ARTIFACT_PATHS: task.md, research.md, spec.md`.
-   Категории spec, architecture.
+   Категории spec, architecture. `FINDINGS_PATH: {TASK_DIR}/review/spec-pass{N}.json`.
 3. Findings: `suggestion` auto-accept; `warning [spec]` с понятным фиксом
-   auto-accept; `warning [architecture]` и `critical` эскалация по dialog.md.
+   auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. FIX: SendMessage `architect-{id}` с `MODE: fix` и принятыми findings. Re-review:
    SendMessage `reviewer-{id}` по тем же id. Не больше `limits.review_passes`.
 5. Состояние: `complete spec`. log.md: `## Spec ✅`, findings, проходов.
@@ -73,6 +74,6 @@ Spec завершён: {TASK_DIR}/spec.md, findings: {N} ({resolved}), прох�
 ## Правила
 
 - spec = дельта.
-- Ревью обязателен в M и L; critical без решения разработчика останавливает фазу.
+- Ревью обязателен в M и L; critical без решения в точке `finding` останавливает фазу.
 - architect читает код сам: Source Files Map говорит что читать.
 - Спавн architect и reviewer без `name` это дефект: FIX-цикл идёт по имени.

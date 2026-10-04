@@ -5,7 +5,7 @@
 version: 1
 
 # plugin:
-#   min_version: 0.1.0
+#   min_version: 0.3.0
 
 # Источник задач. Адаптеры плагина: youtrack, local, none. Свой: файл
 # .claude/omixflow/tracker/{name}.md с port: tracker.
@@ -38,6 +38,8 @@ workspace:
   #   - path: omix
   #     readonly: true
   integration: squash                  # squash | merge (интеграция части мультизадачи)
+  # sync: auto                         # auto | merge | rebase: как подтягивать ушедшую базу
+  # delivery: pr                       # pr | integrate | lead: как сдаётся задача (под лидом по умолчанию lead)
   # protected: [master, "release/*"]   # ветки, куда нельзя коммитить напрямую
   # repos:                             # чужие репозитории для исследования (профиль research)
   #   omix-lib:                        # имя: slug, им ссылается колонка repo блока мультизадачи
@@ -86,3 +88,26 @@ multitask:
 # Замена агентов ядра агентами проекта (.claude/agents/{name}.md).
 # agents:
 #   coder: my-coder
+
+# Лид: маршрут вопросов сессии, запущенной с --lead; без флага секция не действует.
+# Режимы: developer (разработчик через окно лида), lead (решает лид),
+# direct (разработчик в сессии задачи, лид уведомлён). Ключи policy это
+# идентификаторы точек решения из protocol/dialog.md плагина.
+# lead:
+#   default: developer                 # для точек, не перечисленных в policy
+#   timeout: 10m                       # ожидание ack лида, затем вопрос задаётся в сессии
+#   stall: 15m                         # простой сессии без вопроса дольше этого лид сообщает разработчику
+#   notify: [visible-behaviour]        # решение лида, меняющее видимое поведение, сразу показывается (lead-notify)
+#   actions:                           # собственные действия лида без санкции (трекер и ветки всегда по санкции)
+#     backlog: lead                    # заметки бэклога из гочей
+#     memory: lead                     # память проекта
+#   policy:                            # рекомендуемое: рутину решает лид, постановку и видимое другим разработчик
+#     design-question: lead
+#     finding: lead
+#     resume: lead
+#     gotchas: lead
+#     tracker.comment: lead
+#     tracker.status: lead
+#     workspace.branch: lead
+#     workspace.exit: lead
+#     tracker.describe: developer

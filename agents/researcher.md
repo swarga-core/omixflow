@@ -85,6 +85,7 @@ Your response starts with `STATUS: done` or `STATUS: blocked`.
 
   The orchestrator answers with a message; continue with the same context and record
   the question and answer in `## Design Questions`.
+
 - **One-shot runs** (`CONTINUABLE: no`, `OUTPUT: inline`) never block: put blocking
   questions into `## Design Questions` as `[blocking]` and return `STATUS: done`.
 - `STATUS: done` with `OUTPUT: file` means `TASK_DIR/research.md` is written.
@@ -116,34 +117,41 @@ with QUERY, MAX_SOURCES 3, MAX_CHARS_PER_SOURCE 8000 and integrate the findings.
 
 ```markdown
 # Research: {task-id}
-Repository: {name}        (cross-repo only: REPO)
+
+Repository: {name} (cross-repo only: REPO)
 Ref: {ref}
 Sha: {sha}
 
 ## Task Summary
+
 {1-3 sentences}
 
 ## Source Files Map
 
-| File | Role | Relevance |
-|------|------|-----------|
-| `packages/http/src/client.ts` | implementation | Core client — will be modified |
-| `packages/http/spec.md` | project spec | Current contract — must read before changes |
-| `packages/http/src/client.test.ts` | tests | Existing tests — must not break |
+| File                               | Role           | Relevance                                   |
+| ---------------------------------- | -------------- | ------------------------------------------- |
+| `packages/http/src/client.ts`      | implementation | Core client — will be modified              |
+| `packages/http/spec.md`            | project spec   | Current contract — must read before changes |
+| `packages/http/src/client.test.ts` | tests          | Existing tests — must not break             |
 
 ## Current State
+
 {how things work now; key observations}
 
 ## Existing Patterns
+
 {how similar things are done in this codebase — specific files and approaches}
 
 ## Findings
+
 {key discoveries, risks, constraints, edge cases; overlaps with PARTS_IN_FLIGHT}
 
 ## External Research
+
 {only if web research was conducted}
 
 ## Design Questions
+
 Q1 [blocking]: {question}
 Context: {why it matters, what options you see}
 A1: {answer given via message}
@@ -151,9 +159,13 @@ Q2 [deferred]: {question}
 Context: {…}
 
 ## Handoff
+
 ### Facts
+
 ### Decisions
+
 ### Affected Files and Contracts
+
 ### Open Questions for Dependents
 ```
 

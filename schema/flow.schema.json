@@ -72,6 +72,8 @@
           }
         },
         "integration": { "type": "string", "enum": ["squash", "merge"], "default": "squash" },
+        "delivery": { "type": "string", "enum": ["pr", "integrate", "lead"], "default": "pr", "description": "способ сдачи одиночной задачи на Finalize; у сессии под лидом по умолчанию lead" },
+        "sync": { "type": "string", "enum": ["auto", "merge", "rebase"], "default": "auto", "description": "подтягивание ушедшей базы: auto — rebase, пока в ветке только артефакты, merge после кода" },
         "protected": { "type": "array", "items": { "type": "string" } },
         "repos": {
           "type": "object",
@@ -139,9 +141,45 @@
       "type": "object",
       "description": "маппинг роли на агента проекта: coder: my-coder",
       "additionalProperties": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    },
+    "lead": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "маршрут вопросов сессии, запущенной с --lead; без флага не действует",
+      "properties": {
+        "default": { "$ref": "#/definitions/leadMode", "default": "developer", "description": "режим для точек решения, не перечисленных в policy" },
+        "timeout": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$", "default": "10m", "description": "сколько ждать ack или brief лида, затем вопрос задаётся в сессии; после ack ожидание без ограничения" },
+        "notify": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["visible-behaviour"] },
+          "default": [],
+          "description": "признаки, с которыми решение лида в режиме lead идёт как lead-notify; visible-behaviour: решение меняет видимое поведение продукта"
+        },
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "собственные действия лида без санкции разработчика; трекер, ветки и worktree всегда по санкции",
+          "properties": {
+            "backlog": { "type": "string", "enum": ["lead", "developer"], "default": "lead", "description": "заметки бэклога из гочей на ветке лида" },
+            "memory": { "type": "string", "enum": ["lead", "developer"], "default": "lead", "description": "запись памяти проекта" }
+          }
+        },
+        "stall": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$", "default": "15m", "description": "простой сессии без открытого вопроса дольше этого лид сообщает разработчику как подозрение на зависание" },
+        "policy": {
+          "type": "object",
+          "description": "режим по идентификатору точки решения из protocol/dialog.md",
+          "propertyNames": { "enum": ["statement", "decomposition", "design-question", "research-blocking", "handoff", "finding", "scope-change", "deadlock", "reconcile", "gotchas", "resume", "part-take", "part-blocked", "part-integrate", "delivery", "tracker.describe", "tracker.comment", "tracker.status", "forge.pr", "workspace.branch", "workspace.exit", "workspace.integrate"] },
+          "additionalProperties": { "$ref": "#/definitions/leadMode" }
+        }
+      }
     }
   },
   "definitions": {
+    "leadMode": {
+      "type": "string",
+      "enum": ["developer", "lead", "lead-notify", "precedent", "direct"],
+      "description": "developer: разработчик через окно лида; lead: решает лид; lead-notify: решает лид и сразу показывает разработчику с правом вето; precedent: лид, только по прецеденту разработчика, иначе разработчик; direct: разработчик в сессии задачи, лид уведомлён"
+    },
     "repo": {
       "type": "object",
       "additionalProperties": false,

@@ -119,12 +119,22 @@ def load_schema() -> Dict[str, Any]:
 
 
 def config_get(cfg: Dict[str, Any], dotted: str) -> Any:
+    """Keys may contain dots themselves (`lead.policy.tracker.comment`): at each object
+    level the longest matching key wins."""
+    parts = dotted.split(".")
     cur: Any = cfg
-    for key in dotted.split("."):
-        if isinstance(cur, dict) and key in cur:
-            cur = cur[key]
-        elif isinstance(cur, list) and key.isdigit() and int(key) < len(cur):
-            cur = cur[int(key)]
+    i = 0
+    while i < len(parts):
+        if isinstance(cur, dict):
+            for j in range(len(parts), i, -1):
+                key = ".".join(parts[i:j])
+                if key in cur:
+                    cur, i = cur[key], j
+                    break
+            else:
+                return None
+        elif isinstance(cur, list) and parts[i].isdigit() and int(parts[i]) < len(cur):
+            cur, i = cur[int(parts[i])], i + 1
         else:
             return None
     return cur
@@ -154,8 +164,8 @@ def _resolve_ref(schema: Dict[str, Any], ref: str) -> Dict[str, Any]:
 def validate(instance: Any, schema: Dict[str, Any], node: Optional[Dict[str, Any]] = None,
              path: str = "$") -> List[str]:
     """Validate against the subset of JSON Schema draft-07 used by flow.schema.json:
-    type, required, properties, additionalProperties, enum, items, pattern,
-    minimum, minItems, $ref, definitions."""
+    type, required, properties, additionalProperties, propertyNames, enum, items,
+    pattern, minimum, minItems, $ref, definitions."""
     node = schema if node is None else node
     errors: List[str] = []
     if "$ref" in node:
@@ -195,7 +205,10 @@ def validate(instance: Any, schema: Dict[str, Any], node: Optional[Dict[str, Any
             if req not in instance:
                 errors.append(f"{path}: отсутствует обязательный ключ {req!r}")
         addl = node.get("additionalProperties", True)
+        names = node.get("propertyNames")
         for key, value in instance.items():
+            if names is not None:
+                errors.extend(validate(key, schema, names, f"{path}.{key} (ключ)"))
             if key in props:
                 errors.extend(validate(value, schema, props[key], f"{path}.{key}"))
             elif addl is False:
@@ -207,6 +220,105 @@ def validate(instance: Any, schema: Dict[str, Any], node: Optional[Dict[str, Any
 
 def validate_config(cfg: Dict[str, Any]) -> List[str]:
     return validate(cfg, load_schema())
+
+
+# ------------------------------------------------------------ managed blocks
+
+def _block_res(kind: str) -> Tuple["re.Pattern[str]", "re.Pattern[str]"]:
+    k = re.escape(kind)
+    start = re.compile(rf"^[ \t]*<!--[ \t]*omixflow:{k}:start((?:[ \t]+[^\s>]+)*)[ \t]*-->[ \t\r]*$", re.M)
+    end = re.compile(rf"^[ \t]*<!--[ \t]*omixflow:{k}:end[ \t]*-->[ \t\r]*$", re.M)
+    return start, end
+
+
+def outside_dir(files: List[str], directory: str) -> List[str]:
+    """Files not under `directory` (e.g. the artifacts directory)."""
+    d = directory.strip("/")
+    return [f for f in files if not (f == d or f.startswith(d + "/"))]
+
+
+def replace_managed_block(text: str, kind: str, body: str, before: Optional[str] = None) -> str:
+    """Replace the content between whole-line markers `<!-- omixflow:{kind}:start -->` and
+    `<!-- omixflow:{kind}:end -->` (port tracker, «Управляемые блоки»), keeping the marker
+    lines verbatim. Without a block: insert it before the first line equal to `before`
+    (e.g. the local tracker's `## Журнал`), else append it at the end."""
+    start_re, end_re = _block_res(kind)
+    starts = list(start_re.finditer(text))
+    if len(starts) > 1:
+        raise OmixflowError(f"блок omixflow:{kind}: маркер начала встречается {len(starts)} раза")
+    content = body.rstrip("\n") + "\n"
+    block = f"<!-- omixflow:{kind}:start -->\n{content}<!-- omixflow:{kind}:end -->\n"
+    if not starts:
+        if before is not None:
+            lines = text.splitlines(keepends=True)
+            for i, line in enumerate(lines):
+                if line.strip() == before.strip():
+                    return "".join(lines[:i]) + block + "\n" + "".join(lines[i:])
+        return (text.rstrip("\n") + "\n\n" if text.strip() else "") + block
+    end = end_re.search(text, starts[0].end())
+    if end is None:
+        raise OmixflowError(f"блок omixflow:{kind}: нет маркера конца")
+    return text[:starts[0].end()] + "\n" + content + text[end.start():]
+
+
+# ------------------------------------------------------------ decision points
+
+DIALOG_PATH = PLUGIN_ROOT / "protocol" / "dialog.md"
+POINTS_HEADER = "| id | Вид | Точка | Режим |"
+POINT_KINDS = ("содержание", "маршрут", "внешнее")
+
+
+LEAD_DEFAULT_MODE = "developer"   # mirrors lead.default in the schema (tests/test_lint.py)
+LEAD_DEFAULT_TIMEOUT = "10m"      # mirrors lead.timeout in the schema
+LEAD_DEFAULT_STALL = "15m"        # mirrors lead.stall in the schema
+LEAD_DEFAULT_ACTIONS = {"backlog": "lead", "memory": "lead"}  # mirrors lead.actions in the schema
+_DURATION_RE = re.compile(r"^([1-9][0-9]*)([smh])$")
+
+
+def duration_seconds(text: str) -> int:
+    m = _DURATION_RE.match(text)
+    if not m:
+        raise OmixflowError(f"длительность вида 30s, 10m или 1h, получено {text!r}")
+    return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+def lead_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """lead.default, lead.timeout, lead.stall, lead.actions and lead.notify with defaults;
+    durations in seconds."""
+    lead = cfg.get("lead") or {}
+    return {"default": lead.get("default") or LEAD_DEFAULT_MODE,
+            "timeout": duration_seconds(str(lead.get("timeout") or LEAD_DEFAULT_TIMEOUT)),
+            "stall": duration_seconds(str(lead.get("stall") or LEAD_DEFAULT_STALL)),
+            "actions": {**LEAD_DEFAULT_ACTIONS, **(lead.get("actions") or {})},
+            "notify": list(lead.get("notify") or [])}
+
+
+def lead_route(cfg: Dict[str, Any], point: str) -> Dict[str, Any]:
+    """Route of a question at a decision point for a session with a lead (protocol/lead.md):
+    lead.policy.{point}, else lead.default, else developer; timeout in seconds."""
+    kinds = dict(decision_points())
+    if point not in kinds:
+        raise OmixflowError(f"неизвестная точка решения {point!r}; есть: {', '.join(kinds)}")
+    settings = lead_settings(cfg)
+    mode = ((cfg.get("lead") or {}).get("policy") or {}).get(point) or settings["default"]
+    return {"point": point, "kind": kinds[point], "mode": mode, "timeout": settings["timeout"]}
+
+
+def decision_points(path: Path = DIALOG_PATH) -> List[Tuple[str, str]]:
+    """(id, kind) of every decision point, in table order, from protocol/dialog.md."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip() == POINTS_HEADER]
+    if len(starts) != 1:
+        raise OmixflowError(f"{path}: нужна ровно одна таблица с заголовком {POINTS_HEADER!r}")
+    points: List[Tuple[str, str]] = []
+    for line in lines[starts[0] + 2:]:
+        if not line.strip().startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) != 4 or not re.fullmatch(r"`[^`]+`", cells[0]):
+            raise OmixflowError(f"{path}: строка точки решения не по формату: {line.strip()}")
+        points.append((cells[0].strip("`"), cells[1]))
+    return points
 
 
 # ---------------------------------------------------------------- frontmatter

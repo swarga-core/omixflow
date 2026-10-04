@@ -1,5 +1,8 @@
 """Lint the plugin sources for terminology and layering rules.
 
+Files ignored by git (local drafts, scratch notes) are not plugin sources and are
+skipped; outside a git checkout every file is linted.
+
 - Forbidden terms (see protocol/glossary.md) must not appear anywhere except the
   files that explain the ban.
 - Core (protocol/, skills/, agents/) must not name adapter tools: package managers,
@@ -8,13 +11,20 @@
 - Every SendMessage target mentioned in a skill has a named spawn in the same skill
   (activates once skills are transferred; passes vacuously until then).
 - The profiles table in protocol/profiles.md equals state.PROFILES.
+- Script subcommands avoid shell builtins that a worktree-isolated session refuses;
+  the core calls `state.py finish`, never the `complete` alias.
+- Decision point ids in protocol/dialog.md are unique and well-formed (kebab-case,
+  external actions as `{port}.{action}`); protocol and skills reference known points only.
 """
 from __future__ import annotations
 
+import functools
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from typing import Optional, Set
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -34,13 +44,28 @@ TOOL_NAMES = re.compile(
 CORE_DIRS = ("protocol", "skills", "agents")
 
 
+@functools.lru_cache(maxsize=None)
+def git_visible_files() -> Optional[Set[Path]]:
+    """Tracked plus untracked-but-not-ignored files; None outside a git checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=ROOT, capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {ROOT / rel for rel in out.decode("utf-8").split("\0") if rel}
+
+
 def iter_files(*dirs: str):
     bases = [ROOT / d for d in dirs] if dirs else [ROOT]
+    visible = git_visible_files()
     for base in bases:
         if not base.exists():
             continue
         for path in sorted(base.rglob("*")):
             if any(part in SKIP_DIRS for part in path.relative_to(ROOT).parts):
+                continue
+            if visible is not None and path not in visible:
                 continue
             if path.is_file() and path.suffix in TEXT_SUFFIXES:
                 yield path
@@ -155,6 +180,94 @@ class ProfilesLint(unittest.TestCase):
         for name, props in state.PROFILES.items():
             with self.subTest(profile=name):
                 self.assertEqual(table[name], props)
+
+
+class ScriptCallLint(unittest.TestCase):
+    """A worktree-isolated session rejects commands it reads as shell builtins that run
+    strings (`state.py complete` was refused in five live runs)."""
+    RISKY = {"complete", "compgen", "eval", "exec", "source", "trap", "command", "builtin", "alias", "bind"}
+    PARSER_RE = re.compile(r'add_parser\(\s*"([a-z-]+)"')
+    COMPLETE_CALL_RE = re.compile(r"""state\.py["']?\s+complete\b""")
+
+    def test_script_subcommands_avoid_risky_builtins(self):
+        hits = []
+        for path in sorted((ROOT / "scripts").glob("*.py")):
+            hits += [f"scripts/{path.name}: {m.group(1)}" for m in self.PARSER_RE.finditer(
+                path.read_text(encoding="utf-8")) if m.group(1) in self.RISKY]
+        self.assertEqual(hits, [], "подкоманды совпадают со встроенными командами shell:\n" + "\n".join(hits))
+
+    def test_core_calls_finish_not_complete(self):
+        hits = []
+        for path in iter_files(*CORE_DIRS):
+            rel = path.relative_to(ROOT).as_posix()
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.COMPLETE_CALL_RE.search(line):
+                    hits.append(f"{rel}:{n}: {line.strip()}")
+        self.assertEqual(hits, [], "state.py complete вместо finish:\n" + "\n".join(hits))
+
+
+class DecisionPointsLint(unittest.TestCase):
+    ID_RE = re.compile(r"^[a-z]+(-[a-z]+)*$")
+    REF_RE = re.compile(r"точк[аеиу] `([^`]+)`")
+    PIPELINE_SKILLS = ("develop", "refine", "start", "research", "spec", "plan",
+                       "implement", "review", "finalize")
+    DIRECT_MODE_RE = re.compile(r"AskUserQuestion|\bAUQ\b|гибрид", re.I)
+
+    def points(self):
+        try:
+            return lib.decision_points()
+        except lib.OmixflowError as e:
+            self.fail(str(e))
+
+    def test_lead_defaults_match_schema(self):
+        lead = lib.load_schema()["properties"]["lead"]["properties"]
+        self.assertEqual(lead["default"]["default"], lib.LEAD_DEFAULT_MODE)
+        self.assertEqual(lead["timeout"]["default"], lib.LEAD_DEFAULT_TIMEOUT)
+        self.assertEqual(lead["stall"]["default"], lib.LEAD_DEFAULT_STALL)
+        self.assertEqual({k: v["default"] for k, v in lead["actions"]["properties"].items()},
+                         lib.LEAD_DEFAULT_ACTIONS)
+
+    def test_schema_policy_keys_equal_points(self):
+        schema = lib.load_schema()
+        names = schema["properties"]["lead"]["properties"]["policy"]["propertyNames"]["enum"]
+        self.assertEqual(names, [point for point, _ in self.points()],
+                         "ключи lead.policy в схеме расходятся с таблицей protocol/dialog.md")
+
+    def test_ids_are_well_formed_and_unique(self):
+        points = self.points()
+        ids = [point for point, _ in points]
+        self.assertTrue(ids)
+        self.assertEqual(len(ids), len(set(ids)), "идентификаторы точек повторяются")
+        for point, kind in points:
+            with self.subTest(point=point):
+                self.assertIn(kind, lib.POINT_KINDS)
+                port, dot, action = point.rpartition(".")
+                self.assertEqual(bool(dot), kind == "внешнее",
+                                 f"{point}: вид `внешнее` ⇔ идентификатор вида {{порт}}.{{действие}}")
+                if dot:
+                    self.assertIn(port, lib.PORTS, f"{point}: неизвестный порт")
+                self.assertRegex(action, self.ID_RE)
+
+    def test_pipeline_skills_do_not_pick_dialog_mode(self):
+        """Pipeline skills name decision points; the mode lives in protocol/dialog.md."""
+        hits = []
+        for name in self.PIPELINE_SKILLS:
+            path = ROOT / "skills" / name / "SKILL.md"
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.DIRECT_MODE_RE.search(line):
+                    hits.append(f"skills/{name}/SKILL.md:{n}: {line.strip()}")
+        self.assertEqual(hits, [], "режим диалога в скиле пайплайна вместо точки решения:\n"
+                         + "\n".join(hits))
+
+    def test_references_name_known_points(self):
+        ids = {point for point, _ in self.points()}
+        hits = []
+        for path in iter_files("protocol", "skills"):
+            rel = path.relative_to(ROOT).as_posix()
+            for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                hits += [f"{rel}:{n}: {m.group(1)}" for m in self.REF_RE.finditer(line)
+                         if m.group(1) not in ids]
+        self.assertEqual(hits, [], "ссылки на неизвестные точки решения:\n" + "\n".join(hits))
 
 
 if __name__ == "__main__":

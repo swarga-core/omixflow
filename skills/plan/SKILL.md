@@ -19,7 +19,7 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 `task.md`, `research.md`, `spec.md`; `state.py next` даёт `plan`. Если состояние
 говорит, что plan уже завершён (S и M: план создан вместе со spec), сообщить об
 этом и ничего не делать. Если `plan.md` существует при `next == plan`: обзор
-(число шагов), AskUserQuestion «Пропустить (Recommended) / Создать заново».
+(число шагов) и вопрос в точке `resume`: Пропустить (Recommended) / Создать заново.
 
 ## Алгоритм
 
@@ -35,11 +35,12 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
    (порядок зависимостей), granularity (шаг атомарен и верифицируем), test
    checkpoints (у каждого шага), files (пути точны, новые помечены CREATE).
    `ARTIFACT_PATHS: spec.md, plan.md`. Категории plan, architecture.
+   `FINDINGS_PATH: {TASK_DIR}/review/plan-pass{N}.json`.
 3. **Findings.** `suggestion` auto-accept; `warning [plan]` с понятным фиксом
-   auto-accept; `warning [architecture]` и `critical` эскалация по dialog.md.
+   auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
    тому же reviewer по тем же id, не больше `limits.review_passes`.
-5. **Состояние.** `state.py complete TASK_DIR plan`; `state.py set TASK_DIR
+5. **Состояние.** `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
    steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов. Коммит.
 
 ## Итог (mode manual)

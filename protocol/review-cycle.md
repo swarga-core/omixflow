@@ -6,23 +6,26 @@
 ## Цикл
 
 1. Спавн **reviewer** через Agent tool с параметром `name` (`reviewer-{id}` или
-   `reviewer-{id}-{part}`), MODE: review, с ASPECTS и ARTIFACT_PATHS фазы.
-2. Ответ reviewer заканчивается JSON-блоком контракта. Решения принимаются программно
-   по `severity` и `category`:
+   `reviewer-{id}-{part}`), MODE: review, с ASPECTS и ARTIFACT_PATHS фазы
+   и `FINDINGS_PATH: {TASK_DIR}/review/{phase}-pass{N}.json`.
+2. Reviewer пишет полный контракт в `FINDINGS_PATH`, а в ответе даёт сводку и путь:
+   длинный ответ агента обрезается в канале сообщений. Оркестратор читает файл.
+   Решения принимаются программно по `severity` и `category`:
    - `suggestion` любой категории: auto-accept;
    - `warning` категорий `spec`, `plan`, `code`, `tests`, `spec-sync` с понятным
      фиксом: auto-accept;
-   - `warning [architecture]` и любой `critical`: эскалация разработчику по `dialog.md`
-     (гибрид, пакетами до четырёх).
+   - `warning [architecture]` и любой `critical`: эскалация в точке `finding`
+     (`dialog.md`).
 3. FIX выполняет **исполнитель по категории**: `spec` и `plan` идут architect'у задачи,
    `code` и `spec-sync` идут coder'у, `tests` идут tester'у (после coder). Reviewer
    в MODE fix только когда правка тривиальна и своего исполнителя у задачи нет.
    Исполнитель получает принятые findings с решениями через SendMessage, потому что
    он уже существует как continuation-агент.
-4. Re-review: SendMessage тому же reviewer по имени, не новый спавн. Проверяются только
-   исправленные findings по тем же id; новые дефекты, внесённые фиксами, получают
-   новые id.
-5. Не больше `limits.review_passes` проходов, затем эскалация с нерешёнными findings.
+4. Re-review: SendMessage тому же reviewer по имени, не новый спавн, с новым
+   `FINDINGS_PATH` прохода. Проверяются только исправленные findings по тем же id;
+   новые дефекты, внесённые фиксами, получают новые id.
+5. Не больше `limits.review_passes` проходов, затем эскалация нерешённых findings
+   в точке `finding`.
 
 ## Контракт findings
 

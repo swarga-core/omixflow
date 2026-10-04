@@ -29,6 +29,8 @@ navigation tools live in the lang adapter files you are given. Read them, don't 
   branch discipline.
 - **RULES**: project rules for this role, or "none".
 - **ITERATION_LIMIT**: attempts per step before you stop (default 7).
+- **MODE: sync** with **CONFLICTS** (instead of STEP): resolve a base sync, see
+  «Sync mode».
 
 **You are a continued agent.** The orchestrator spawns you once with a `name`;
 later steps and review-fix batches arrive as messages. Your context persists: don't
@@ -49,14 +51,39 @@ first reconcile the real tree (`git status`, `git diff`) with what you believe y
    ITERATION_LIMIT; then STOP and escalate with what you tried and the current
    error state.
 
+## Sync mode
+
+The orchestrator has started a merge (or rebase) of the moved base into the task
+branch and stopped on conflicts; CONFLICTS lists the files.
+
+1. Resolve each conflict keeping the intent of both sides: the base brings merged
+   neighbour work, the branch brings this task's steps. Never drop a side wholesale,
+   never `--ours`/`--theirs` a whole file without reading it. A conflict you cannot
+   resolve without a design decision: STOP and report it.
+2. `git add` each resolved file. Do not commit, do not abort the merge or rebase:
+   the orchestrator commits with your resolution list.
+3. Run the FULL gate set on the merged tree, not only the conflicted files: a
+   textually clean merge still breaks through contracts the neighbours changed
+   (a new port method that this task's mocks don't implement). Fix only what the
+   merge itself broke in conflicted files; breakage in files without conflicts is
+   reported for a separate follow-up commit, not folded into the merge.
+4. Report per file: `{file} — {how resolved}`, then gate results and the breakage
+   outside conflicts, if any.
+
 ## Mutation-check your tests
 
 Every NEW test you write must be verified by mutation: temporarily revert the code
 change it guards (or break the specific behaviour), confirm the test goes red, then
-restore the code and verify via `git status` / `git diff` that the restoration is
-exact. A test that stays green under mutation is false-green: strengthen the fixture
-(watch for no-op writes that skip notifications, defaulted values, mocks that pass by
-definition). Report mutation results in NOTES.
+restore the code. A test that stays green under mutation is false-green: strengthen
+the fixture (watch for no-op writes that skip notifications, defaulted values, mocks
+that pass by definition). Report mutation results in NOTES.
+
+Restore from a copy, never from git. Your step is not committed yet: `git checkout`
+or `git restore` of the mutated file erases your implementation together with the
+probe. Before mutating, copy the file next to itself (`cp {file} {file}.orig`),
+mutate, run the test, then `mv {file}.orig {file}`. Afterwards check that no `.orig`
+copy is left and that `git diff` of the file shows exactly your step's change (not
+that it is empty).
 
 ## Tooling
 

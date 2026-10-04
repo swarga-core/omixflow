@@ -62,6 +62,88 @@ class StateTests(unittest.TestCase):
             self.assertEqual(run("state.py", "get", d, "multitask.part").stdout.strip(), "auth")
 
 
+class LeadStateTests(unittest.TestCase):
+    def init(self, tmp: str, *extra: str) -> str:
+        d = str(Path(tmp) / ".tasks" / "AL-7")
+        self.assertEqual(run("state.py", "init", d, "--id", "AL-7", "--kind", "task", *extra).returncode, 0)
+        return d
+
+    def lead(self, d: str) -> dict:
+        return json.loads(run("state.py", "get", d, "lead").stdout)
+
+    def test_finish_advances_and_complete_stays_an_alias(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp)
+            self.assertEqual(run("state.py", "finish", d, "refine").stdout.strip(), "start")
+            self.assertEqual(run("state.py", "complete", d, "start").stdout.strip(), "research")
+            self.assertEqual(run("state.py", "finish", d, "lunch").returncode, 2)
+
+    def test_finish_reminds_about_lead_notice(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = self.init(tmp)
+            proc = run("state.py", "finish", plain, "refine")
+            self.assertEqual((proc.stdout.strip(), proc.stderr.strip()), ("start", ""))
+            led = str(Path(tmp) / ".tasks" / "AL-9")
+            run("state.py", "init", led, "--id", "AL-9", "--kind", "task", "--lead", "lead-omix")
+            proc = run("state.py", "finish", led, "refine")
+            self.assertEqual(proc.stdout.strip(), "start")
+            self.assertIn("под лидом lead-omix: отправь notice о фазе refine", proc.stderr)
+
+    def test_init_without_lead_has_no_lead_and_ask_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp)
+            self.assertNotIn("lead", json.loads(run("state.py", "get", d).stdout))
+            proc = run("state.py", "ask", d, "Q1:wait")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("без лида", proc.stderr)
+
+    def test_ask_ack_close_cycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp, "--lead", "lead-omix")
+            self.assertEqual(self.lead(d), {"name": "lead-omix", "asked": 0, "open": []})
+            self.assertEqual(run("state.py", "ask", d, "Q1:wait", "F3:nowait").stdout.strip(), "1")
+            self.assertEqual(run("state.py", "ask", d, "P1:wait").stdout.strip(), "2")
+            run("state.py", "ack", d, "1", "Q1=решаю", "F3=E-7")
+            lead = self.lead(d)
+            self.assertEqual(lead["asked"], 2)
+            self.assertEqual(lead["open"][0], {"n": 1, "items": {"Q1": "wait", "F3": "nowait"},
+                                               "ack": {"Q1": "решаю", "F3": "E-7"}})
+            # partial decision closes one item; the question stays open
+            self.assertEqual(json.loads(run("state.py", "close", d, "1", "Q1").stdout), {"F3": "nowait"})
+            self.assertEqual(self.lead(d)["open"][0]["ack"], {"F3": "E-7"})
+            # closing the rest removes the question; numbering survives
+            run("state.py", "close", d, "1")
+            self.assertEqual([q["n"] for q in self.lead(d)["open"]], [2])
+            self.assertEqual(run("state.py", "ask", d, "P1:wait").stdout.strip(), "3")
+
+    def test_init_continues_question_numbering(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp, "--lead", "lead-omix", "--asked", "2")
+            self.assertEqual(run("state.py", "ask", d, "P1:wait").stdout.strip(), "3")
+            other = str(Path(tmp) / ".tasks" / "AL-8")
+            proc = run("state.py", "init", other, "--id", "AL-8", "--kind", "task", "--asked", "2")
+            self.assertEqual(proc.returncode, 2)
+
+    def test_lead_commands_reject_bad_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp, "--lead", "lead-omix")
+            run("state.py", "ask", d, "Q1:wait")
+            cases = [
+                ("ask", d, "Q1"),                 # no wait flag
+                ("ask", d, "Q1:maybe"),           # unknown wait flag
+                ("ask", d, "Q1:wait", "Q1:nowait"),  # duplicate label
+                ("ack", d, "1", "Q9=решаю"),      # unknown item
+                ("ack", d, "1", "Q1"),            # no value
+                ("ack", d, "5", "Q1=решаю"),      # question not open
+                ("close", d, "1", "Q9"),          # unknown item
+                ("close", d, "5"),                # question not open
+            ]
+            for args in cases:
+                with self.subTest(args=args):
+                    self.assertEqual(run("state.py", *args).returncode, 2)
+            self.assertEqual(self.lead(d)["asked"], 1)
+
+
 class ProfileTests(unittest.TestCase):
     def init(self, d: str, *args: str) -> subprocess.CompletedProcess:
         return run("state.py", "init", d, *args)

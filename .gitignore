@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .DS_Store
 .pytest_cache/
+
+# Local drafts of plugin issues from live runs; never committed
+/issues-*.md

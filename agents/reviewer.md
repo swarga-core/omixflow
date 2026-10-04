@@ -29,6 +29,9 @@ probes in the working tree.
   read-only analysis tools (references of a changed symbol, unused exports). The
   workspace adapter lists read-only paths and submodule rules.
 - **RULES**: project rules for this role, or "none".
+- **FINDINGS_PATH** (review mode): absolute path of the JSON file for this pass's
+  findings, inside TASK_DIR (`…/review/{phase}-pass{N}.json`). Each re-review brings
+  its own path.
 
 **You are a continued agent.** One spawn per review cycle with a `name`; FIX and
 RE-REVIEW instructions arrive as follow-up messages. Your context persists: don't
@@ -43,9 +46,12 @@ depends on a changed symbol; use the adapter's structural search for pattern che
 
 ### Finding format (JSON contract)
 
-Your final message MUST end with a single fenced ```json block; the orchestrator
-parses it programmatically. Prose analysis before the block is welcome, but the
-block is the contract:
+With FINDINGS_PATH: write the contract below to that file (create the directory if
+needed) and end your message with a short summary only: counts by severity, the
+blocking ids, the recommendation and the path. Long replies get truncated in the
+message channel; the file is the contract the orchestrator parses. Without
+FINDINGS_PATH: end your final message with the contract as a single fenced ```json
+block. The contract:
 
 ```json
 {
@@ -72,22 +78,22 @@ block is the contract:
 
 ### Severity
 
-| Severity | Meaning | Examples |
-|---|---|---|
-| critical | broken, won't compile, data loss, security hole | missing import causes a runtime error; spec contradicts itself |
-| warning | incomplete, inconsistent, potential problem | missing edge case in tests; type not matching spec; undocumented breaking change |
-| suggestion | improvement, style, minor | better name; extract helper; add doc comment |
+| Severity   | Meaning                                         | Examples                                                                         |
+| ---------- | ----------------------------------------------- | -------------------------------------------------------------------------------- |
+| critical   | broken, won't compile, data loss, security hole | missing import causes a runtime error; spec contradicts itself                   |
+| warning    | incomplete, inconsistent, potential problem     | missing edge case in tests; type not matching spec; undocumented breaking change |
+| suggestion | improvement, style, minor                       | better name; extract helper; add doc comment                                     |
 
 ### Categories
 
-| Category | Covers | Fixed by |
-|---|---|---|
-| code | code quality, patterns, safety, performance | coder |
-| tests | coverage, test quality, missing cases | tester |
-| spec-sync | spec says X, code does Y (or vice versa) | coder |
-| spec | problems in the specification itself | architect |
-| plan | problems in the implementation plan | architect |
-| architecture | architectural decisions, trade-offs | escalate to the developer |
+| Category     | Covers                                      | Fixed by                  |
+| ------------ | ------------------------------------------- | ------------------------- |
+| code         | code quality, patterns, safety, performance | coder                     |
+| tests        | coverage, test quality, missing cases       | tester                    |
+| spec-sync    | spec says X, code does Y (or vice versa)    | coder                     |
+| spec         | problems in the specification itself        | architect                 |
+| plan         | problems in the implementation plan         | architect                 |
+| architecture | architectural decisions, trade-offs         | escalate to the developer |
 
 ### Aspects by phase
 
@@ -112,12 +118,14 @@ Used only when the orchestrator has no better-suited agent for the category.
 ```json
 {
   "fixes": [
-    {"finding": 2, "file": "packages/http/src/types.ts", "change": "timeout made optional"}
+    {
+      "finding": 2,
+      "file": "packages/http/src/types.ts",
+      "change": "timeout made optional"
+    }
   ],
-  "gates": {"typecheck": "pass", "test": "245/245", "lint": "pass"},
-  "remaining": [
-    {"finding": 5, "reason": "could not fix because ..."}
-  ]
+  "gates": { "typecheck": "pass", "test": "245/245", "lint": "pass" },
+  "remaining": [{ "finding": 5, "reason": "could not fix because ..." }]
 }
 ```
 

@@ -7,7 +7,8 @@ Exit code: 0 all OK or WARN, 1 at least one FAIL, 2 usage/config error.
 --init writes a draft .claude/omixflow/flow.yaml from the template plus
 auto-detected values (never overwrites without --force) and then runs checks.
 Each workspace.repos entry gets a `repo:{name}` section (slug, path, git, remote,
-ref, flow.yaml, research worktrees).
+ref, flow.yaml, research worktrees). A `lead` section summarises the question
+policy, lists external actions the lead confirms alone and warns for the sensitive ones.
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ import omixflow_lib as lib  # noqa: E402
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
 REVIEW_WORKTREE_WARN = 3  # review worktrees (.claude/worktrees/pr-*) tolerated before a warning
 RESEARCH_WORKTREE_WARN = 3  # research-worktrees (.claude/worktrees/research-*) of one foreign repo
+# External actions visible to others and hard to undo: confirming them by the lead alone warrants a WARN.
+LEAD_SENSITIVE = ("tracker.describe", "forge.pr", "workspace.integrate")
 
 
 @dataclass
@@ -311,6 +314,27 @@ class Doctor:
                 self.add("agents", f"rules:{f.stem}", OK if ext else WARN,
                          str(ext) if ext else "нет extends: правила не привяжутся к агенту плагина")
 
+    # ----------------------------------------------------------------- lead
+    def check_lead(self) -> None:
+        """Keys and modes are already schema-checked; here only the policy's effect."""
+        assert self.cfg is not None
+        lead = self.cfg.get("lead")
+        if not lead:
+            return
+        policy = lead.get("policy") or {}
+        default = lead.get("default", lib.LEAD_DEFAULT_MODE)
+        self.add("lead", "policy", OK,
+                 f"default {default}, timeout {lead.get('timeout', lib.LEAD_DEFAULT_TIMEOUT)}, "
+                 f"stall {lead.get('stall', lib.LEAD_DEFAULT_STALL)}, точек в policy: {len(policy)}")
+        by_lead = [point for point, kind in lib.decision_points()
+                   if kind == "внешнее" and policy.get(point, default) == "lead"]
+        for point in by_lead:
+            if point in LEAD_SENSITIVE:
+                self.add("lead", point, WARN, "лид подтверждает без разработчика: видно другим, трудно откатить")
+        routine = [p for p in by_lead if p not in LEAD_SENSITIVE]
+        if routine:
+            self.add("lead", "external", OK, "лид подтверждает без разработчика: " + ", ".join(routine))
+
     # ------------------------------------------------------------------ run
     def run(self) -> int:
         self.check_env()
@@ -320,6 +344,7 @@ class Doctor:
             self.check_verify()
             self.check_artifacts()
             self.check_agents()
+            self.check_lead()
         return 1 if any(c.status == FAIL for c in self.checks) else 0
 
 

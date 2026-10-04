@@ -47,6 +47,7 @@ findings, answered design questions), existing project specs.
 # Spec: {task-id}
 
 ## Summary
+
 {1-3 sentences: what this task changes and why}
 
 ## Changes
@@ -54,22 +55,31 @@ findings, answered design questions), existing project specs.
 ### {Slice / Package 1}
 
 #### Modified contracts
+
 - `{TypeName}` — {what changes}
+
 #### New contracts
+
 - `{NewName}` — {purpose, key fields / signature}
+
 #### Removed contracts
+
 - `{OldName}` — {why, what replaces it}
 
 ### {Slice / Package 2}
+
 ...
 
 ## Dependencies
+
 - {Package A} → {Package B}: {why this dependency exists or changes}
 
 ## Decisions
+
 - D1: {decision} — {rationale}
 
 ## Out of Scope
+
 - {what this task explicitly does NOT change}
 ```
 
@@ -81,26 +91,32 @@ Input: task.md, research.md, spec.md.
 # Plan: {task-id}
 
 ## Overview
+
 {1-2 sentences: implementation strategy; mandatory cross-step rules if any}
 
 ## Steps
 
 ### Step 1: {name}
+
 **Goal:** {what this step achieves}
 **Files:**
+
 - CREATE: `{path}` — {purpose}
 - MODIFY: `{path}` — {what changes}
-**Test checkpoint:**
+  **Test checkpoint:**
 - [ ] {specific thing to verify; at minimum the typecheck gate passes}
 
 ### Step 2: {name}
+
 **Depends on:** Step 1
 ...
 
 ## Project Specs to Update
+
 - `{path/to/spec}` — {what section changes}
 
 ## Verification
+
 - [ ] All gates from the lang adapter pass (typecheck, test, lint; build / e2e when configured)
 - [ ] Project specs consistent with code
 ```

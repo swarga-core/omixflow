@@ -27,6 +27,13 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 (`state.py get TASK_DIR profile`, таблица `profiles.md`): `code` → шаги ниже;
 `research` → раздел «Задача с `finalize_artifact: research`».
 
+### 0. Синхронизация с базой
+
+`sync.py check TASK_DIR`; база ушла вперёд после Review → синхронизация по
+возможности `sync` порта workspace (порядок как в `implement`). Слияние с конфликтами
+в коде возвращает задачу на повторный проход ревью по разрешениям (`reviewer-{id}`
+проверяет дифф слияния); чистое слияние с зелёным полным набором гейтов идёт дальше.
+
 ### 1. Статистика
 
 `base` из состояния:
@@ -47,25 +54,25 @@ git log --oneline {base}...HEAD | wc -l
 - Тестов: {M} passed
 - Project specs обновлены: {список или «нет»}
 - Findings ревью: {N} total, {N} resolved
+- Сдача: {PR url | squash {sha} в {base} | лиду}
 ```
 
 ### 3. Гочи
 
-Перебрать log.md (NOTES coder'а, замечания вне scope, особенности окружения)
-и предложить адреса по phases.md: дефект плагина → issue в репозитории плагина
+Под лидом гочи здесь не раскладываются: раздел «Сессия под лидом». Иначе перебрать
+log.md (NOTES coder'а, замечания вне scope, особенности окружения) и предложить адреса
+по phases.md в точке `gotchas`: дефект плагина → issue в репозитории плагина
 (текст готовится, создание за разработчиком); особенность проекта → CLAUDE.md
 проекта или проектный адаптер (правка с подтверждением); личное → память сессии.
 Ничего не записывать молча.
 
-### 4. Трекер
+### 4. Сдача
 
-Гибрид: текст комментария целиком (реализация завершена; ветка, коммиты, тесты,
-файлы, PR), затем AskUserQuestion: Добавить (Recommended) / Поправить / Пропустить.
-`comment` адаптера.
+Способ: `workspace.delivery` конфига; не задан → `lead` у задачи под лидом (поле
+`lead` состояния), иначе `pr`. Подтвердить в точке `delivery`: найденный способ
+(Recommended) / два других.
 
-### 5. PR
-
-Гибрид: превью (ветки, заголовок, body из шаблона), затем AskUserQuestion:
+**pr.** Превью (ветки, заголовок, body из шаблона), затем подтверждение в точке `forge.pr`:
 Создать (Recommended) / Поправить / Пропустить. `pr_create` адаптера forge:
 push ветки и создание PR в base из состояния. Body:
 
@@ -86,26 +93,46 @@ Task: {id}
 Адаптер `none`: push при наличии remote и сообщение, что PR открывается вручную.
 CLI хостинга не настроен: инструкция, не ошибка.
 
+**integrate.** Влить ветку задачи в базу без PR возможностью `integrate` порта
+workspace (`workspace.integration`: squash или merge). Превью: ветка, база, файлы
+(`git diff --stat {base}...HEAD`), сообщение коммита `feat({id}): {title}`; затем
+подтверждение в точке `workspace.integrate`. База в `workspace.protected`:
+подтверждает только разработчик, режим маршрута `lead` к этой точке не применяется.
+Итог: хеш коммита в базе.
+
+**lead.** Сессия под лидом ничего не вливает и PR не создаёт. Ветка синхронизирована
+с текущей головой базы (шаг 0, `sync.py check` даёт `moved: false`), полный набор
+гейтов зелёный на итоговом дереве; лиду уходит `done` с отчётом о готовности
+(`protocol/lead.md`, «Сдача лиду»). Мерж делает лид.
+
+### 5. Трекер
+
+Текст комментария целиком (реализация завершена; ветка, коммиты, тесты, файлы; итог
+сдачи: URL PR, хеш коммита в базе или «сдано лиду»), затем подтверждение в точке
+`tracker.comment`: Добавить (Recommended) / Поправить / Пропустить. `comment` адаптера.
+
 ### 6. Статус
 
-Если PR создан или разработчик хочет: AskUserQuestion «Статус {id}?»
-(in_review (Recommended) / другой / не менять). `set_status`.
+Спросить в точке `tracker.status`: «Статус {id}?» с рекомендацией по итогу сдачи:
+PR или сдача лиду → in_review (Recommended); интеграция в базу → done (Recommended);
+другой / не менять. `set_status`.
 
 ### 7. Worktree
 
-Сессия в worktree: AskUserQuestion «Выйти?» (keep (Recommended): ветка нужна
-открытому PR / remove / остаться). `remove` блокируется незакоммиченными
-изменениями. Worktree, в который вошли по `path`, `ExitWorktree` не удаляет:
-сказать, что снос вручную.
+Сессия в worktree: спросить в точке `workspace.exit`: «Выйти?». Ветка ещё нужна
+(открытый PR, сдача лиду) → keep (Recommended) / remove / остаться; ветка влита
+в базу → remove (Recommended) / keep / остаться. `remove` блокируется
+незакоммиченными изменениями. Worktree, в который вошли по `path`, `ExitWorktree`
+не удаляет: сказать, что снос вручную.
 
 ### 8. Состояние и итог
 
-`state.py complete TASK_DIR finalize` (фаза становится `done`). Коммит
+`state.py finish TASK_DIR finalize` (фаза становится `done`). Коммит
 артефактов до выхода из worktree.
 
 ```
-Задача {id} финализирована: log.md обновлён, трекер {да/нет}, PR {url/нет},
-ветка {branch}, worktree {оставлен/снесён/н/д}.
+Задача {id} финализирована: log.md обновлён, трекер {да/нет}, сдача {PR url |
+squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставлен/снесён/н/д}.
 ```
 
 ## Задача с `finalize_artifact: research`
@@ -115,10 +142,10 @@ CLI хостинга не настроен: инструкция, не ошиб�
 1. log.md: `## Finalize ✅` с числом файлов в карте, вопросов (отвечено, отложено).
 2. Гочи как в шаге 3.
 3. Коммит research.md и артефактов задачи.
-4. Трекер: комментарий с итогами исследования (гибрид, как в шаге 4).
-5. PR с артефактами из ветки задачи: предложить по шагу 5 (Summary из task.md,
-   ключевые findings вместо Changes, без Test plan), решает разработчик.
-6. Статус и worktree как в шагах 6–7; `state.py complete TASK_DIR finalize`.
+4. PR с артефактами из ветки задачи: предложить как способ `pr` шага 4 в точке
+   `forge.pr` (Summary из task.md, ключевые findings вместо Changes, без Test plan).
+5. Трекер: комментарий с итогами исследования в точке `tracker.comment`, как в шаге 5.
+6. Статус и worktree как в шагах 6–7; `state.py finish TASK_DIR finalize`.
 
 ## Часть мультизадачи (`--part`)
 
@@ -136,13 +163,14 @@ review части завершены по её состоянию.
 1. Финальная запись в log.md части: статистика ветки части относительно ветки
    мультизадачи.
 2. Блок → `in-review` (`multitask.py set … status=in-review` на свежем описании,
-   `update_description` с дисциплиной записи). Сводка текстом, AskUserQuestion:
-   Интегрировать (Recommended) / Оставить in-review / Пропустить часть (skipped).
+   `update_description` с дисциплиной записи). Сводка и вопрос в точке
+   `part-integrate`: Интегрировать (Recommended) / Оставить in-review / Пропустить
+   часть (skipped).
 3. Интеграция по адаптеру workspace (`integrate`): закоммитить всё в worktree
    части, включая log.md и state.yaml; `ExitWorktree keep`; убедиться, что дерево
    на ветке мультизадачи, иначе временный worktree; rebase ветки части на ветку
    мультизадачи; squash; проверить, что застейджены только файлы части
-   (`git diff --cached --stat`), иначе СТОП; один коммит `feat({id}): {part} —
+   (`git diff --cached --stat`), иначе СТОП в точке `deadlock`; один коммит `feat({id}): {part} —
    {title}`; push при `multitask.push`; снести worktree и ветку части. Пустая часть:
    не коммитить, статус `skipped`.
 4. Блок → `done` с коротким хешем (или `skipped`). `comment`: «{part} → done.
@@ -150,8 +178,8 @@ review части завершены по её состоянию.
 5. Статус задачи и PR не трогать: это уровень мультизадачи. Вернуть управление
    `develop`.
 
-Отказ разработчика: оставить `in-review`, worktree и ветку. Конфликт при squash:
-СТОП, разрешение за разработчиком, блок остаётся `in-review`.
+Отказ в точке `part-integrate`: оставить `in-review`, worktree и ветку. Конфликт при
+squash: СТОП, решение в точке `deadlock`, блок остаётся `in-review`.
 
 ## Часть с `part_integration: commit`
 
@@ -165,13 +193,13 @@ researcher'ы работают. Предусловие: research.md части �
 комментарий. Выход.
 
 1. Открытые вопросы `### Open Questions for Dependents` из `## Handoff` research.md
-   части: диалог (текст или AUQ по характеру вопроса), ответы записать в Handoff
-   research.md части.
-2. log.md части: `## Finalize ✅`; `state.py complete {PART_DIR} finalize`.
+   части: спросить в точке `handoff`, ответы записать в Handoff research.md части.
+2. log.md части: `## Finalize ✅`; `state.py finish {PART_DIR} finalize`.
 3. Коммит только каталога части: пути `.tasks/{id}/{part}/` явно, сообщение
    `docs({id}): research {part} — {title}`. Никогда не «все изменения».
 4. Push при `multitask.push` по правилу общей ветки: fetch; если `origin/task/{id}`
-   не предок HEAD, rebase с autostash на него; конфликт → СТОП, блок как есть.
+   не предок HEAD, rebase с autostash на него; конфликт → СТОП в точке `deadlock`,
+   блок как есть.
 5. После коммита, а при `multitask.push` — после успешного push: блок → `done`
    с коротким хешем коммита (после rebase, если он был), `comment`: «{part} → done. Коммит `{sha}` → `task/{id}`.» При трекере
    `none` коммит `multitask.md` по пути сразу после записи блока.
@@ -184,23 +212,32 @@ researcher'ы работают. Предусловие: research.md части �
    файлов по log.md частей. При `finalize_artifact: research` вместо коммитов
    и тестов число findings и отложенных вопросов сводного research.md (синтез уже
    выполнен планировщиком).
-2. `comment`: «Мультизадача завершена: {done}/{N} частей done{, {skipped} skipped}.
-   Ветка `{branch}` готова.»
-3. Статус с подтверждением (in_review по умолчанию).
-4. PR из ветки мультизадачи в base: предложить по шагу 5 одиночного потока,
-   решает разработчик. При `finalize_artifact: research` PR несёт сводный
-   research.md и артефакты частей.
+2. `comment` в точке `tracker.comment`: «Мультизадача завершена: {done}/{N} частей
+   done{, {skipped} skipped}. Ветка `{branch}` готова.»
+3. Статус в точке `tracker.status` (in_review по умолчанию).
+4. PR из ветки мультизадачи в base: предложить по шагу 5 одиночного потока в точке
+   `forge.pr`. При `finalize_artifact: research` PR несёт сводный research.md
+   и артефакты частей.
 5. При `finalize_artifact: research`: для каждого репозитория из `repos` состояния
    мультизадачи проверить research-worktree по детерминированному пути
    `{repo_path}/.claude/worktrees/research-{id}` и снести существующие
-   с подтверждением в порядке адаптера workspace.
-6. `state.py complete` для мультизадачи до `done`. При `part_isolation: shared`
+   с подтверждением в точке `workspace.exit`, в порядке адаптера workspace.
+6. `state.py finish` для мультизадачи до `done`. При `part_isolation: shared`
    коммиты называют пути явно (`state.yaml`, `log.md`, `research.md` мультизадачи),
    push по правилу общей ветки.
 
+## Сессия под лидом
+
+Состояние задачи или части содержит `lead`: гочи из log.md уходят лиду пунктами
+`G{n}` в `notice` (суть, факты с `path:line`, предлагаемый адрес) вместо раскладки
+в шаге 3, кандидаты в память тоже; раскладывает лид (`protocol/lead.md`, «Гочи, бэклог
+и память»); после `state.py finish … finalize` сессия шлёт `done` по `protocol/lead.md`:
+способ сдачи и его итог, при сдаче лиду отчёт о готовности («Сдача лиду»).
+
 ## Правила
 
-- Всё внешнее с подтверждением: комментарий, PR, статус, выход из worktree.
+- Всё внешнее с подтверждением: комментарий (точка `tracker.comment`), PR (`forge.pr`),
+  статус (`tracker.status`), выход из worktree (`workspace.exit`).
 - Код не менять.
 - PR body из артефактов, не выдумывать.
 - Часть: при `part_integration: integrate` squash в один коммит, при `commit` коммит

@@ -30,10 +30,10 @@ Start, Research, Finalize, код он не меняет. Профили и их
 ```
 omixflow/
 ├── skills/        develop, create, refine, start, research, spec, plan, implement,
-│                  review, finalize, pr-review, doctor
+│                  review, finalize, pr-review, doctor, lead
 ├── agents/        researcher, architect, coder, tester, reviewer, web-fetcher
 ├── protocol/      канон: словарь, фазы, тиры, диалог, ревью-цикл, артефакты,
-│                  worktree, мультизадача, профили, адаптеры, рантайм скила
+│                  worktree, мультизадача, профили, адаптеры, рантайм скила, лид
 ├── adapters/      порты и адаптеры
 │   ├── tracker/   PORT.md + youtrack, local (+ backlog-index.py), none
 │   ├── forge/     PORT.md + github (+ pr.py), none
@@ -57,6 +57,7 @@ omixflow/
 | `/omixflow:start`, `research`, `spec`, `plan`, `implement`, `review`, `finalize` | фазы по отдельности; каждая единственный источник своей логики |
 | `/omixflow:pr-review {pr}` | ревью PR или ветки с публикацией через адаптер forge |
 | `/omixflow:doctor [--init]` | проверка и настройка проекта |
+| `/omixflow:lead [--integration=BRANCH]` | лид: координирует сессии задач, отвечает на их вопросы по политике или передаёт разработчику, ведёт журнал (`protocol/lead.md`) |
 
 Три слоя:
 
@@ -121,16 +122,21 @@ python3 scripts/resolve.py repo omix-lib --json   # запись workspace.repos
 python3 scripts/resolve.py repo --list            # имена workspace.repos через запятую
 python3 scripts/resolve.py adapter lang --project ../other --fallback-project .  # чужой репозиторий без flow.yaml
 python3 scripts/cfg.py workspace.setup            # значение из flow.yaml
-python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/complete/next/step), фазы по профилю
+python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/finish/next/step; ask/ack/close для лида)
 python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/meta/waves/ready/set/seed/file
+python3 scripts/lead.py show                      # журнал лида: decide/escalate/resolve/replace/rule/oblige/approve/accept/register/list
+python3 scripts/sync.py check .tasks/AL-1         # сдвиг базы и стратегия синхронизации (record)
+python3 scripts/accept.py plan task/AL-1 --into main  # приёмка мержа лидом: plan/prepare/merge/commit/abort/cleanup
 ```
 
 ## Статус
 
-`0.2.0`: скилы, агенты и протокол перенесены из `eps-omix-lib/.claude/`
-и `~/.claude/skills/omix-pr-review` с чисткой терминологии и закрытием известных
-дефектов. Следующий шаг: миграция проектов на `flow.yaml` и первый прогон реальной
-задачи через `/omixflow:develop`.
+`0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
+решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии
+задач одного разработчика: отвечает на их вопросы по политике или передаёт
+разработчику, ведёт журнал, принимает мержи в интеграционную ветку, сводит гочи;
+синхронизация с ушедшей базой и сдача без PR. Лид проверен тремя прогонами
+в песочнице; следующий шаг: первый прогон на реальной задаче.
 
 ## Разработка
 

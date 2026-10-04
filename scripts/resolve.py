@@ -8,6 +8,8 @@
     resolve.py base                    [--project DIR]
     resolve.py repo NAME               [--project DIR] [--json]   # workspace.repos entry, ref → sha
     resolve.py repo --list             [--project DIR]            # names, comma-separated
+    resolve.py route POINT             [--project DIR]            # lead route: JSON {point, kind, mode, timeout}
+    resolve.py lead                    [--project DIR]            # lead settings: JSON {default, timeout, stall, actions, notify}
 
 Without --json prints one path per line, base → leaf.
 
@@ -70,7 +72,7 @@ def cmd_repo(ns: argparse.Namespace, root: Path) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("kind", choices=["adapter", "adapter-script", "agent", "script", "base", "repo"])
+    ap.add_argument("kind", choices=["adapter", "adapter-script", "agent", "script", "base", "repo", "route", "lead"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--fallback-project", type=Path, default=None)
@@ -89,6 +91,16 @@ def main(argv=None) -> int:
     try:
         if ns.kind == "repo":
             return cmd_repo(ns, root)
+
+        if ns.kind == "lead":
+            print(json.dumps(lib.lead_settings(lib.load_config(root)), ensure_ascii=False))
+            return 0
+
+        if ns.kind == "route":
+            if len(ns.args) != 1:
+                raise lib.OmixflowError("укажи точку решения: route POINT")
+            print(json.dumps(lib.lead_route(lib.load_config(root), ns.args[0]), ensure_ascii=False))
+            return 0
 
         if ns.kind == "base":
             cfg = {} if foreign_bare else lib.load_config(root)

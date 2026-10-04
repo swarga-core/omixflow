@@ -11,3 +11,11 @@
 | Документ | Происхождение |
 |---|---|
 | [omixflow-part-reads-repos.md](omixflow-part-reads-repos.md) | AL-1147, запуск аудита паритета legacy → eal — часть research-мультизадачи читает ровно один репозиторий; нужна колонка `reads` (read-only корни у части, `REPOS` у researcher'а) вместо двухэтапной декомпозиции |
+| [omixflow-lead-coordinator.md](omixflow-lead-coordinator.md) **[РЕАЛИЗОВАНО 0.3.0]** | обсуждение после AL-1147 — лид как реактивный координатор сессий: маршрут вопросов по политике, прецеденты, единое окно, бэклог и память, ветка лида; реализация по плану работ в документе (18 шагов, без отдельных задач в трекере), начиная со спайка межсессионных сообщений |
+| [omixflow-local-tracker-worktree.md](omixflow-local-tracker-worktree.md) | живой прогон лида 2026-10-04 — Refine с трекером `local` пишет в основное дерево на защищённой базе, worktree задачи этой правки не видит; перенос в ветку задачи штатным шагом Start |
+| [omixflow-review-passes-closing.md](omixflow-review-passes-closing.md) | живой прогон лида 2026-10-04 — как закрывать фикс, принятый после исчерпания `limits.review_passes`: без прохода, если исходник не тронут, иначе дополнительный проход с разрешения разработчика |
+| [omixflow-protocol-diet.md](omixflow-protocol-diet.md) | повторный прогон лида 2026-10-04 (10b) — сессия тира S читает ~100K токенов протокола до первого действия; обязательный минимум по скилам, остальное по требованию с условием |
+| [omixflow-agent-escape-bytes.md](omixflow-agent-escape-bytes.md) | третий прогон лида 2026-10-04 (гоча G-2 журнала лида) — агенты пишут литерал вместо escape-последовательности в параметрах инструментов и отчитываются по намерению, а не по байтам файла |
+| [omixflow-coder-mutation-report.md](omixflow-coder-mutation-report.md) | третий прогон лида 2026-10-04 (G-3) — coder обобщает мутационную проверку в отчёте вместо перечня проб и их исходов |
+| [omixflow-findings-prefix.md](omixflow-findings-prefix.md) | третий прогон лида 2026-10-04 (G-10) — findings Research в spec.md и findings ревью делят префикс `F`, метки в сообщениях лида путаются |
+| [omixflow-iteration-tracker-sync.md](omixflow-iteration-tracker-sync.md) | третий прогон лида 2026-10-04 (G-7) — итерация после вето меняет постановку, но не обновляет уточнённую формулировку в трекере |

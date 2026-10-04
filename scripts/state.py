@@ -3,15 +3,18 @@
 
     state.py init DIR --id ID --kind task|multitask|part [--mode pipeline|manual]
                       [--profile NAME] [--tier S|M|L] [--forced] [--branch B] [--base B]
-                      [--multitask-id X --part P] [--session S] [--force]
+                      [--multitask-id X --part P] [--session S] [--lead NAME [--asked K]] [--force]
     state.py get DIR [KEY]                 # whole state as JSON, or one value
     state.py get DIR profile               # effective profile (full for legacy states)
     state.py set DIR KEY=VALUE ...         # dotted keys; JSON for lists/objects
     state.py unset DIR KEY ...
-    state.py complete DIR PHASE            # add to completed, advance phase
+    state.py finish DIR PHASE              # add to completed, advance phase (alias: complete)
     state.py next DIR                      # print the next phase of the profile
     state.py step DIR done N | start N     # implement bookkeeping
     state.py agents DIR --session S        # drop agents from another session
+    state.py ask DIR ITEM:wait|nowait ...  # open the next question to the lead, print its #n
+    state.py ack DIR N ITEM=ACK ...        # record the lead's ack per item (решаю | E-n)
+    state.py close DIR N [ITEM ...]        # close items (all when none given), print what stays open
 
 DIR is the task directory (.tasks/{id} or .tasks/{id}/{part}).
 
@@ -19,6 +22,13 @@ Profiles (protocol/profiles.md) live in PROFILES; a state without `profile` is
 `full`. A part inherits the profile of its parent state DIR/../state.yaml, which
 must be `kind: multitask` with the id given by --multitask-id. A profile with
 `triage: false` stores `tier: null` and rejects --tier.
+
+`finish` is the phase-completion command; `complete` stays as an alias, but a
+worktree-isolated session rejects it as the shell builtin of the same name. With a
+lead in the state, `finish` reminds on stderr to send the phase `notice`
+(protocol/runtime.md, item 7); stdout stays the next phase.
+`ask`/`ack`/`close` keep `lead.asked` and `lead.open` (protocol/lead.md): the
+question counter and the questions not yet decided, which survive a resume.
 """
 from __future__ import annotations
 
@@ -59,6 +69,7 @@ PHASES: List[str] = PROFILES[DEFAULT_PROFILE]["phases"]
 KINDS = ("task", "multitask", "part")
 MODES = ("pipeline", "manual")
 TIERS = ("S", "M", "L")
+WAITS = ("wait", "nowait")
 FILE = "state.yaml"
 
 
@@ -213,6 +224,10 @@ def cmd_init(ns: argparse.Namespace) -> int:
     }
     if ns.kind == "part":
         state["multitask"] = {"id": ns.multitask_id, "part": ns.part}
+    if ns.asked and not ns.lead:
+        raise lib.OmixflowError("--asked задаётся только вместе с --lead")
+    if ns.lead:
+        state["lead"] = {"name": ns.lead, "asked": ns.asked, "open": []}
     save(d, state)
     print(path_of(d))
     return 0
@@ -267,7 +282,7 @@ def cmd_unset(ns: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_complete(ns: argparse.Namespace) -> int:
+def cmd_finish(ns: argparse.Namespace) -> int:
     d = Path(ns.dir).resolve()
     state = load(d)
     phase = ns.phase
@@ -281,6 +296,10 @@ def cmd_complete(ns: argparse.Namespace) -> int:
     state["phase"] = next_phase(state)
     save(d, state)
     print(state["phase"])
+    lead = state.get("lead")
+    if isinstance(lead, dict) and lead.get("name"):
+        print(f"omixflow: под лидом {lead['name']}: отправь notice о фазе {phase} (protocol/lead.md)",
+              file=sys.stderr)
     return 0
 
 
@@ -322,6 +341,74 @@ def cmd_agents(ns: argparse.Namespace) -> int:
     return 0
 
 
+def lead_of(state: Dict[str, Any]) -> Dict[str, Any]:
+    lead = state.get("lead")
+    if not isinstance(lead, dict) or not lead.get("name"):
+        raise lib.OmixflowError("задача запущена без лида: в состоянии нет lead.name")
+    lead.setdefault("asked", 0)
+    lead.setdefault("open", [])
+    return lead
+
+
+def open_question(lead: Dict[str, Any], n: int) -> Dict[str, Any]:
+    for q in lead["open"]:
+        if q["n"] == n:
+            return q
+    raise lib.OmixflowError(f"вопрос #{n} не открыт: {[q['n'] for q in lead['open']]}")
+
+
+def cmd_ask(ns: argparse.Namespace) -> int:
+    d = Path(ns.dir).resolve()
+    state = load(d)
+    lead = lead_of(state)
+    items: Dict[str, str] = {}
+    for spec in ns.items:
+        label, _, wait = spec.partition(":")
+        if not label or wait not in WAITS:
+            raise lib.OmixflowError(f"пункт задаётся как МЕТКА:wait или МЕТКА:nowait, получено {spec!r}")
+        if label in items:
+            raise lib.OmixflowError(f"пункт {label} повторяется")
+        items[label] = wait
+    n = int(lead["asked"]) + 1
+    lead["asked"] = n
+    lead["open"].append({"n": n, "items": items, "ack": {}})
+    save(d, state)
+    print(n)
+    return 0
+
+
+def cmd_ack(ns: argparse.Namespace) -> int:
+    d = Path(ns.dir).resolve()
+    state = load(d)
+    q = open_question(lead_of(state), int(ns.n))
+    for pair in ns.pairs:
+        label, sep, value = pair.partition("=")
+        if not sep or label not in q["items"]:
+            raise lib.OmixflowError(f"ожидается ПУНКТ=ack для пунктов {list(q['items'])}, получено {pair!r}")
+        q["ack"][label] = value
+    save(d, state)
+    return 0
+
+
+def cmd_close(ns: argparse.Namespace) -> int:
+    d = Path(ns.dir).resolve()
+    state = load(d)
+    lead = lead_of(state)
+    q = open_question(lead, int(ns.n))
+    labels = ns.items or list(q["items"])
+    unknown = [label for label in labels if label not in q["items"]]
+    if unknown:
+        raise lib.OmixflowError(f"у вопроса #{q['n']} нет пунктов {unknown}: {list(q['items'])}")
+    for label in labels:
+        q["items"].pop(label)
+        q["ack"].pop(label, None)
+    if not q["items"]:
+        lead["open"].remove(q)
+    save(d, state)
+    print(json.dumps(q["items"], ensure_ascii=False))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -339,6 +426,8 @@ def main(argv=None) -> int:
     p.add_argument("--multitask-id", default=None)
     p.add_argument("--part", default=None)
     p.add_argument("--session", default=None)
+    p.add_argument("--lead", default=None)
+    p.add_argument("--asked", type=int, default=0)
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_init)
 
@@ -357,10 +446,10 @@ def main(argv=None) -> int:
     p.add_argument("keys", nargs="+")
     p.set_defaults(fn=cmd_unset)
 
-    p = sub.add_parser("complete")
+    p = sub.add_parser("finish", aliases=["complete"])
     p.add_argument("dir")
     p.add_argument("phase")
-    p.set_defaults(fn=cmd_complete)
+    p.set_defaults(fn=cmd_finish)
 
     p = sub.add_parser("next")
     p.add_argument("dir")
@@ -377,6 +466,23 @@ def main(argv=None) -> int:
     p.add_argument("dir")
     p.add_argument("--session", required=True)
     p.set_defaults(fn=cmd_agents)
+
+    p = sub.add_parser("ask")
+    p.add_argument("dir")
+    p.add_argument("items", nargs="+")
+    p.set_defaults(fn=cmd_ask)
+
+    p = sub.add_parser("ack")
+    p.add_argument("dir")
+    p.add_argument("n")
+    p.add_argument("pairs", nargs="+")
+    p.set_defaults(fn=cmd_ack)
+
+    p = sub.add_parser("close")
+    p.add_argument("dir")
+    p.add_argument("n")
+    p.add_argument("items", nargs="*")
+    p.set_defaults(fn=cmd_close)
 
     ns = ap.parse_args(argv)
     try:
