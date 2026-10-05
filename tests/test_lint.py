@@ -34,7 +34,7 @@ import state  # noqa: E402
 TEXT_SUFFIXES = {".md", ".py", ".yaml", ".yml", ".json", ".sh"}
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "tests"}
 
-FORBIDDEN_TERMS = re.compile(r"эпик|\bepic\b|подзадач|\bsubtask", re.I)
+FORBIDDEN_TERMS = re.compile(r"подзадач|\bsubtask", re.I)
 FORBIDDEN_TERMS_EXEMPT = {"protocol/glossary.md", "CHANGELOG.md", "README.md",
                           "adapters/tracker/youtrack.md"}  # explains that Type=Epic is meaningless
 

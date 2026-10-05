@@ -9,12 +9,15 @@ auto-detected values (never overwrites without --force) and then runs checks.
 Each workspace.repos entry gets a `repo:{name}` section (slug, path, git, remote,
 ref, flow.yaml, research worktrees). A `lead` section summarises the question
 policy, lists external actions the lead confirms alone and warns for the sensitive ones.
+An adapter may declare the hooks `scripts.doctor` (its own checks, added to its port
+section) and `scripts.detect` (a draft config fragment for --init); protocol/adapters.md.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -126,6 +129,24 @@ class Doctor:
                     else:
                         self.add(sec, f"tool:{tool}", FAIL,
                                  f"MCP-сервер {server} не найден в ~/.claude.json или .mcp.json")
+                self.adapter_checks(sec, port, name)
+
+    def adapter_checks(self, sec: str, port: str, name: str) -> None:
+        """Checks the adapter itself declares by the hook `scripts.doctor`."""
+        try:
+            script = lib.resolve_adapter_script(port, name, "doctor", self.root)
+        except lib.OmixflowError as e:
+            self.add(sec, "doctor", FAIL, str(e))
+            return
+        if script is None:
+            return
+        items = run_hook(script, self.root, "doctor")
+        if not isinstance(items, list):
+            self.add(sec, "doctor", FAIL, f"{script}: проверки адаптера не выполнились")
+            return
+        for item in items:
+            status = item.get("status") if item.get("status") in (OK, WARN, FAIL) else FAIL
+            self.add(sec, str(item.get("name") or "doctor"), status, str(item.get("detail") or ""))
 
     # ------------------------------------------------------------ workspace
     def check_workspace(self) -> None:
@@ -283,6 +304,23 @@ class Doctor:
         tracked = lib.config_get(self.cfg, "artifacts.tracked")
         tracked = True if tracked is None else bool(tracked)
         inside = lib.git(self.root, "rev-parse", "--is-inside-work-tree") == "true"
+        try:
+            in_tracker = lib.artifacts_script(self.root, self.cfg) is not None
+        except lib.OmixflowError:
+            in_tracker = False
+        if in_tracker:
+            # Artifacts live in the tracker task; .tasks/ holds only working copies (protocol/artifacts.md).
+            ignored = inside and lib.git(self.root, "check-ignore", "-q", f"{d.rstrip('/')}/probe/state.yaml") is not None
+            if tracked:
+                self.add("artifacts", "tracked", FAIL, "трекер хранит артефакты в задаче: нужно artifacts.tracked: false")
+            elif inside and not ignored:
+                self.add("artifacts", "tracked", FAIL, f"{d} не игнорируется: добавить /{d.strip('/')}/* в .gitignore")
+            else:
+                self.add("artifacts", "tracked", OK, f"артефакты в задаче трекера, {d} только рабочие копии")
+            if inside and lib.git(self.root, "check-ignore", "-q", f"{d.rstrip('/')}/_lead/journal.jsonl") is not None:
+                self.add("artifacts", "lead journal", WARN, f"журнал лида не закоммитится на ветке лида: "
+                         f"добавить !/{d.strip('/')}/_lead/ в .gitignore")
+            return
         if tracked and inside:
             probe = f"{d.rstrip('/')}/probe/state.yaml"
             ignored = lib.git(self.root, "check-ignore", "-q", probe)
@@ -414,7 +452,37 @@ def detect_defaults(root: Path) -> Dict[str, Any]:
     if gm.exists():
         paths = re.findall(r"^\s*path\s*=\s*(\S+)", gm.read_text(encoding="utf-8"), re.M)
         cfg["workspace"]["submodules"] = [{"path": p, "readonly": True} for p in paths]
+    for fragment in detected(root):
+        for key, value in fragment.items():
+            cfg[key] = {**cfg[key], **value} if isinstance(cfg.get(key), dict) and isinstance(value, dict) else value
     return cfg
+
+
+def run_hook(script: Path, root: Path, command: str) -> Any:
+    """Run an adapter hook script; its JSON stdout, or None when it fails."""
+    try:
+        proc = subprocess.run([sys.executable, str(script), "--project", str(root), command],
+                              capture_output=True, text=True, timeout=60)
+        return json.loads(proc.stdout) if proc.returncode == 0 else None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+        return None
+
+
+def detected(root: Path) -> List[Dict[str, Any]]:
+    """Config fragments from the `scripts.detect` hooks of the plugin adapters."""
+    out: List[Dict[str, Any]] = []
+    for port in lib.PORTS:
+        for path in sorted((lib.PLUGIN_ROOT / "adapters" / port).glob("*.md")):
+            if path.name == "PORT.md":
+                continue
+            try:
+                script = lib.resolve_adapter_script(port, path.stem, "detect", root)
+            except lib.OmixflowError:
+                continue
+            fragment = run_hook(script, root, "detect") if script else None
+            if isinstance(fragment, dict):
+                out.append(fragment)
+    return out
 
 
 def write_init(root: Path, force: bool) -> Path:

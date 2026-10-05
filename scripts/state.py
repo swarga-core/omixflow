@@ -29,11 +29,18 @@ lead in the state, `finish` reminds on stderr to send the phase `notice`
 (protocol/runtime.md, item 7); stdout stays the next phase.
 `ask`/`ack`/`close` keep `lead.asked` and `lead.open` (protocol/lead.md): the
 question counter and the questions not yet decided, which survive a resume.
+
+When the tracker adapter keeps task artifacts in the task itself (capability
+`artifacts`, protocol/artifacts.md «Хранение в задаче трекера»): `init` completes a card
+record (a state.yaml without `phase`) instead of refusing, keeping its formal fields;
+`finish` and `step done` publish the working copy through the adapter's
+`scripts.artifacts`; a failed publication is a warning, the next one catches up.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +74,9 @@ DEFAULT_PROFILE = "full"
 # Global phase order; every profile's phases are a subset in this order.
 PHASES: List[str] = PROFILES[DEFAULT_PROFILE]["phases"]
 KINDS = ("task", "multitask", "part")
+# Formal fields of a tracker card kept by init when it completes a card record.
+CARD_FIELDS = ("schema", "id", "kind", "title", "type", "owner", "parent", "links", "external",
+               "resolution", "blocked", "created", "imported")
 MODES = ("pipeline", "manual")
 TIERS = ("S", "M", "L")
 WAITS = ("wait", "nowait")
@@ -177,10 +187,33 @@ def parent_profile(d: Path, multitask_id: str) -> str:
 
 # ---------------------------------------------------------------- commands
 
+def publish(d: Path, state: Dict[str, Any]) -> None:
+    """Publish the working copy when the tracker keeps artifacts in the task; warn on failure."""
+    try:
+        root = lib.find_project_root(d)
+        script = lib.artifacts_script(root)
+    except lib.OmixflowError:
+        return
+    if script is None or not state.get("id"):
+        return
+    proc = subprocess.run([sys.executable, str(script), "--project", str(root), "publish", str(state["id"]),
+                           "--from", str(d)], capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(f"omixflow: артефакты {state['id']} не опубликованы ({proc.stderr.strip()}); "
+              "следующая публикация досылает всё", file=sys.stderr)
+
+
 def cmd_init(ns: argparse.Namespace) -> int:
     d = Path(ns.dir).resolve()
-    if path_of(d).exists() and not ns.force:
-        raise lib.OmixflowError(f"{path_of(d)} уже существует; перезаписать: --force")
+    card: Dict[str, Any] = {}
+    if path_of(d).exists():
+        existing = load(d)
+        if "phase" not in existing:
+            card = {k: existing[k] for k in CARD_FIELDS if k in existing}
+            if card.get("kind") == "epic":
+                raise lib.OmixflowError("эпик пайплайном не ведётся: он группирует дочерние задачи")
+        elif not ns.force:
+            raise lib.OmixflowError(f"{path_of(d)} уже существует; перезаписать: --force")
     if ns.kind not in KINDS:
         raise lib.OmixflowError(f"kind должен быть одним из {KINDS}")
     if ns.mode not in MODES:
@@ -228,6 +261,8 @@ def cmd_init(ns: argparse.Namespace) -> int:
         raise lib.OmixflowError("--asked задаётся только вместе с --lead")
     if ns.lead:
         state["lead"] = {"name": ns.lead, "asked": ns.asked, "open": []}
+    if card:
+        state = {**{k: v for k, v in card.items() if k not in ("kind", "id")}, **state}
     save(d, state)
     print(path_of(d))
     return 0
@@ -296,6 +331,7 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     state["phase"] = next_phase(state)
     save(d, state)
     print(state["phase"])
+    publish(d, state)
     lead = state.get("lead")
     if isinstance(lead, dict) and lead.get("name"):
         print(f"omixflow: под лидом {lead['name']}: отправь notice о фазе {phase} (protocol/lead.md)",
@@ -325,6 +361,8 @@ def cmd_step(ns: argparse.Namespace) -> int:
         total = state.get("steps_total")
         state["step"] = n + 1 if (total is None or n < int(total)) else None
     save(d, state)
+    if ns.action == "done":
+        publish(d, state)
     return 0
 
 

@@ -1,8 +1,8 @@
 ---
 port: tracker
 required: [identify, get, update_description, comment, set_status, current_user]
-optional: [comments, create, link, search, tag, parts_as_issues]
-config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_map, tracker.create_defaults, tracker.dir]
+optional: [comments, create, link, search, tag, parts_as_issues, artifacts]
+config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_map, tracker.create_defaults, tracker.dir, tracker.branch, tracker.push]
 ---
 
 # Порт tracker
@@ -27,6 +27,7 @@ config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_ma
 | search | нет | найти задачи по запросу адаптера | refine, yt-commit-подобные сценарии |
 | tag | нет | добавить или снять тег | multitask (`multitask`) |
 | parts_as_issues | нет | материализовать части мультизадачи дочерними задачами; зарезервировано | multitask, будущее |
+| artifacts | нет | хранить артефакты задачи в самой задаче трекера: `path`, `publish`, `checkout` (раздел «Артефакты в задаче») | start, implement, finalize, develop, lead |
 
 ## Управляемые блоки
 
@@ -40,10 +41,41 @@ config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_ma
 если его нет. Правило «прочитать перед записью, перечитать после» описано
 в `protocol/multitask.md` и обязательно для любой реализации `update_description`.
 
+## Артефакты в задаче
+
+Адаптер с возможностью `artifacts` хранит артефакты задачи (`task.md`, `state.yaml`,
+`log.md`, `research.md`, `spec.md`, `plan.md`, `review/`) в самой задаче трекера, а не на
+кодовой ветке. Три операции:
+
+| Операция | Что делает |
+|---|---|
+| `path {id}` | абсолютный путь хранилища задачи; путь может меняться со статусом, поэтому нигде не хранится и всякий раз разрешается заново |
+| `publish {id} {TASK_DIR}` | скопировать артефакты из рабочей копии в хранилище задачи и зафиксировать (для доски на ветке: коммит и push) |
+| `checkout {id} {TASK_DIR}` | восстановить рабочую копию из хранилища задачи |
+
+Адаптер объявляет их скриптом `scripts.artifacts` (`resolve.py adapter-script tracker
+artifacts`), принимающим `path {id}`, `publish {id} --from {TASK_DIR}` и
+`checkout {id} --to {TASK_DIR} [--force]`; через него `state.py` публикует сам.
+
+Когда ядро их вызывает и как рабочая копия соотносится с хранилищем, описывает
+`protocol/artifacts.md`, раздел «Хранение в задаче трекера». Без этой возможности
+артефакты живут на ветке задачи, как раньше.
+
 ## Уточнённая формулировка
 
 Refine дописывает в описание секцию `## Уточнённая формулировка`, не удаляя исходный
 текст. Start читает эту секцию, если она есть.
+
+## Разделы адаптера по ситуации
+
+Ядро читает эти разделы файла адаптера, если они есть:
+
+| Раздел | Что описывает | Кто читает |
+|---|---|---|
+| «Свежесть» | как обновить локальную копию трекера перед чтением | develop и lead в начале работы |
+| «Ссылка на задачу» | как сослаться на задачу из PR; без раздела — id задачи | finalize |
+| «Мультизадача» | что мультизадача адаптером не поддерживается | refine `--multitask` и start мультизадачи: СТОП |
+| «Эпики» | эпик, родитель дочерних задач: как узнать эпик, создать дочернюю задачу, проверить, что все дочерние закрыты, закрыть эпик | refine эпика; finalize и лид после перевода дочерней задачи в `done` |
 
 ## Конфиг
 
@@ -58,7 +90,9 @@ tracker:
     done: Finished
   create_defaults:            # поля при create
     Type: Task
-  dir: .tasks/backlog         # для адаптера local: каталог задач
+  dir: .tasks/backlog         # для адаптера local: каталог задач; для kanban: где открыта доска
+  branch: board               # для kanban: ветка доски
+  push: true                  # для kanban: пушить ветку доски после каждой записи
 ```
 
 ## Авторинг адаптера

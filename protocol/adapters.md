@@ -9,7 +9,7 @@
 
 | Порт | Отвечает за | Контракт | Адаптеры в плагине |
 |---|---|---|---|
-| tracker | задачи: чтение, постановка, статус, комментарии, блок мультизадачи | `adapters/tracker/PORT.md` | youtrack, local, none |
+| tracker | задачи: чтение, постановка, статус, комментарии, блок мультизадачи | `adapters/tracker/PORT.md` | youtrack, local, kanban, none |
 | forge | pull request'ы: создание, чтение, публикация ревью | `adapters/forge/PORT.md` | github, none |
 | lang | гейты проверки, конвенции тестов, запрещённые подавления, инструменты навигации | `adapters/lang/PORT.md` | ts |
 | workspace | ветки, base branch, worktree, submodule, установка зависимостей, интеграция | `adapters/workspace/PORT.md` | git |
@@ -112,6 +112,15 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter tracker
 именем в `.claude/omixflow/scripts/` затеняет плагинный. Так проект подменяет,
 например, скрипт гейта, не трогая адаптер.
 
+Скрипты адаптера (`scripts:` во фронтматтере) вызываются через `resolve.py
+adapter-script {port} {key}`; лист цепочки затеняет базу по ключу. Два ключа
+зарезервированы под хуки `doctor`, адаптер объявляет их по желанию:
+
+| Ключ | Вызов | Вывод |
+|---|---|---|
+| `doctor` | `{script} --project {root} doctor` | JSON-список проверок `{name, status: OK \| WARN \| FAIL, detail}`; попадают в секцию порта отчёта, `detail` проблемы несёт команду исправления |
+| `detect` | `{script} --project {root} detect` | для `doctor --init`, конфига ещё нет: JSON-фрагмент `flow.yaml`, если адаптер узнал проект, иначе `null` |
+
 ## Что проверяет doctor
 
 - фронтматтер каждого адаптера в цепочке корректен, `port` совпадает с каталогом;
@@ -119,7 +128,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter tracker
 - объединённые `capabilities` цепочки покрывают `required` порта;
 - `requires.bin` есть в PATH, `requires.tools` соответствуют известным MCP-серверам;
 - замена без `extends` отмечается предупреждением;
-- маппинг агентов указывает на существующие файлы.
+- маппинг агентов указывает на существующие файлы;
+- проверки самого адаптера из хука `doctor`.
 
 ## Правила для авторов ядра
 

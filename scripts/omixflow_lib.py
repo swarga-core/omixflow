@@ -508,6 +508,16 @@ def resolve_adapter_script(port: str, name: str, key: str, root: Path) -> Option
     return None
 
 
+def artifacts_script(root: Path, cfg: Optional[Dict[str, Any]] = None) -> Optional[Path]:
+    """The `scripts.artifacts` of the tracker adapter when it declares the capability
+    `artifacts` (port tracker, «Артефакты в задаче»), else None."""
+    cfg = cfg if cfg is not None else load_config(root)
+    for name in adapters_for(cfg, "tracker"):
+        if "artifacts" in chain_capabilities(resolve_adapter("tracker", name, root)):
+            return resolve_adapter_script("tracker", name, "artifacts", root)
+    return None
+
+
 # ---------------------------------------------------------------- base branch
 
 _NUM_RE = re.compile(r"\d+")

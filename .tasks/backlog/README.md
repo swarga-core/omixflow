@@ -19,3 +19,4 @@
 | [omixflow-coder-mutation-report.md](omixflow-coder-mutation-report.md) | третий прогон лида 2026-10-04 (G-3) — coder обобщает мутационную проверку в отчёте вместо перечня проб и их исходов |
 | [omixflow-findings-prefix.md](omixflow-findings-prefix.md) | третий прогон лида 2026-10-04 (G-10) — findings Research в spec.md и findings ревью делят префикс `F`, метки в сообщениях лида путаются |
 | [omixflow-iteration-tracker-sync.md](omixflow-iteration-tracker-sync.md) | третий прогон лида 2026-10-04 (G-7) — итерация после вето меняет постановку, но не обновляет уточнённую формулировку в трекере |
+| [omixflow-kanban-tracker.md](omixflow-kanban-tracker.md) **[В РАБОТЕ]** | обсуждение 2026-10-04 после 0.3.0 — трекер kanban: доска на отдельной ветке в `.tasks/board/`, колонки-папки, карточка как досье задачи (`task.md`, `state.yaml`, артефакты), сквозные номера, несколько разработчиков, эпики; план работ из 11 шагов |

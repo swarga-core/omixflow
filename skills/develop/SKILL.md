@@ -45,8 +45,15 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 ### 1. Идентификация
 
-`identify` адаптера tracker: id или slug из свободной формулировки.
-`TASK_DIR = {artifacts.dir}/{id}`.
+`identify` адаптера tracker: id, slug из свободной формулировки или id задачи, которую
+адаптер завёл по ней сразу. `TASK_DIR = {artifacts.dir}/{id}`.
+
+### 1b. Рабочая копия (трекер с возможностью `artifacts`)
+
+Обновить трекер по разделу «Свежесть» адаптера, если он есть. Нет `TASK_DIR/state.yaml`,
+а у задачи в трекере есть состояние пайплайна (поле `phase` в записи задачи из `get`):
+`checkout {id} --to TASK_DIR`, дальше резюм как обычно. Задачи без состояния
+пайплайна поднимает Start.
 
 ### 1a. Лид
 

@@ -92,7 +92,7 @@ Step {N}/{total} of {id}
 Часть мультизадачи при `multitask.push: true`: `git push` ветки части после
 первого коммита.
 
-**2.5 Состояние.** `state.py step TASK_DIR done N`; log.md:
+**2.5 Состояние.** log.md:
 
 ```markdown
 ### Шаг {N}: {название} ✅
@@ -102,10 +102,13 @@ Step {N}/{total} of {id}
 - Коммит: {short hash}
 ```
 
+затем `state.py step TASK_DIR done N` (с трекером `artifacts` он публикует рабочую
+копию вместе с записью шага).
+
 ### 3. Завершение
 
-Все шаги в `steps_done`: `state.py finish TASK_DIR implement`; log.md
-`## Implement ✅`. Коммит состояния.
+Все шаги в `steps_done`: log.md `## Implement ✅`, затем `state.py finish TASK_DIR
+implement`. Коммит состояния.
 
 ## Итог (mode manual)
 

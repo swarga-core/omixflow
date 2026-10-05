@@ -33,7 +33,9 @@
           }
         },
         "create_defaults": { "type": "object", "additionalProperties": true },
-        "dir": { "type": "string" }
+        "branch": { "type": "string", "default": "board", "description": "kanban: ветка доски" },
+        "push": { "type": "boolean", "default": true, "description": "kanban: пушить ветку доски после каждой записи (несколько разработчиков)" },
+        "dir": { "type": "string", "description": "local: каталог задач; kanban: где открыта доска (по умолчанию .tasks/board)" }
       }
     },
     "forge": {

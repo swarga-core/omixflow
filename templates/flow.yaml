@@ -5,9 +5,9 @@
 version: 1
 
 # plugin:
-#   min_version: 0.3.0
+#   min_version: 0.4.0
 
-# Источник задач. Адаптеры плагина: youtrack, local, none. Свой: файл
+# Источник задач. Адаптеры плагина: youtrack, local, kanban, none. Свой: файл
 # .claude/omixflow/tracker/{name}.md с port: tracker.
 tracker:
   adapter: none
@@ -20,6 +20,9 @@ tracker:
   # create_defaults:                   # поля при создании задачи
   #   Type: Task
   # dir: .tasks/backlog                # каталог задач адаптера local
+  # kanban: доска на ветке board, открытой worktree в .tasks/board/; задачи T-1, T-2…
+  #   adapter: kanban, project: T (префикс номеров), branch: board, dir: .tasks/board,
+  #   push: true; artifacts.tracked: false, в .gitignore кодовых веток /.tasks/* и !/.tasks/_lead/
 
 # Хостинг кода. Адаптеры: github, none.
 forge:
