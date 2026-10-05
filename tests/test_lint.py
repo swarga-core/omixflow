@@ -32,7 +32,8 @@ import omixflow_lib as lib  # noqa: E402
 import state  # noqa: E402
 
 TEXT_SUFFIXES = {".md", ".py", ".yaml", ".yml", ".json", ".sh"}
-SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "tests"}
+# studio/: concept of a separate project with its own vocabulary, not part of the plugin.
+SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", "tests", "studio"}
 
 FORBIDDEN_TERMS = re.compile(r"подзадач|\bsubtask", re.I)
 FORBIDDEN_TERMS_EXEMPT = {"protocol/glossary.md", "CHANGELOG.md", "README.md",
