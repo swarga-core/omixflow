@@ -30,7 +30,7 @@
 | [hypotheses.md](hypotheses.md) | гипотезы `H-n` и как их проверить | ведётся |
 | [glossary.md](glossary.md) | словарь студии | черновик |
 | **Уровень 0** — `foundation/` | | |
-| `foundation/problems.md` | что болит в нынешней работе с агентами | не начат |
+| [foundation/problems.md](foundation/problems.md) | что болит в нынешней работе с агентами `PB-n` | черновик |
 | `foundation/goals.md` | цели и не-цели | не начат |
 | `foundation/actors.md` | участники и роли | не начат |
 | `foundation/scenarios.md` | ключевые сценарии — якоря для проверки остального | не начат |
