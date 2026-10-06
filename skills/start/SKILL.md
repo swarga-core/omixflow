@@ -84,8 +84,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
 ```
 
 `--tier` не передаётся при `triage: false`. `log.md`: секция `## Start ✅` с веткой,
-базой, профилем, статусом трекера. Коммит артефактов
-(`artifacts.tracked: true`).
+базой, профилем, статусом трекера. Коммит артефактов (`artifacts.md`).
 
 ### 4. Трекер
 

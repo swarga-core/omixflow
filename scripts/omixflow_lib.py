@@ -29,6 +29,11 @@ TEMPLATE_PATH = PLUGIN_ROOT / "templates" / "flow.yaml"
 GATES = ("typecheck", "test", "lint", "build", "e2e", "visual")
 ROLES = ("researcher", "architect", "coder", "tester", "reviewer", "web-fetcher")
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # part slugs, workspace.repos names
+# The formal record of a task kept by a tracker with the capability `artifacts`
+# (protocol/artifacts.md, «Хранение в задаче трекера»): the tracker owns these state.yaml
+# fields, the session owns the pipeline ones (tests/test_lint.py checks the protocol list).
+CARD_FIELDS = ("schema", "id", "kind", "title", "type", "owner", "parent", "links", "external",
+               "resolution", "blocked", "created", "imported")
 
 
 class OmixflowError(Exception):
@@ -138,6 +143,54 @@ def config_get(cfg: Dict[str, Any], dotted: str) -> Any:
         else:
             return None
     return cur
+
+
+def schema_default(dotted: str, schema: Optional[Dict[str, Any]] = None) -> Any:
+    """The `default` of a config key in schema/flow.schema.json, following `properties`
+    (and `$ref`) with the same longest-key rule as config_get. An object without its own
+    default yields the defaults of its children, or None when it has none."""
+    schema = schema if schema is not None else load_schema()
+
+    def deref(node: Dict[str, Any]) -> Dict[str, Any]:
+        return _resolve_ref(schema, node["$ref"]) if "$ref" in node else node
+
+    def defaults_of(node: Dict[str, Any]) -> Any:
+        node = deref(node)
+        if "default" in node:
+            return node["default"]
+        children = {k: defaults_of(v) for k, v in (node.get("properties") or {}).items()}
+        children = {k: v for k, v in children.items() if v is not None}
+        return children or None
+
+    parts = dotted.split(".")
+    node, i = deref(schema), 0
+    while i < len(parts):
+        props = node.get("properties") or {}
+        for j in range(len(parts), i, -1):
+            key = ".".join(parts[i:j])
+            if key in props:
+                node, i = deref(props[key]), j
+                break
+        else:
+            return None
+    return defaults_of(node)
+
+
+def config_value(cfg: Dict[str, Any], dotted: str, defaults: bool = True) -> Any:
+    """config_get with the schema defaults filled in: a missing key yields its default,
+    an object yields its default children under the configured ones."""
+    value = config_get(cfg, dotted)
+    if not defaults:
+        return value
+
+    def merge(base: Any, over: Any) -> Any:
+        if over is None:
+            return base
+        if isinstance(base, dict) and isinstance(over, dict):
+            return {**base, **{k: merge(base.get(k), v) for k, v in over.items()}}
+        return over
+
+    return merge(schema_default(dotted), value)
 
 
 # ------------------------------------------------------------- light validator

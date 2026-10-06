@@ -72,13 +72,11 @@ COLUMNS = ("backlog", "working", "review", "done")
 KINDS = ("task", "epic")
 TYPES = ("feature", "bug", "chore", "docs")
 RESOLUTIONS = ("done", "canceled", "skipped")
-SETTABLE = ("title", "type", "owner", "parent", "external", "resolution", "blocked")
-FORMAL = ("schema", "id", "kind", "title", "type", "owner", "parent", "links", "external",
-          "resolution", "blocked", "created", "updated")
+# Resolution changes only with the column (move): it is set in done and cleared elsewhere.
+SETTABLE = ("title", "type", "owner", "parent", "external", "blocked")
 # The board owns these state.yaml fields and comments.md; the session owns task.md and the
 # pipeline fields after Start (protocol/artifacts.md, «Хранение в задаче трекера»).
-BOARD_OWNED = ("schema", "id", "kind", "title", "type", "owner", "parent", "links", "external",
-               "resolution", "blocked", "created", "imported")
+BOARD_OWNED = lib.CARD_FIELDS
 BOARD_FILES = ("comments.md",)
 DEFAULT_BRANCH = "board"
 DEFAULT_DIR = ".tasks/board"
@@ -147,7 +145,8 @@ class Board:
         self.rel_dir = str(lib.config_get(cfg, "tracker.dir") or DEFAULT_DIR)
         push = lib.config_get(cfg, "tracker.push")
         self.push_enabled = True if push is None else bool(push)
-        self.common = Path(git(self.root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        # Relative to the root when git prints it relative; no --path-format (git 2.31+).
+        self.common = (self.root / git(self.root, "rev-parse", "--git-common-dir")).resolve()
         self.id_re = re.compile(rf"^({re.escape(self.prefix)}-(\d+))(?:-[a-z0-9-]+)?$")
 
     # ------------------------------------------------------------ location
@@ -438,6 +437,8 @@ class Board:
             raise lib.OmixflowError(f"тип задачи: {TYPES}")
         if parent:
             self.check_parent(parent)
+        if not title.strip():
+            raise lib.OmixflowError("название не может быть пустым")
         cid = self.next_id()
         card = self.board() / "backlog" / f"{cid}-{slugify(slug or title)}"
         card.mkdir(parents=True)
@@ -450,7 +451,9 @@ class Board:
         self.commit(f"board: {cid} create")
         return cid
 
-    def check_parent(self, parent: str) -> None:
+    def check_parent(self, parent: str, child: Optional[str] = None) -> None:
+        if parent == child:
+            raise lib.OmixflowError(f"{child} не может быть родителем самому себе")
         if self.read_state(self.card(parent)).get("kind") != "epic":
             raise lib.OmixflowError(f"{parent} не эпик: родителем задачи может быть только эпик")
 
@@ -503,23 +506,41 @@ class Board:
             shutil.move(str(card), str(target))
         return target
 
-    def set_fields(self, cid: str, pairs: List[str]) -> None:
+    def set_fields(self, cid: str, pairs: List[str]) -> List[str]:
+        """Set formal fields; returns warnings. A new title rewrites the heading of task.md
+        while the session does not own it (backlog, or an epic)."""
         card = self.card(cid)
         state = self.read_state(card)
+        warnings: List[str] = []
         for pair in pairs:
             key, sep, value = pair.partition("=")
             if not sep or key not in SETTABLE:
-                raise lib.OmixflowError(f"ожидается KEY=VALUE, KEY из {SETTABLE}: {pair!r}")
+                hint = "; резолюция меняется с колонкой: move --to done --resolution R" if key == "resolution" else ""
+                raise lib.OmixflowError(f"ожидается KEY=VALUE, KEY из {SETTABLE}: {pair!r}{hint}")
             val: Any = value if value not in ("", "null") else None
             if key == "type" and val not in TYPES:
                 raise lib.OmixflowError(f"тип задачи: {TYPES}")
-            if key == "resolution" and val is not None and val not in RESOLUTIONS:
-                raise lib.OmixflowError(f"резолюция: {RESOLUTIONS}")
+            if key == "title" and not val:
+                raise lib.OmixflowError("название не может быть пустым")
             if key == "parent" and val is not None:
-                self.check_parent(val)
+                self.check_parent(val, cid)
+            if key == "title":
+                warnings += self.retitle(cid, card, state, val)
             state[key] = val
         self.write_state(card, state)
         self.commit(f"board: {cid} set {' '.join(p.split('=', 1)[0] for p in pairs)}")
+        return warnings
+
+    def retitle(self, cid: str, card: Path, state: Dict[str, Any], title: str) -> List[str]:
+        if card.parent.name != "backlog" and state.get("kind") != "epic":
+            return [f"{cid} в {card.parent.name}: заголовок task.md принадлежит рабочей копии сессии, "
+                    "поправить его там"]
+        path = card / "task.md"
+        head, sep, rest = path.read_text(encoding="utf-8").partition("\n")
+        if not head.startswith(f"# {cid}: "):
+            return [f"{cid}: первая строка task.md не вида «# {cid}: …», заголовок не тронут"]
+        path.write_text(f"# {cid}: {title}{sep}{rest}", encoding="utf-8")
+        return []
 
     def link(self, a: str, b: str) -> None:
         if a == b:
@@ -570,13 +591,14 @@ def publish(b: "Board", cid: str, source: Path) -> int:
 
 
 def checkout(b: "Board", cid: str, target: Path, force: bool) -> str:
-    """Restore the working copy from the card; refuse to clobber a different one."""
+    """Restore the working copy from the card: afterwards it equals the card (files the card
+    lacks are removed); refuse to clobber a different copy without --force."""
     with b.locked():
         b.refresh()
     card = b.card(cid)
     theirs = card_files(card)
-    if target.exists() and not force:
-        mine = card_files(target)
+    mine = card_files(target) if target.exists() else {}
+    if not force:
         differs = sorted(rel for rel in mine if rel != "state.yaml" and theirs.get(rel) != mine[rel])
         if differs:
             raise lib.OmixflowError(f"{target}: рабочая копия отличается от карточки ({', '.join(differs[:5])}); "
@@ -585,6 +607,11 @@ def checkout(b: "Board", cid: str, target: Path, force: bool) -> str:
         path = target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+    for rel in set(mine) - set(theirs):
+        (target / rel).unlink()
+    for d in sorted((p for p in target.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+        if not any(d.iterdir()):
+            d.rmdir()
     return str(target)
 
 
@@ -858,7 +885,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif ns.cmd == "move":
             print(b.transaction(lambda: b.move(ns.id, ns.to, ns.resolution)))
         elif ns.cmd == "set":
-            b.transaction(lambda: b.set_fields(ns.id, ns.pairs))
+            for warning in b.transaction(lambda: b.set_fields(ns.id, ns.pairs)):
+                print(f"omixflow: {warning}", file=sys.stderr)
         elif ns.cmd == "link":
             b.transaction(lambda: b.link(ns.id, ns.other))
         elif ns.cmd == "publish":

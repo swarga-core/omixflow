@@ -63,6 +63,50 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(lib.config_get(cfg, "workspace.submodules.0.path"), "omix")
         self.assertIsNone(lib.config_get(cfg, "nope.nope"))
 
+    def test_schema_defaults(self):
+        self.assertEqual(lib.schema_default("limits.coder_iterations"), 7)
+        self.assertEqual(lib.schema_default("models"), {"strong": "opus", "light": "sonnet"})
+        self.assertEqual(lib.schema_default("lead.actions.memory"), "lead")
+        self.assertIsNone(lib.schema_default("tracker.project"))
+        self.assertIsNone(lib.schema_default("nope.nope"))
+        cfg = {"limits": {"review_passes": 5}, "lead": {"actions": {"backlog": "developer"}}}
+        self.assertEqual(lib.config_value(cfg, "limits"),
+                         {"coder_iterations": 7, "review_passes": 5, "agent_rotation_steps": 10})
+        self.assertEqual(lib.config_value(cfg, "lead.actions"), {"backlog": "developer", "memory": "lead"})
+        self.assertIsNone(lib.config_value(cfg, "limits.coder_iterations", defaults=False))
+
+
+class CfgScriptTests(unittest.TestCase):
+    """cfg.py: values from flow.yaml, schema defaults for missing keys, `get` tolerated."""
+
+    def setUp(self):
+        import cfg as cfg_script
+        self.script = cfg_script
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        path = self.root / ".claude" / "omixflow" / "flow.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text("version: 1\ntracker: none\nlimits: {review_passes: 5}\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def call(self, *args: str):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = self.script.main([*args, "--project", str(self.root)])
+        return code, out.getvalue().strip()
+
+    def test_value_default_raw_and_get(self):
+        self.assertEqual(self.call("limits.review_passes"), (0, "5"))
+        self.assertEqual(self.call("limits.coder_iterations"), (0, "7"))
+        self.assertEqual(self.call("artifacts.tracked"), (0, "true"))
+        self.assertEqual(self.call("limits.coder_iterations", "--raw"), (1, "null"))
+        self.assertEqual(self.call("tracker.project"), (1, "null"))
+        self.assertEqual(self.call("get", "tiers.s_max_files"), (0, "5"))
+
 
 class AdapterTests(unittest.TestCase):
     def test_project_extension_chains_onto_plugin_adapter(self):

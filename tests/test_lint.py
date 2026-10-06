@@ -188,7 +188,8 @@ class ScriptCallLint(unittest.TestCase):
     strings (`state.py complete` was refused in five live runs)."""
     RISKY = {"complete", "compgen", "eval", "exec", "source", "trap", "command", "builtin", "alias", "bind"}
     PARSER_RE = re.compile(r'add_parser\(\s*"([a-z-]+)"')
-    COMPLETE_CALL_RE = re.compile(r"""state\.py["']?\s+complete\b""")
+    COMPLETE_CALL_RE = re.compile(
+        r"""state\.py["']?\s+complete\b|`complete\s+(refine|start|research|spec|plan|implement|review|finalize)\b""")
 
     def test_script_subcommands_avoid_risky_builtins(self):
         hits = []
@@ -205,6 +206,36 @@ class ScriptCallLint(unittest.TestCase):
                 if self.COMPLETE_CALL_RE.search(line):
                     hits.append(f"{rel}:{n}: {line.strip()}")
         self.assertEqual(hits, [], "state.py complete вместо finish:\n" + "\n".join(hits))
+
+
+class ArtifactsCommitLint(unittest.TestCase):
+    """Whether task artifacts are committed depends on artifacts.tracked (protocol/artifacts.md,
+    «Коммит артефактов»): skills name the commit only together with that rule."""
+    COMMIT_RE = re.compile(r"[Кк]оммит (артефактов|состояния)")
+
+    def test_skills_reference_the_artifacts_commit_rule(self):
+        hits = []
+        for path in iter_files("skills"):
+            rel = path.relative_to(ROOT).as_posix()
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for n, line in enumerate(lines, 1):
+                window = line + " " + (lines[n] if n < len(lines) else "")
+                if self.COMMIT_RE.search(line) and "artifacts.md" not in window:
+                    hits.append(f"{rel}:{n}: {line.strip()}")
+        self.assertEqual(hits, [], "коммит артефактов без ссылки на artifacts.md:\n" + "\n".join(hits))
+
+
+class CardFieldsLint(unittest.TestCase):
+    """omixflow_lib.CARD_FIELDS (used by state.py and the kanban board) is the formal record
+    that protocol/artifacts.md lists in «Хранение в задаче трекера»."""
+
+    def test_card_fields_are_the_protocol_list(self):
+        text = (ROOT / "protocol" / "artifacts.md").read_text(encoding="utf-8")
+        start = text.index("- **`state.yaml`** при создании задачи")
+        end = text.index("\n- **", start + 1)
+        named = set(re.findall(r"`([a-z_]+)`", text[start:end]))
+        self.assertEqual(sorted(set(lib.CARD_FIELDS) - {"schema"} - named), [],
+                         "поля CARD_FIELDS, которых нет в перечне artifacts.md")
 
 
 class DecisionPointsLint(unittest.TestCase):

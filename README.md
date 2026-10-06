@@ -121,7 +121,7 @@ python3 scripts/resolve.py base                   # разрешённая base-
 python3 scripts/resolve.py repo omix-lib --json   # запись workspace.repos: ref → sha, HEAD, dirty
 python3 scripts/resolve.py repo --list            # имена workspace.repos через запятую
 python3 scripts/resolve.py adapter lang --project ../other --fallback-project .  # чужой репозиторий без flow.yaml
-python3 scripts/cfg.py workspace.setup            # значение из flow.yaml
+python3 scripts/cfg.py workspace.setup            # значение из flow.yaml, иначе умолчание схемы (--raw: без него)
 python3 scripts/state.py get .tasks/AL-1          # состояние задачи (init/set/finish/next/step; ask/ack/close для лида)
 python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/meta/waves/ready/set/seed/file
 python3 scripts/lead.py show                      # журнал лида: decide/escalate/resolve/replace/rule/oblige/approve/accept/register/list
@@ -136,7 +136,8 @@ python3 scripts/accept.py plan task/AL-1 --into main  # приёмка мерж�
 артефакты пайплайна), работа нескольких разработчиков через push с повторами,
 эпики с дочерними задачами, переезд с `local`. Артефакты задачи живут в карточке
 и на кодовые ветки не попадают. Проверен скриптовым прогоном на двух клонах
-и живой сессией.
+и живой сессией. `0.4.1`: исправления по первому реальному проекту на kanban (коммит
+артефактов по `artifacts.tracked`, умолчания схемы в `cfg.py`, инварианты доски).
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

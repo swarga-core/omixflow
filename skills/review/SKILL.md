@@ -72,6 +72,9 @@ SendMessage тому же reviewer по тем же id. Не больше `limit
 
 ### 5. Коммит и состояние
 
+Фиксы кода одним коммитом; артефакты (`state.yaml`, `log.md`, `review/`) — в нём же
+по правилу «Коммит артефактов» (`artifacts.md`):
+
 ```
 fix: address review findings for {id}
 ```

@@ -30,7 +30,7 @@ Task spec: дельта, а не полное состояние. Что мен�
 как у architect: modified / new / removed contracts, decisions, out of scope)
 и `## Steps` (2–4 атомарных шага с файлами CREATE/MODIFY и тест-чекпоинтами,
 заменяет plan.md). Отдельное ревью артефакта не проводится: его покрывает
-единый Review в фазе review. Состояние: `complete spec` и `complete plan`.
+единый Review в фазе review. Состояние: `state.py finish TASK_DIR spec`, затем `… plan`.
 log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
 
 ### M: architect в режиме spec+plan, один общий review
@@ -43,7 +43,7 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    spec.md, plan.md`, категории spec, plan, architecture,
    `FINDINGS_PATH: {TASK_DIR}/review/spec-pass{N}.json`.
 3. Findings и FIX-цикл по review-cycle.md; фиксы идут architect'у по имени.
-4. Состояние: `complete spec`, `complete plan`. log.md: обе секции с числом findings
+4. Состояние: `state.py finish TASK_DIR spec`, затем `… plan`. log.md: обе секции с числом findings
    и проходов. Фаза plan затем пропускается.
 
 ### L: spec отдельно
@@ -59,9 +59,9 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. FIX: SendMessage `architect-{id}` с `MODE: fix` и принятыми findings. Re-review:
    SendMessage `reviewer-{id}` по тем же id. Не больше `limits.review_passes`.
-5. Состояние: `complete spec`. log.md: `## Spec ✅`, findings, проходов.
+5. Состояние: `state.py finish TASK_DIR spec`. log.md: `## Spec ✅`, findings, проходов.
 
-Во всех тирах коммит артефактов после фазы. Имена агентов записать в состояние:
+Во всех тирах коммит артефактов после фазы (`artifacts.md`). Имена агентов записать в состояние:
 `state.py set TASK_DIR agents.architect=architect-{id} agents.reviewer=reviewer-{id}`.
 
 ## Итог (mode manual)

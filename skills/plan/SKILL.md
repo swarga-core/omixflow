@@ -41,7 +41,7 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
    тому же reviewer по тем же id, не больше `limits.review_passes`.
 5. **Состояние.** `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
-   steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов. Коммит.
+   steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов. Коммит артефактов (`artifacts.md`).
 
 ## Итог (mode manual)
 

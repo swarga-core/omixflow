@@ -147,7 +147,8 @@ class BoardTests(BoardCase):
         self.assertEqual((info["owner"], info["blocked"]), ("anna", "ждёт API"))
         self.ok("set", "T-1", "blocked=null")
         self.assertIsNone(json.loads(self.ok("get", "T-1"))["blocked"])
-        for bad in (("T-1", "column=done"), ("T-1", "type=epic"), ("T-1", "parent=T-2"), ("T-1", "owner")):
+        for bad in (("T-1", "column=done"), ("T-1", "type=epic"), ("T-1", "parent=T-2"), ("T-1", "owner"),
+                    ("T-1", "resolution=canceled")):
             with self.subTest(bad=bad):
                 self.assertEqual(self.call("set", *bad)[0], 2)
         self.ok("link", "T-1", "T-2")
@@ -155,6 +156,32 @@ class BoardTests(BoardCase):
         self.assertEqual(json.loads(self.ok("get", "T-1"))["state"]["links"], ["T-2"])
         self.assertEqual(json.loads(self.ok("get", "T-2"))["state"]["links"], ["T-1"])
         self.assertEqual(self.call("link", "T-1", "T-1")[0], 2)
+
+    def test_resolution_only_with_the_column_and_no_self_parent(self):
+        self.create("Задача")
+        code, _, err = self.call("set", "T-1", "resolution=canceled")
+        self.assertEqual(code, 2)
+        self.assertIn("move --to done", err)
+        self.assertIsNone(json.loads(self.ok("get", "T-1"))["resolution"])
+        self.create("Эпик", "--kind", "epic")
+        code, _, err = self.call("set", "T-2", "parent=T-2")
+        self.assertEqual(code, 2)
+        self.assertIn("самому себе", err)
+
+    def test_title_rewrites_the_heading_only_while_the_board_owns_task_md(self):
+        self.create("Старое")
+        self.ok("set", "T-1", "title=Новое название")
+        info = json.loads(self.ok("get", "T-1"))
+        self.assertEqual(info["title"], "Новое название")
+        self.assertTrue(info["task_md"].startswith("# T-1: Новое название\n\n## Исходная формулировка"))
+        self.ok("move", "T-1", "--to", "working")
+        code, _, err = self.call("set", "T-1", "title=После старта")
+        self.assertEqual(code, 0)
+        self.assertIn("рабочей копии", err)
+        info = json.loads(self.ok("get", "T-1"))
+        self.assertEqual(info["title"], "После старта")
+        self.assertTrue(info["task_md"].startswith("# T-1: Новое название"))
+        self.assertEqual(self.call("set", "T-1", "title=")[0], 2)
 
     def test_board_md_sections_and_epic_progress(self):
         self.create("Эпик", "--kind", "epic")
@@ -297,8 +324,13 @@ class ArtifactsTests(BoardCase):
         code, _, err = self.call("checkout", "T-1", "--to", str(work))
         self.assertEqual(code, 2)
         self.assertIn("неопубликованная работа", err)
+        (work / "review").mkdir()
+        (work / "review" / "spec-pass1.json").write_text("{}", encoding="utf-8")
         self.ok("checkout", "T-1", "--to", str(work), "--force")
         self.assertFalse((self.card() / "spec.md").exists())
+        self.assertFalse((work / "spec.md").exists(), "--force leaves the working copy equal to the card")
+        self.assertFalse((work / "review").exists())
+        self.assertEqual(sorted(p.name for p in work.iterdir()), ["state.yaml", "task.md"])
 
     def test_describe_only_while_in_backlog(self):
         self.create("Задача")

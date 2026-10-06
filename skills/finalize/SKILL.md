@@ -133,8 +133,8 @@ PR или сдача лиду → in_review (Recommended); интеграция 
 
 ### 8. Состояние и итог
 
-`state.py finish TASK_DIR finalize` (фаза становится `done`). Коммит
-артефактов до выхода из worktree. Трекер с возможностью `artifacts`: `finish` публикует
+`state.py finish TASK_DIR finalize` (фаза становится `done`). Коммит артефактов
+(`artifacts.md`) до выхода из worktree. Трекер с возможностью `artifacts`: `finish` публикует
 итог, тоже до выхода из worktree; статус задачи `done` → ещё раз `publish {id} --from
 TASK_DIR` и при коде 0 удалить `TASK_DIR` (`finish` при сбое публикации только
 предупреждает); при `in_review` рабочая копия остаётся для доработки.
@@ -150,7 +150,7 @@ squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставл�
 
 1. log.md: `## Finalize ✅` с числом файлов в карте, вопросов (отвечено, отложено).
 2. Гочи как в шаге 3.
-3. Коммит research.md и артефактов задачи.
+3. Коммит артефактов задачи с research.md (`artifacts.md`).
 4. PR с артефактами из ветки задачи: предложить как способ `pr` шага 4 в точке
    `forge.pr` (Summary из task.md, ключевые findings вместо Changes, без Test plan).
    Трекер с возможностью `artifacts`: шаги 3–4 не выполняются, итог исследования

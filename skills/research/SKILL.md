@@ -128,7 +128,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" research
 ```
 
 `log.md`: `## Research ✅` с числом файлов в карте, вопросов и ответов, веб-ресёрч
-да/нет, пометка `(inline)` для S. Коммит артефактов (в мультизадаче с
+да/нет, пометка `(inline)` для S. Коммит артефактов (`artifacts.md`; в мультизадаче с
 `part_isolation: shared` только пути каталога части, правило «Явные пути»
 multitask.md).
 

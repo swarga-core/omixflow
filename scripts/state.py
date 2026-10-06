@@ -75,8 +75,7 @@ DEFAULT_PROFILE = "full"
 PHASES: List[str] = PROFILES[DEFAULT_PROFILE]["phases"]
 KINDS = ("task", "multitask", "part")
 # Formal fields of a tracker card kept by init when it completes a card record.
-CARD_FIELDS = ("schema", "id", "kind", "title", "type", "owner", "parent", "links", "external",
-               "resolution", "blocked", "created", "imported")
+CARD_FIELDS = lib.CARD_FIELDS
 MODES = ("pipeline", "manual")
 TIERS = ("S", "M", "L")
 WAITS = ("wait", "nowait")
