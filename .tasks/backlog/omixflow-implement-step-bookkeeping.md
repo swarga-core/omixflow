@@ -1,0 +1,44 @@
+---
+id: omixflow-implement-step-bookkeeping
+title: Учёт шагов Implement — условные и отложенные шаги, step start, хеш шага в log.md
+status: draft
+type: feature
+created: 2026-10-06
+updated: 2026-10-06
+origin: прогоны AL-1138, AL-1151, AL-1157, AL-1160 (черновики issues-al-*, разобраны 2026-10-06)
+target: omixflow
+external:
+links: []
+---
+
+**Контекст.** Модель шагов — линейный список с числом `steps_total`. Живые задачи требуют
+шагов, зависящих от внешних событий, а учёт текущего шага и хеша коммита в log.md держится
+на догадках оркестратора.
+
+**Проблемы.**
+1. **Условные и отложенные шаги.** AL-1157: шаг 9 выполнялся, только если соседняя задача
+   влита раньше; `steps_total` правили вручную 8 → 9, полный e2e дважды переносили с шага 8.
+   AL-1160: шаг 9 ждал мержа соседа, шаг 7 — стенда за VPN; Implement закрыт с
+   `steps_done: [1..6, 8, 9]` без записи о седьмом, Review шёл в два прохода (шаги 1–8, затем
+   дельта). Нет поля в формате шага (`agents/architect.md:97-112`), нет команды
+   (`scripts/state.py:348-362`: только `start`/`done`), `finish implement`
+   (`state.py:320-331`) не сверяет `steps_done` со `steps_total`.
+2. **`step start` не вызывается** (AL-1138): команда есть (`state.py:13`, `:352-355`), скил
+   её не вызывает (`skills/implement/SKILL.md:34` читает `step`, 2.5 зовёт только `done`); до
+   первого `done` в состоянии `step: null`, резюм посреди шага 1 угадывает.
+3. **Хеш шага недостижим в том же коммите** (AL-1151): 2.4 коммитит, 2.5 пишет
+   `Коммит: {short hash}` в log.md, а правило велит log.md в том же коммите; хеши уезжали
+   в коммит следующего шага, после rebase все устаревают (`protocol/artifacts.md`, «log.md»).
+
+**Предложение.**
+1. В plan.md поля шага `Waits for:` и `Deferrable:`; в состоянии
+   `steps_deferred: [{step, reason, until}]`; `state.py step … defer|drop`; `finish implement`
+   отказывает при невыполненных и неснятых шагах; полный долгий гейт — на последнем
+   выполняемом шаге; Review по дельте (`--delta {sha}`) с проверкой прежних findings по id;
+   Finalize выносит открытые критерии в комментарий и бэклог.
+2. Implement 2.1: `state.py step TASK_DIR start N` перед спавном или SendMessage.
+3. В секции шага `Коммит: {тема}`, хеши одним списком на Finalize
+   (`git log --oneline {base}..HEAD`).
+
+**Критерии приёмки.** Тесты `state.py` на defer/drop и отказ `finish`; скил implement
+и формат log.md без недостижимого хеша.

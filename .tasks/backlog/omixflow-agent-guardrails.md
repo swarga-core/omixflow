@@ -1,0 +1,40 @@
+---
+id: omixflow-agent-guardrails
+title: Ограждения агентов — git-состояние, самопроверка подавлений, пересказ правил адаптера в промпте
+status: draft
+type: bug
+created: 2026-10-06
+updated: 2026-10-06
+origin: прогоны AL-1138, AL-1158, AL-1164 (черновики issues-al-*, разобраны 2026-10-06)
+target: omixflow
+external:
+links: [omixflow-agent-escape-bytes]
+---
+
+**Проблемы.**
+1. **Git-состояние** (AL-1138, шаг 6): coder сделал `git stash`/`stash pop`, чтобы сравнить
+   вывод biome с базой, пока в фоне шёл `turbo build:dev`. В 0.3.0 закрыт только откат
+   мутационной пробы (`agents/coder.md:81-86`); общего запрета в Rules (`:116-127`) нет,
+   у tester'а git не упоминается.
+2. **Подавления без самопроверки** (AL-1158): tester в фиксе ревью написал
+   `} as unknown as typeof WebSocket;` — конструкция из `suppressions` `lang/ts`
+   (`adapters/lang/ts.md:49`), biome её не ловит, lint зелёный; заметил coder соседних файлов.
+   `adapters/lang/PORT.md:22` не числит tester среди потребителей `suppressions`;
+   re-review проверяет только исправленные findings.
+3. **Пересказ правил адаптера в промпте** (AL-1164): оркестратор написал coder'у «no
+   diagnostic suppressions», coder остановился на `noDocumentCookie` и эскалировал, хотя
+   адаптер разрешает обоснованный `biome-ignore`. Тексты к тому же расходятся:
+   `agents/coder.md:120-122` и `protocol/phases.md:44-45` — без исключений,
+   `adapters/lang/PORT.md:50-51` — исключение с обоснованием, `adapters/lang/ts.md:50`.
+
+**Предложение.**
+1. Rules coder и tester: только правки файлов; `stash`, `checkout`, `restore`, `reset`,
+   `commit`, `clean`, `switch` запрещены, коммитит оркестратор; сравнение с базой —
+   `git show {ref}:{path}`, `git diff {ref} -- {path}`; исключение — `git add` в `MODE: sync`.
+2. Перед отчётом coder и tester проходят изменённые файлы списком `suppressions`; находка —
+   исправить или в NOTES с причиной. `PORT.md:22` + tester. Reviewer на Review смотрит весь
+   дифф ветки.
+3. Шаблон спавна (`runtime.md`) и implement: правила адаптера в промпте не пересказываются,
+   только ссылка на раздел; `coder.md` и `phases.md` называют исключение из `PORT.md`.
+
+**Критерии приёмки.** Rules агентов и `PORT.md` дополнены; тексты о подавлениях согласованы.
