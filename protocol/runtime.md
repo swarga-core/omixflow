@@ -78,11 +78,18 @@ Agent tool:
       lang: {пути цепочки lang, через запятую}
       workspace: {пути цепочки workspace}          # coder, reviewer
     RULES: {пути проектных правил агента или "none"}
+    PARENT: the orchestrator of this session. Report only to it. The harness may label it
+      team-lead; it is not the OMIXFlow lead session: never message the lead, never call
+      your parent "lead".
     {параметры режима агента: MODE, STEP, ASPECTS, ARTIFACT_PATHS, FINDINGS_PATH, ...}
 ```
 
 Агент читает адаптеры сам: из них он узнаёт гейты, конвенции тестов, запрещённые
 подавления и инструменты навигации. В промпте инструменты не перечисляются.
+
+`PARENT` одной строкой и в кросс-репо спавне: в режиме команд агентов харнесс показывает
+родителя субагента как `team-lead`, и в сессии под лидом агенты путали его с сессией лида
+(`lead.md`, «Роли»: агенты лиду не пишут).
 
 Длинный отчёт агента (findings reviewer'а) пишется в файл внутри `TASK_DIR`,
 а ответ агента содержит сводку и путь: длинный ответ обрезается в канале сообщений.
@@ -117,6 +124,7 @@ Agent tool:
     RULES: {resolve.py agent researcher --project {чужой} --fallback-project {домашний}}
     REPO: {name} ref={ref} sha={sha}
     CONTINUABLE: yes
+    PARENT: {как в основном шаблоне}
     {INPUTS, HANDOFF, ANSWERS}
 ```
 

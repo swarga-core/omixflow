@@ -33,10 +33,12 @@ lifts it from backlog to working. A child closes in done, canceled or not.
 
 Every write is one transaction: take a lock in the common git dir; with
 `tracker.push` (default) fetch `origin/{branch}` and rebase the board onto it; apply
-the change, rebuild board.md and commit; push. A rejected push undoes the local
-commit and repeats the transaction (a new id is computed for `create`, a stale
-revision fails `describe`); no connection undoes it and fails: the board never keeps
-an unpublished write. Reads use the local board; `pull` refreshes it. Commands find
+the change, rebuild board.md and commit; push. A push refused as non-fast-forward
+(`! [rejected]`, a concurrent write) undoes the local commit and repeats the transaction
+(a new id is computed for `create`, a stale revision fails `describe`); a server refusal
+(`! [remote rejected]`) or no connection undoes it and fails without retries: the board
+never keeps an unpublished write. Reads use the local board; `pull` refreshes it, and
+`checkout` without a connection warns and reads the local board. Commands find
 the board from any worktree of the repository. `describe` writes task.md only while the
 task card is in backlog: after Start the session owns it and publishes it (an epic has
 no session and stays writable).
@@ -62,7 +64,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
 
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[3] / "scripts"))
@@ -83,6 +85,8 @@ DEFAULT_DIR = ".tasks/board"
 EXIT_STALE = 3
 REMOTE = "origin"
 RETRIES = 3
+SANDBOX_HINT = ("в песочнице Claude Code ssh-агент недоступен — команды доски с tracker.push "
+                "запускать вне песочницы (adapters/tracker/kanban.md, «Песочница»)")
 T = TypeVar("T")
 
 TRANSLIT = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
@@ -205,7 +209,7 @@ class Board:
         proc = subprocess.run(["git", "-C", str(self.root), "fetch", "-q", REMOTE],
                               capture_output=True, text=True)
         if proc.returncode != 0:
-            raise lib.OmixflowError(f"нет связи с {REMOTE}: доска не обновлена ({proc.stderr.strip()})")
+            raise NoConnection(f"нет связи с {REMOTE}: доска не обновлена ({proc.stderr.strip()}); {SANDBOX_HINT}")
 
     def refresh(self) -> None:
         """Bring the local board onto the remote one before a change."""
@@ -232,16 +236,21 @@ class Board:
     def _before_push(self) -> None:
         """Hook for tests: runs between the local commit and the push."""
 
-    def push(self) -> str:
+    def push(self) -> Tuple[str, str]:
+        """Push the board: ("ok" | "rejected" | "failed" | "offline", git's message).
+        Only a non-fast-forward refusal (`! [rejected]`) is a concurrent write worth a retry;
+        `! [remote rejected]` is the server's refusal (error, hook, branch rule)."""
         self._before_push()
         proc = subprocess.run(["git", "-C", str(self.board()), "push", "-q", REMOTE,
                                f"{self.branch}:{self.branch}"], capture_output=True, text=True)
         if proc.returncode == 0:
-            return "ok"
-        err = proc.stderr
-        if "rejected" in err or "non-fast-forward" in err or "fetch first" in err:
-            return "rejected"
-        return "offline"
+            return "ok", ""
+        err = proc.stderr.strip()
+        if "[remote rejected]" in err:
+            return "failed", err
+        if "[rejected]" in err or "non-fast-forward" in err or "fetch first" in err:
+            return "rejected", err
+        return "offline", err
 
     def transaction(self, fn: Callable[[], T]) -> T:
         with self.locked():
@@ -255,12 +264,17 @@ class Board:
                     raise
                 if not self.push_enabled or self.head() == head:
                     return result
-                status = self.push()
+                status, detail = self.push()
                 if status == "ok":
                     return result
                 self.restore(head)
+                if status == "failed":
+                    raise lib.OmixflowError(f"{REMOTE} отклонил push доски: запись отменена, доска не изменилась "
+                                            f"({detail}); повтор не поможет, пока не устранена причина на стороне "
+                                            f"{REMOTE}")
                 if status == "offline":
-                    raise lib.OmixflowError(f"нет связи с {REMOTE}: запись отменена, доска не изменилась")
+                    raise NoConnection(f"нет связи с {REMOTE}: запись отменена, доска не изменилась ({detail}); "
+                                       f"{SANDBOX_HINT}")
             raise lib.OmixflowError(f"push доски отклонён {RETRIES} раза подряд: доска занята, повтори позже")
 
     def pull(self) -> str:
@@ -424,7 +438,7 @@ class Board:
         if not (board / "README.md").exists():
             (board / "README.md").write_text(README.format(branch=self.branch, dir=self.rel_dir), encoding="utf-8")
         self.commit("board: init")
-        if remote and self.push() != "ok":
+        if remote and self.push()[0] != "ok":
             raise lib.OmixflowError(f"доска создана локально, но не опубликована в {REMOTE}: "
                                     "проверь связь и права, затем board.py pull")
         return str(board)
@@ -592,9 +606,14 @@ def publish(b: "Board", cid: str, source: Path) -> int:
 
 def checkout(b: "Board", cid: str, target: Path, force: bool) -> str:
     """Restore the working copy from the card: afterwards it equals the card (files the card
-    lacks are removed); refuse to clobber a different copy without --force."""
+    lacks are removed); refuse to clobber a different copy without --force. Without a
+    connection it reads the local board and warns (a read, like `pull` in «Свежесть»)."""
     with b.locked():
-        b.refresh()
+        try:
+            b.refresh()
+        except NoConnection as e:
+            print(f"omixflow: {e}; рабочая копия восстановлена из локальной доски, она может отставать "
+                  f"от {REMOTE}", file=sys.stderr)
     card = b.card(cid)
     theirs = card_files(card)
     mine = card_files(target) if target.exists() else {}
@@ -617,6 +636,10 @@ def checkout(b: "Board", cid: str, target: Path, force: bool) -> str:
 
 class StaleRevision(lib.OmixflowError):
     pass
+
+
+class NoConnection(lib.OmixflowError):
+    """origin is unreachable (network, credentials, or the sandbox without the ssh agent)."""
 
 
 LOCAL_COLUMNS = {"draft": "backlog", "ready": "backlog", "in_work": "working", "in_review": "review",

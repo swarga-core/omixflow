@@ -601,6 +601,34 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(code, 3, err)
         self.assertIn("Борис уточнил.", git(self.origin, "show", "board:backlog/T-1-obshchaya/task.md"))
 
+    def test_remote_rejection_is_a_failure_not_a_race(self):
+        self.ok(self.a, "init")
+        head = git(self.a / ".tasks" / "board", "rev-parse", "HEAD")
+        counter = Path(self.tmp.name) / "hook-calls"
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text(f"#!/bin/sh\necho call >> '{counter}'\necho 'Internal Server Error' >&2\nexit 1\n",
+                        encoding="utf-8")
+        hook.chmod(0o755)
+        code, _, err = self.call(self.a, "create", "--title", "Сервер отказал")
+        self.assertEqual(code, 2)
+        self.assertIn("отклонил push", err)
+        self.assertIn("remote rejected", err)
+        self.assertNotIn("доска занята", err)
+        self.assertEqual(counter.read_text(encoding="utf-8").count("call"), 1, "a server refusal is not retried")
+        self.assertEqual(git(self.a / ".tasks" / "board", "rev-parse", "HEAD"), head)
+        self.assertEqual(git(self.a / ".tasks" / "board", "status", "--porcelain"), "")
+
+    def test_checkout_without_connection_reads_the_local_board(self):
+        self.ok(self.a, "init")
+        self.ok(self.a, "create", "--title", "Офлайн")
+        self.origin.rename(self.origin.with_name("gone.git"))
+        work = self.a / ".tasks" / "T-1"
+        code, out, err = self.call(self.a, "checkout", "T-1", "--to", str(work))
+        self.assertEqual(code, 0, err)
+        self.assertIn("нет связи", err)
+        self.assertIn("локальной доски", err)
+        self.assertTrue((work / "task.md").exists())
+
     def test_offline_write_fails_and_leaves_board_clean(self):
         self.ok(self.a, "init")
         head = git(self.a / ".tasks" / "board", "rev-parse", "HEAD")
@@ -608,6 +636,7 @@ class RemoteTests(unittest.TestCase):
         code, _, err = self.call(self.a, "create", "--title", "Без связи")
         self.assertEqual(code, 2)
         self.assertIn("нет связи", err)
+        self.assertIn("песочниц", err)
         self.assertEqual(git(self.a / ".tasks" / "board", "rev-parse", "HEAD"), head)
         self.assertEqual(git(self.a / ".tasks" / "board", "status", "--porcelain"), "")
 

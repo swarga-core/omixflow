@@ -61,7 +61,7 @@ Agent tool:
   name: "researcher-{id}"            # часть: "researcher-{id}-{part}"
   model: "{по tiers.md}"
   prompt: |
-    PROJECT_ROOT: …   TASK_DIR: …   ADAPTERS: lang …   RULES: …
+    PROJECT_ROOT: …   TASK_DIR: …   ADAPTERS: lang …   RULES: …   PARENT: …
     SCOPE: …   OUTPUT: file   CONTINUABLE: yes
     PARTS_IN_FLIGHT: …               # только при mutates: true
     ANSWERS: …                       # при перезапуске, из log.md

@@ -81,9 +81,13 @@ that pass by definition). Report mutation results in NOTES.
 Restore from a copy, never from git. Your step is not committed yet: `git checkout`
 or `git restore` of the mutated file erases your implementation together with the
 probe. Before mutating, copy the file next to itself (`cp {file} {file}.orig`),
-mutate, run the test, then `mv {file}.orig {file}`. Afterwards check that no `.orig`
-copy is left and that `git diff` of the file shows exactly your step's change (not
-that it is empty).
+mutate, run the test, then restore with `cp {file}.orig {file}` and remove the copy
+(`rm {file}.orig`). Do not restore with `mv`: it brings back the copy's old modification
+time, older than the mutant's build outputs, and a build that decides by modification
+time keeps the mutated binary for the next gates. Afterwards check that no `.orig` copy
+is left and that `git diff` of the file shows exactly your step's change (not that it is
+empty). After a series of probes, run the step's gates as a full rebuild when the lang
+adapter names one (its `verify` section): an incremental cache may still hold a mutant.
 
 ## Tooling
 
