@@ -4,6 +4,9 @@
 
 version: 1
 
+plugin:
+  backlog: .tasks/backlog      # проект и есть плагин: гочи плагина — в свой бэклог
+
 tracker:
   adapter: youtrack
   project: AL

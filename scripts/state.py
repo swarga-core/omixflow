@@ -5,7 +5,7 @@
                       [--profile NAME] [--tier S|M|L] [--forced] [--branch B] [--base B]
                       [--multitask-id X --part P] [--session S] [--lead NAME [--asked K]] [--force]
     state.py get DIR [KEY]                 # whole state as JSON, or one value
-    state.py get DIR profile               # effective profile (full for legacy states)
+    state.py get DIR profile [--json]      # effective profile (full for legacy states); --json: with properties
     state.py set DIR KEY=VALUE ...         # dotted keys; JSON for lists/objects
     state.py unset DIR KEY ...
     state.py finish DIR PHASE              # add to completed, advance phase (alias: complete)
@@ -232,8 +232,8 @@ def cmd_init(ns: argparse.Namespace) -> int:
         profile = ns.profile or DEFAULT_PROFILE
     tier = ns.tier
     if not PROFILES[profile]["triage"]:
-        if ns.tier:
-            raise lib.OmixflowError(f"профиль {profile} не триажится: --tier не допускается")
+        if ns.tier or ns.forced:
+            raise lib.OmixflowError(f"профиль {profile} не триажится: --tier и --forced не допускаются")
         tier = None
     state: Dict[str, Any] = {
         "schema": 1,
@@ -270,7 +270,8 @@ def cmd_init(ns: argparse.Namespace) -> int:
 def cmd_get(ns: argparse.Namespace) -> int:
     state = load(Path(ns.dir).resolve())
     if ns.key == "profile":
-        print(profile_of(state))
+        name = profile_of(state)
+        print(json.dumps({"profile": name, **PROFILES[name]}, ensure_ascii=False) if ns.json else name)
         return 0
     if ns.key:
         value = lib.config_get(state, ns.key)
@@ -471,6 +472,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("get")
     p.add_argument("dir")
     p.add_argument("key", nargs="?")
+    p.add_argument("--json", action="store_true", help="с key=profile: имя и свойства профиля одним JSON")
     p.set_defaults(fn=cmd_get)
 
     p = sub.add_parser("set")

@@ -32,8 +32,8 @@ Source Files Map, текущее состояние, паттерны, findings,
 
 ### 1. Контекст
 
-`task.md`: финальная формулировка, scope. Профиль из `state.py get TASK_DIR profile`,
-его свойства по таблице `profiles.md`. Тир из `state.py get TASK_DIR tier` (нет → M;
+`task.md`: финальная формулировка, scope. Профиль и его свойства — `state.py get TASK_DIR
+profile --json`. Тир из `state.py get TASK_DIR tier` (нет → M;
 при `triage: false` тира нет). Цепочка адаптеров lang. Для части мультизадачи
 мутирующего профиля (`mutates: true`) собрать `PARTS_IN_FLIGHT`: для каждой другой
 части со статусом не терминальным, у которой есть
@@ -48,7 +48,7 @@ Source Files Map, текущее состояние, паттерны, findings,
 
 **S-тир (инлайн).** Только в профиле с триажем. Оркестратор исследует сам,
 read-only, инструментами навигации из адаптера lang. Результат: секция `## Research`
-(mini Source Files Map + findings) в `TASK_DIR/spec.md`; отдельный research.md не
+(mini Source Files Map + findings `R{n}`) в `TASK_DIR/spec.md`; отдельный research.md не
 создаётся. Если вскрылся масштаб больше S: повысить тир (`state.py set tier=M`),
 записать причину в log.md и выполнить фазу заново через агента.
 

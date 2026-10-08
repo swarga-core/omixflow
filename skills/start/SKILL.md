@@ -134,8 +134,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
 Предусловие: ветка мультизадачи существует; текущий пользователь известен
 (`current_user`).
 
-Профиль и его свойства из `state.py get {artifacts.dir}/{id} profile` и таблицы
-`profiles.md`.
+Профиль и его свойства — `state.py get {artifacts.dir}/{id} profile --json`.
 
 1. Свежее описание из трекера → файл; `multitask.py ready --from {desc} --owner {me}
    --parallel {лимит}`, лимит по `part_runner`: `multitask.parallel_per_owner` для

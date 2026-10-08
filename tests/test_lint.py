@@ -255,6 +255,7 @@ class DecisionPointsLint(unittest.TestCase):
         self.assertEqual(lead["default"]["default"], lib.LEAD_DEFAULT_MODE)
         self.assertEqual(lead["timeout"]["default"], lib.LEAD_DEFAULT_TIMEOUT)
         self.assertEqual(lead["stall"]["default"], lib.LEAD_DEFAULT_STALL)
+        self.assertEqual(lead["delivery"]["default"], lib.LEAD_DEFAULT_DELIVERY)
         self.assertEqual({k: v["default"] for k, v in lead["actions"]["properties"].items()},
                          lib.LEAD_DEFAULT_ACTIONS)
 

@@ -477,11 +477,14 @@ class LeadConfigTests(unittest.TestCase):
         bare = lib.normalize_config(lib.yaml.safe_load(HOME_CFG))
         actions = {"backlog": "lead", "memory": "lead"}
         self.assertEqual(lib.lead_settings(bare), {"default": "developer", "timeout": 600, "stall": 900,
-                                                   "actions": actions, "notify": []})
-        cfg = self.cfg({"default": "lead", "timeout": "1m", "stall": "30m", "actions": {"memory": "developer"}})
+                                                   "actions": actions, "notify": [], "delivery": "lead",
+                                                   "plugin_session": None})
+        cfg = self.cfg({"default": "lead", "timeout": "1m", "stall": "30m", "actions": {"memory": "developer"},
+                        "delivery": "pr", "plugin_session": "omixflow-lead"})
         self.assertEqual(lib.lead_settings(cfg), {"default": "lead", "timeout": 60, "stall": 1800,
                                                   "actions": {"backlog": "lead", "memory": "developer"},
-                                                  "notify": []})
+                                                  "notify": [], "delivery": "pr", "plugin_session": "omixflow-lead"})
+        self.assertTrue(any("lead.delivery" in e for e in lib.validate_config(self.cfg({"delivery": "merge"}))))
         self.assertTrue(any("lead.actions" in e for e in lib.validate_config(self.cfg({"actions": {"tracker": "lead"}}))))
         self.assertTrue(any("lead.stall" in e for e in lib.validate_config(self.cfg({"stall": "soon"}))))
         with tempfile.TemporaryDirectory() as tmp:
@@ -490,7 +493,7 @@ class LeadConfigTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(json.loads(proc.stdout), {"default": "developer", "timeout": 600, "stall": 1200,
                                                        "actions": {"backlog": "lead", "memory": "lead"},
-                                                       "notify": []})
+                                                       "notify": [], "delivery": "lead", "plugin_session": None})
 
     def test_duration_seconds(self):
         self.assertEqual([lib.duration_seconds(x) for x in ("45s", "10m", "2h")], [45, 600, 7200])

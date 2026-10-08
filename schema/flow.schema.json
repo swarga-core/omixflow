@@ -12,7 +12,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "min_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "description": "минимальная версия плагина, с которой проект совместим" }
+        "min_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "description": "минимальная версия плагина, с которой проект совместим" },
+        "backlog": { "type": "string", "description": "каталог бэклога локального клона плагина (абсолютный, от ~ или от корня проекта): заметки о дефектах плагина (protocol/phases.md, «Finalize: маршрутизация гочей»)" }
       }
     },
     "tracker": {
@@ -74,7 +75,7 @@
           }
         },
         "integration": { "type": "string", "enum": ["squash", "merge"], "default": "squash" },
-        "delivery": { "type": "string", "enum": ["pr", "integrate", "lead"], "default": "pr", "description": "способ сдачи одиночной задачи на Finalize; у сессии под лидом по умолчанию lead" },
+        "delivery": { "type": "string", "enum": ["pr", "integrate", "lead"], "default": "pr", "description": "способ сдачи одиночной задачи на Finalize у сессии без лида; под лидом — lead.delivery" },
         "sync": { "type": "string", "enum": ["auto", "merge", "rebase"], "default": "auto", "description": "подтягивание ушедшей базы: auto — rebase, пока в ветке только артефакты, merge после кода" },
         "protected": { "type": "array", "items": { "type": "string" } },
         "repos": {
@@ -167,6 +168,8 @@
           }
         },
         "stall": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$", "default": "15m", "description": "простой сессии без открытого вопроса дольше этого лид сообщает разработчику как подозрение на зависание" },
+        "delivery": { "type": "string", "enum": ["pr", "integrate", "lead"], "default": "lead", "description": "способ сдачи у сессии под лидом; при lead точка delivery не задаётся (workspace.delivery — для сессий без лида)" },
+        "plugin_session": { "type": "string", "description": "имя сессии, ведущей плагин OMIXFlow: лид шлёт ей гочи плагина сообщением (protocol/lead.md, «Гочи, бэклог и память»)" },
         "policy": {
           "type": "object",
           "description": "режим по идентификатору точки решения из protocol/dialog.md",

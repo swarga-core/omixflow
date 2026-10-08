@@ -24,7 +24,7 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 ## Одиночная задача
 
 Предусловие: `state.py next` даёт `finalize`. Свойство `finalize_artifact` профиля
-(`state.py get TASK_DIR profile`, таблица `profiles.md`): `code` → шаги ниже;
+(`state.py get TASK_DIR profile --json`): `code` → шаги ниже;
 `research` → раздел «Задача с `finalize_artifact: research`».
 
 ### 0. Синхронизация с базой
@@ -61,16 +61,17 @@ git log --oneline {base}...HEAD | wc -l
 
 Под лидом гочи здесь не раскладываются: раздел «Сессия под лидом». Иначе перебрать
 log.md (NOTES coder'а, замечания вне scope, особенности окружения) и предложить адреса
-по phases.md в точке `gotchas`: дефект плагина → issue в репозитории плагина
-(текст готовится, создание за разработчиком); особенность проекта → CLAUDE.md
+по phases.md в точке `gotchas`: дефект плагина → заметка в `plugin.backlog`, если задан,
+иначе текст разработчику для issue в репозитории плагина; особенность проекта → CLAUDE.md
 проекта или проектный адаптер (правка с подтверждением); личное → память сессии.
 Ничего не записывать молча.
 
 ### 4. Сдача
 
-Способ: `workspace.delivery` конфига; не задан → `lead` у задачи под лидом (поле
-`lead` состояния), иначе `pr`. Подтвердить в точке `delivery`: найденный способ
-(Recommended) / два других.
+Способ: у задачи под лидом (поле `lead` состояния) — `lead.delivery` (по умолчанию `lead`),
+без лида — `workspace.delivery` (по умолчанию `pr`); `resolve.py lead` и `cfg.py` дают оба.
+Под лидом способ `lead` не спрашивается: строка в log.md «Сдача: лиду (`lead.delivery`)».
+Иначе подтвердить в точке `delivery`: найденный способ (Recommended) / два других.
 
 **pr.** Превью (ветки, заголовок, body из шаблона), затем подтверждение в точке `forge.pr`:
 Создать (Recommended) / Поправить / Пропустить. `pr_create` адаптера forge:
@@ -177,7 +178,8 @@ review части завершены по её состоянию.
    `update_description` с дисциплиной записи). Сводка и вопрос в точке
    `part-integrate`: Интегрировать (Recommended) / Оставить in-review / Пропустить
    часть (skipped).
-3. Интеграция по адаптеру workspace (`integrate`): закоммитить всё в worktree
+3. Интеграция по адаптеру workspace (`integrate`): `state.py finish {PART_DIR} finalize`
+   (состояние части уходит в squash завершённым); закоммитить всё в worktree
    части, включая log.md и state.yaml; `ExitWorktree keep`; убедиться, что дерево
    на ветке мультизадачи, иначе временный worktree; rebase ветки части на ветку
    мультизадачи; squash; проверить, что застейджены только файлы части

@@ -183,6 +183,19 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(run("state.py", "complete", str(d), "spec").stdout.strip(), "plan")
             self.assertNotIn("profile", json.loads(run("state.py", "get", str(d)).stdout))
 
+    def test_profile_json_and_forced_without_triage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = str(Path(tmp) / "R-2")
+            proc = self.init(d, "--id", "R-2", "--kind", "task", "--profile", "research", "--forced")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("--forced", proc.stderr)
+            self.assertEqual(self.init(d, "--id", "R-2", "--kind", "task", "--profile", "research").returncode, 0)
+            props = json.loads(run("state.py", "get", d, "profile", "--json").stdout)
+            self.assertEqual(props["profile"], "research")
+            self.assertEqual((props["mutates"], props["finalize_artifact"], props["part_runner"]),
+                             (False, "research", "scheduler"))
+            self.assertEqual(run("state.py", "get", d, "profile").stdout.strip(), "research")
+
     def test_new_state_persists_default_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(self.init(tmp, "--id", "F-1", "--kind", "task", "--tier", "M").returncode, 0)
@@ -590,6 +603,35 @@ class RepoProfileTests(unittest.TestCase):
         self.assertIn("только у pending", proc.stderr)
         self.assertEqual(self.cli(REPO_DESCRIPTION, "set", "--part", "lib-store", "repo=ghost",
                                   "--repos", "omix-lib,eal").returncode, 2)
+
+    def test_add_part_appends_a_pending_row_and_keeps_the_rest(self):
+        proc = self.cli(DESCRIPTION, "add-part", "--part", "profile-ui — Экран профиля", "--depends", "profile-store")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        before, after = DESCRIPTION.splitlines(), proc.stdout.splitlines()
+        end = next(i for i, ln in enumerate(before) if ln.strip() == mt.MARK_END)
+        self.assertEqual(after[:end], before[:end], "rows and text before the new row stay byte-for-byte")
+        self.assertEqual(after[end], "| 5 | profile-ui | Экран профиля | profile-store | — | pending | — | — |")
+        self.assertEqual(after[end + 1:], before[end:])
+        self.assertEqual(self.cli(DESCRIPTION, "add-part", "--part", "auth-flow — Ещё раз", "--depends", "—").returncode, 2)
+        proc = self.cli(DESCRIPTION, "add-part", "--part", "x-part — X", "--depends", "ghost")
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("ghost", proc.stderr)
+
+    def test_first_repo_adds_the_column(self):
+        proc = self.cli(RESEARCH_DESCRIPTION, "add-part", "--part", "lib-api — API библиотеки", "--depends", "—",
+                        "--repo", "omix-lib", "--repos", "omix-lib")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("<!-- omixflow:multitask:start profile=research -->", proc.stdout)
+        self.assertEqual(mt.block_header(proc.stdout)[3], "repo")
+        rows = {r["part"]: r for r in mt.extract(proc.stdout)}
+        self.assertEqual((rows["lib-api"]["repo"], rows["lib-api"]["status"]), ("omix-lib", "pending"))
+        self.assertEqual((rows["auth-flow"]["status"], rows["auth-flow"]["owner"]), ("done", "swarga"))
+        proc = self.cli(RESEARCH_DESCRIPTION, "set", "--part", "i18n-keys", "repo=omix-lib")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual({r["part"]: r["repo"] for r in mt.extract(proc.stdout)}["i18n-keys"], "omix-lib")
+        self.assertEqual(self.cli(RESEARCH_DESCRIPTION, "set", "--part", "auth-flow", "repo=omix-lib").returncode, 2)
+        self.assertEqual(self.cli(RESEARCH_DESCRIPTION, "set", "--part", "i18n-keys", "repo=—").stdout,
+                         RESEARCH_DESCRIPTION, "«—» without the column changes nothing")
 
     def test_seed_profile_and_repo(self):
         proc = run("multitask.py", "seed", "--parts", "lib-api — API", "app-usage — Использование",

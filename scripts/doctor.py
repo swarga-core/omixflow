@@ -262,6 +262,8 @@ class Doctor:
         self.add(sec, "ref", OK if sha else FAIL, f"{ref} → {sha[:12]}" if sha else f"{ref} не разрешается")
         self.add(sec, "flow.yaml", OK, "flow.yaml есть" if lib.config_path(path).exists()
                  else "flow.yaml нет, фолбэк на цепочку домашнего проекта")
+        # By directories, not `git worktree list`: the path is fixed by protocol/worktree.md, and
+        # a directory left after its worktree was unregistered still takes space and is worth a WARN.
         research = sorted(d for d in (path / ".claude" / "worktrees").glob("research-*") if d.is_dir())
         if not research:
             return
@@ -363,7 +365,8 @@ class Doctor:
         default = lead.get("default", lib.LEAD_DEFAULT_MODE)
         self.add("lead", "policy", OK,
                  f"default {default}, timeout {lead.get('timeout', lib.LEAD_DEFAULT_TIMEOUT)}, "
-                 f"stall {lead.get('stall', lib.LEAD_DEFAULT_STALL)}, точек в policy: {len(policy)}")
+                 f"stall {lead.get('stall', lib.LEAD_DEFAULT_STALL)}, сдача под лидом "
+                 f"{lead.get('delivery', lib.LEAD_DEFAULT_DELIVERY)}, точек в policy: {len(policy)}")
         by_lead = [point for point, kind in lib.decision_points()
                    if kind == "внешнее" and policy.get(point, default) == "lead"]
         for point in by_lead:

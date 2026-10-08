@@ -24,6 +24,8 @@ through the tracker adapter.
     multitask.py waves    --from F [--json]        # topological waves
     multitask.py ready    --from F [--owner U] [--parallel N]   # parts whose deps are done
     multitask.py set      --from F --part P k=v... [--repos a,b]  # rewrite only that row
+    multitask.py add-part --from F --part "slug — title" --depends D [--repo R] [--repos a,b]
+                                                   # repeated refine: append a pending part
     multitask.py render   --rows ROWS.json [--profile NAME]     # block from rows
     multitask.py seed     --parts "slug — title" ... [--depends D ...] [--repo R ...]
                           [--profile NAME] [--repos a,b] [--from F]  # new block (all pending)
@@ -381,26 +383,17 @@ def set_row(text: str, part: str, pairs: List[str]) -> str:
     span = find_block(text)
     if span is None:
         raise lib.OmixflowError("в тексте нет блока omixflow:multitask")
-    changes: Dict[str, str] = {}
-    for pair in pairs:
-        if "=" not in pair:
-            raise lib.OmixflowError(f"ожидается key=value, получено {pair!r}")
-        k, v = pair.split("=", 1)
-        if k not in EDITABLE:
-            raise lib.OmixflowError(f"нельзя менять колонку {k!r}")
-        if k == "status" and v not in STATUSES:
-            raise lib.OmixflowError(f"статус {v!r} не из {STATUSES}")
-        if "|" in v or "\n" in v or "\r" in v:
-            raise lib.OmixflowError(f"значение {k}={v!r}: символы «|» и перевод строки недопустимы в ячейке")
-        if k == "title" and v in (EMPTY, "-", ""):
-            raise lib.OmixflowError(f"часть {part!r}: пустой title")
-        changes[k] = v
+    changes = _parse_changes(part, pairs)
+    if changes.get("repo", EMPTY) not in (EMPTY, "-", "") and "repo" not in block_header(text):
+        return _set_with_repo_column(text, part, changes)
     block = text[span[0]:span[1]]
     lines = block.splitlines(keepends=True)
     table = [i for i, ln in enumerate(lines) if ln.strip().startswith("|")]
     if len(table) < 2:
         raise lib.OmixflowError(f"части {part!r} нет в блоке")
     header = [h.lower() for h in _split_row(lines[table[0]])]
+    if "repo" in changes and "repo" not in header:
+        changes.pop("repo")  # «—» in a block without the column: nothing to write
     for k in changes:
         if k not in header:
             raise lib.OmixflowError(f"колонки {k!r} нет в заголовке блока")
@@ -433,6 +426,90 @@ def set_row(text: str, part: str, pairs: List[str]) -> str:
     line = lines[target]
     eol = line[len(line.rstrip("\r\n")):]
     lines[target] = "| " + " | ".join(cells) + " |" + eol
+    return text[:span[0]] + "".join(lines) + text[span[1]:]
+
+
+def _parse_changes(part: str, pairs: List[str]) -> Dict[str, str]:
+    changes: Dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise lib.OmixflowError(f"ожидается key=value, получено {pair!r}")
+        k, v = pair.split("=", 1)
+        if k not in EDITABLE:
+            raise lib.OmixflowError(f"нельзя менять колонку {k!r}")
+        if k == "status" and v not in STATUSES:
+            raise lib.OmixflowError(f"статус {v!r} не из {STATUSES}")
+        if "|" in v or "\n" in v or "\r" in v:
+            raise lib.OmixflowError(f"значение {k}={v!r}: символы «|» и перевод строки недопустимы в ячейке")
+        if k == "title" and v in (EMPTY, "-", ""):
+            raise lib.OmixflowError(f"часть {part!r}: пустой title")
+        changes[k] = v
+    return changes
+
+
+def _apply_to_row(row: Row, changes: Dict[str, str]) -> None:
+    for k, v in changes.items():
+        if k == "depends":
+            row["depends"] = [] if v in (EMPTY, "-", "") else [d.strip() for d in v.split(",") if d.strip()]
+        elif k in ("owner", "branch", "commit", "repo"):
+            row[k] = None if v in (EMPTY, "-", "") else v
+        else:
+            row[k] = v
+
+
+def _set_with_repo_column(text: str, part: str, changes: Dict[str, str]) -> str:
+    """The first non-empty `repo` in a block without the column: the block is re-rendered
+    with the column (the marker keeps its profile; other rows keep their values)."""
+    profile = strict_profile(text)
+    rows = extract(text)
+    row = next((r for r in rows if r["part"] == part), None)
+    if row is None:
+        raise lib.OmixflowError(f"части {part!r} нет в блоке")
+    if row.get("status", "pending") != "pending":
+        raise lib.OmixflowError(f"часть {part!r} в статусе {row['status']}: repo меняется только у pending")
+    _apply_to_row(row, changes)
+    return replace_block(text, rows, profile)
+
+
+def parse_part_spec(spec: str) -> Tuple[str, str]:
+    """'slug — title' (or 'slug - title') → (slug, title)."""
+    if "—" in spec:
+        slug, title = spec.split("—", 1)
+    elif " - " in spec:
+        slug, title = spec.split(" - ", 1)
+    else:
+        raise lib.OmixflowError(f"часть должна быть в форме 'slug — title': {spec!r}")
+    return slugify(slug), title.strip()
+
+
+def add_part(text: str, spec: str, depends: str, repo: Optional[str]) -> str:
+    """Append a `pending` part to an existing block (a repeated refine). Other rows and the
+    marker stay byte-for-byte; a first non-empty `repo` re-renders the block with the column."""
+    span = find_block(text)
+    if span is None:
+        raise lib.OmixflowError("в тексте нет блока omixflow:multitask")
+    profile = strict_profile(text)
+    slug, title = parse_part_spec(spec)
+    rows = extract(text)
+    if any(r["part"] == slug for r in rows):
+        raise lib.OmixflowError(f"часть {slug!r} уже есть в блоке")
+    if "|" in title or "\n" in title:
+        raise lib.OmixflowError(f"часть {slug!r}: символы «|» и перевод строки недопустимы в title")
+    new: Row = {"part": slug, "title": title, "depends": [], "owner": None, "status": "pending",
+                "branch": None, "commit": None, "repo": None}
+    _apply_to_row(new, {"depends": depends, "repo": repo or EMPTY})
+    header = block_header(text)
+    if new["repo"] and "repo" not in header:
+        return replace_block(text, rows + [new], profile)
+    values = {"#": str(len(rows) + 1), "part": slug, "title": title, "repo": new["repo"] or EMPTY,
+              "depends": ", ".join(new["depends"]) or EMPTY, "owner": EMPTY, "status": "pending",
+              "branch": EMPTY, "commit": EMPTY}
+    line = "| " + " | ".join(values.get(h, "") for h in header) + " |"
+    block = text[span[0]:span[1]]
+    lines = block.splitlines(keepends=True)
+    last = max(i for i, ln in enumerate(lines) if ln.strip().startswith("|"))
+    eol = lines[last][len(lines[last].rstrip("\r\n")):] or "\n"
+    lines.insert(last + 1, line + eol)
     return text[:span[0]] + "".join(lines) + text[span[1]:]
 
 
@@ -521,6 +598,19 @@ def cmd_set(ns) -> int:
     return 0
 
 
+def cmd_add_part(ns) -> int:
+    text = read_text(ns.from_)
+    out = add_part(text, ns.part, ns.depends, ns.repo)
+    errors = validate(extract(out), strict_profile(out), parse_repos(ns.repos))
+    if errors:
+        raise lib.OmixflowError("; ".join(errors))
+    if ns.in_place and ns.from_ not in (None, "-"):
+        Path(ns.from_).write_text(out, encoding="utf-8")
+    else:
+        sys.stdout.write(out)
+    return 0
+
+
 def cmd_render(ns) -> int:
     rows = json.loads(Path(ns.rows).read_text(encoding="utf-8"))
     print(render(rows, check_profile(ns.profile)))
@@ -530,14 +620,8 @@ def cmd_render(ns) -> int:
 def cmd_seed(ns) -> int:
     rows: List[Row] = []
     for spec in ns.parts:
-        if "—" in spec:
-            slug, title = spec.split("—", 1)
-        elif " - " in spec:
-            slug, title = spec.split(" - ", 1)
-        else:
-            raise lib.OmixflowError(f"часть должна быть в форме 'slug — title': {spec!r}")
-        slug = slugify(slug)
-        rows.append({"part": slug, "title": title.strip(), "depends": [], "depends_raw": None,
+        slug, title = parse_part_spec(spec)
+        rows.append({"part": slug, "title": title, "depends": [], "depends_raw": None,
                      "owner": None, "status": "pending", "branch": None, "commit": None})
     for r, deps in zip(rows, ns.depends or []):
         r["depends"] = [] if deps in (EMPTY, "-", "") else [d.strip() for d in deps.split(",") if d.strip()]
@@ -599,6 +683,11 @@ def main(argv=None) -> int:
     p.set_defaults(fn=cmd_ready)
     p = sub.add_parser("set"); add_from(p); add_repos(p); p.add_argument("--part", required=True)
     p.add_argument("pairs", nargs="+"); p.add_argument("--in-place", action="store_true"); p.set_defaults(fn=cmd_set)
+    p = sub.add_parser("add-part"); add_from(p); add_repos(p)
+    p.add_argument("--part", required=True, help="'slug — title'")
+    p.add_argument("--depends", required=True, help="slug'и через запятую или «—»: ответ обязателен")
+    p.add_argument("--repo", default=None, help="имя из workspace.repos или «—» (домашний)")
+    p.add_argument("--in-place", action="store_true"); p.set_defaults(fn=cmd_add_part)
     p = sub.add_parser("render"); p.add_argument("--rows", required=True)
     p.add_argument("--profile", default=DEFAULT_PROFILE); p.set_defaults(fn=cmd_render)
     p = sub.add_parser("seed"); add_from(p); add_repos(p); p.add_argument("--parts", nargs="+", required=True)

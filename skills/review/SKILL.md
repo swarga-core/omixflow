@@ -67,7 +67,7 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 или спавн с `name: coder-{id}`), tests → tester (спавн с `name: tester-{id}`,
 после coder), spec и plan → architect (SendMessage `architect-{id}` или спавн
 с `name: architect-{id}`), architecture → решение в точке `finding`. Re-review:
-SendMessage тому же reviewer по тем же id. Не больше `limits.review_passes` проходов,
+SendMessage тому же reviewer по тем же id. Не больше `limits.review_passes` проходов (`review-cycle.md`, «Лимит проходов»),
 затем эскалация нерешённых findings в точке `finding`.
 
 ### 5. Коммит и состояние

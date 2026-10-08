@@ -144,7 +144,10 @@ Sha: {sha}
 
 ## Findings
 
-{key discoveries, risks, constraints, edge cases; overlaps with PARTS_IN_FLIGHT}
+R1: {key discovery, risk, constraint or edge case; overlaps with PARTS_IN_FLIGHT}
+R2: {…}
+
+(numbered `R{n}`; the `F{id}` labels belong to review findings)
 
 ## External Research
 

@@ -27,6 +27,10 @@ BOARD=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter-script tracke
 python3 "$BOARD" get T-12
 ```
 
+В `.tasks/board` не заходить (`cd`): каталог сессии там останется, и следующий `git commit`
+уйдёт на ветку доски (`protocol/worktree.md`, «Ловушки»). Доску читать `get`, `list`, `path`
+или `git -C .tasks/board` только для чтения.
+
 Файлы доски руками не правятся: каждая запись скрипта берёт блокировку, при
 `tracker.push: true` (по умолчанию) обновляет доску с `origin`, коммитит и пушит,
 а при отказе push повторяет запись. Код выхода 2 с сообщением `omixflow: …` — ошибка,

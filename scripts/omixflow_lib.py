@@ -325,6 +325,7 @@ LEAD_DEFAULT_MODE = "developer"   # mirrors lead.default in the schema (tests/te
 LEAD_DEFAULT_TIMEOUT = "10m"      # mirrors lead.timeout in the schema
 LEAD_DEFAULT_STALL = "15m"        # mirrors lead.stall in the schema
 LEAD_DEFAULT_ACTIONS = {"backlog": "lead", "memory": "lead"}  # mirrors lead.actions in the schema
+LEAD_DEFAULT_DELIVERY = "lead"    # mirrors lead.delivery in the schema
 _DURATION_RE = re.compile(r"^([1-9][0-9]*)([smh])$")
 
 
@@ -336,14 +337,16 @@ def duration_seconds(text: str) -> int:
 
 
 def lead_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """lead.default, lead.timeout, lead.stall, lead.actions and lead.notify with defaults;
-    durations in seconds."""
+    """lead.default, lead.timeout, lead.stall, lead.actions, lead.notify, lead.delivery and
+    lead.plugin_session with defaults; durations in seconds."""
     lead = cfg.get("lead") or {}
     return {"default": lead.get("default") or LEAD_DEFAULT_MODE,
             "timeout": duration_seconds(str(lead.get("timeout") or LEAD_DEFAULT_TIMEOUT)),
             "stall": duration_seconds(str(lead.get("stall") or LEAD_DEFAULT_STALL)),
             "actions": {**LEAD_DEFAULT_ACTIONS, **(lead.get("actions") or {})},
-            "notify": list(lead.get("notify") or [])}
+            "notify": list(lead.get("notify") or []),
+            "delivery": lead.get("delivery") or LEAD_DEFAULT_DELIVERY,
+            "plugin_session": lead.get("plugin_session")}
 
 
 def lead_route(cfg: Dict[str, Any], point: str) -> Dict[str, Any]:

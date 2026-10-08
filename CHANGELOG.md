@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-08
+
+Мелкое и готовое из бэклога по прогонам mewria под лидом (MEW-4…MEW-9).
+
+### Added
+- Схема и шаблон конфига: `lead.delivery` (`pr | integrate | lead`, по умолчанию `lead`) — способ сдачи под лидом; `lead.plugin_session` — сессия, ведущая плагин; `plugin.backlog` — каталог бэклога локального клона плагина. `resolve.py lead` отдаёт `delivery` и `plugin_session`; doctor показывает способ сдачи под лидом. Собственный конфиг плагина: `plugin.backlog: .tasks/backlog`.
+- `multitask.py add-part` — повторный refine мультизадачи добавляет часть `pending`, остальные строки блока байт в байт; первое непустое `repo` (в `add-part` и `set repo=`) добавляет колонку `repo` (раньше `set` отказывал). `state.py get DIR profile --json` — имя и свойства профиля; скилы research, start, finalize берут свойства из него, а не из таблицы `profiles.md`.
+
+### Changed
+- Под лидом сдача лиду без вопроса в точке `delivery` (`skills/finalize`, **protocol** `lead.md`, `dialog.md`): `workspace.delivery` относится к сессиям без лида; раньше проект с `workspace.delivery: integrate` под лидом каждый раз получал вопрос с ответом «сдать лиду» (MEW-5…MEW-9, G-24).
+- **protocol** `phases.md`, «Маршрутизация гочей»: один адрес гочи плагина — сессия `lead.plugin_session` (у лида), заметка в `plugin.backlog`, иначе текст разработчику; в каталог артефактов проекта — никогда. `lead.md`, скилы `lead` и `finalize` ссылаются на правило (раньше лид писал в `.tasks/backlog/` проекта: не тот бэклог, а при трекере `artifacts` каталог игнорируется).
+- **protocol** `review-cycle.md`, «Лимит проходов»: счётчик проходов на объём (scope-change открывает ревью дельты со своим счётчиком), approve с новыми не-blocking findings на последнем проходе, фикс после лимита без прохода или с одним дополнительным; coder правит текст spec.md задачи в `spec-sync`, если контракт не меняется. Скилы spec, plan, review ссылаются на раздел.
+- **protocol** `artifacts.md`, `lead.md`, агент researcher: findings исследования нумеруются `R{n}`, `F{id}` — только findings ревью.
+- **protocol** `worktree.md`, «Ловушки»: каталог сессии сохраняется между вызовами Bash — без `cd`, абсолютные пути и `git -C`; `artifacts.md`: перед любым коммитом сверка корня (`--show-toplevel`) и ветки задачи; адаптер kanban: в `.tasks/board` не заходить (коммит оттуда уходит на ветку доски; G-25).
+
+### Fixed
+- Finalize части с `part_integration: integrate` закрывает `finalize` в состоянии части до squash. `state.py init --forced` при профиле без триажа отклоняется. **protocol** `phases.md`: у одиночной задачи Research внешних действий нет. Комментарий doctor о поиске research-worktree по каталогам.
+
 ## [0.4.2] — 2026-10-07
 
 Мелкие исправления по живым прогонам mewria под лидом (MEW-1…MEW-7).
