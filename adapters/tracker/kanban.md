@@ -1,7 +1,7 @@
 ---
 port: tracker
 name: kanban
-capabilities: [identify, get, update_description, comment, set_status, current_user, comments, create, link, search, artifacts]
+capabilities: [identify, get, update_description, comment, set_status, current_user, comments, create, link, search, artifacts, batch]
 requires:
   tools: []
   bin: [git]
@@ -33,15 +33,21 @@ python3 "$BOARD" get T-12
 
 Файлы доски руками не правятся: каждая запись скрипта берёт блокировку, при
 `tracker.push: true` (по умолчанию) обновляет доску с `origin`, коммитит и пушит,
-а при отказе push повторяет запись. Код выхода 2 с сообщением `omixflow: …` — ошибка,
+а при отказе push повторяет запись. Несколько записей подряд — одним пакетом (`batch`):
+один коммит вместо коммита на запись. Код выхода 2 с сообщением `omixflow: …` — ошибка,
 показать её разработчику как есть; код 3 — устаревшая ревизия (`update_description`).
 Чтение идёт из локальной доски без сети (раздел «Свежесть»).
+
+Историю ветки доски не переписывать: никаких force-push, сквоша и rebase опубликованных
+коммитов, даже ради читаемости. Второй разработчик пишет в ту же ветку, и его коммиты
+между чтением и force-push теряются, а его `pull` перебазирует уже переписанное. Шумную
+историю лечат пакеты (`batch`), а не чистка задним числом.
 
 ## Песочница
 
 При `tracker.push: true` команды доски ходят в `origin` по ssh, а в песочнице Bash Claude Code
 ssh-агент недоступен (`Permission denied (publickey)`). Записи (`create`, `describe`, `move`,
-`set`, `link`, `comment`, `publish`), `checkout`, `pull` и `state.py finish` / `step done`
+`set`, `link`, `comment`, `publish`, `batch`), `checkout`, `pull` и `state.py finish` / `step done`
 (они публикуют) запускать вне песочницы. В песочнице записи падают с кодом 2 и подсказкой,
 публикация из `state.py` остаётся предупреждением, `checkout` читает локальную доску.
 
@@ -114,6 +120,40 @@ Start переводит задачу в `working` без вопроса: кол
 
 `link {ID} {другой ID}`: связь в `links` обеих карточек.
 
+## batch
+
+`batch --from {файл}` (`-` — stdin): JSON-список записей одной транзакцией — один коммит
+`board: batch — {N} записей: {ID…}` с построчным перечнем в теле, один push. Запись —
+объект `{"op": …}` с аргументами одноимённой команды:
+
+| op | Аргументы |
+|---|---|
+| `create` | `title`; `type`, `kind`, `parent`, `slug`, `text` или `from` (файл), `as` |
+| `describe` | `id`, `text` или `from`; `rev` |
+| `comment` | `id`, `text`; `author` (по умолчанию `current_user`) |
+| `move` | `id`, `to`; `resolution` |
+| `set` | `id`, `pairs` — список `KEY=VALUE`, как у `set` |
+| `link` | `id`, `other` |
+| `publish` | `id`, `from` (рабочая копия) |
+
+`as: "$имя"` у `create` — имя новой карточки для следующих записей пакета в `id`, `other`,
+`parent` и в `parent=` у `set`:
+
+```json
+[
+  {"op": "create", "title": "Парсер", "parent": "T-7", "from": "/tmp/t1.md", "as": "$p"},
+  {"op": "create", "title": "Сериализатор", "parent": "T-7", "from": "/tmp/t2.md", "as": "$s"},
+  {"op": "link", "id": "$s", "other": "$p"},
+  {"op": "describe", "id": "T-7", "from": "/tmp/epic.md", "rev": "3f9c…"}
+]
+```
+
+Вывод — JSON `{"commit": …, "created": {"$p": "T-8", "$s": "T-9"}, "ops": 4}`; созданная
+без `as` карточка видна под ключом `#{номер записи}`. Пакет целиком проверяется до записи
+(известные `op` и аргументы, колонки, типы, ключи `set`, имя `$…` задано созданием выше,
+файлы `from` читаются сразу); отказ записи в середине или отказ push откатывает весь
+пакет — код 2 с номером записи, устаревшая ревизия `describe` — код 3, доска как была.
+
 ## search
 
 `list [--column C] [--kind K] [--parent ID] [--owner U]` → JSON-список карточек с полями
@@ -154,6 +194,7 @@ Start переводит задачу в `working` без вопроса: кол
 не ведётся.
 
 - Создать эпик: `create --kind epic …`; дочернюю задачу: `create --parent {эпик} …`.
+  Несколько дочерних задач, их связи и правка постановки эпика — одним `batch`.
 - Эпик по колонкам двигается вручную (`move`), с одним исключением: первая дочерняя
   задача, взятая в работу, переносит эпик из `backlog` в `working` тем же `move`.
 - Прогресс: `epic {эпик}` → JSON `children` (id, title, column, resolution), `total`,

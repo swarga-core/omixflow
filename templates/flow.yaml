@@ -72,6 +72,7 @@ limits:
   coder_iterations: 7                  # попыток coder на шаг до эскалации
   review_passes: 3                     # проходов ревью до эскалации
   agent_rotation_steps: 10             # шагов плана до смены continuation-агента
+  agent_rotation_context: 350000       # контекст агента (токены), после которого его сменяет новый
 
 # Пороги тиров.
 tiers:

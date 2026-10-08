@@ -14,6 +14,7 @@
     board.py [--project DIR] move ID --to COLUMN [--resolution R]
     board.py [--project DIR] set ID KEY=VALUE ...
     board.py [--project DIR] link ID OTHER
+    board.py [--project DIR] batch --from FILE                               # JSON list of writes, one commit
     board.py [--project DIR] render                                          # rebuild board.md
     board.py [--project DIR] pull                                            # fetch and rebase the board
     board.py [--project DIR] publish ID --from TASK_DIR                      # working copy → card
@@ -42,6 +43,14 @@ never keeps an unpublished write. Reads use the local board; `pull` refreshes it
 the board from any worktree of the repository. `describe` writes task.md only while the
 task card is in backlog: after Start the session owns it and publishes it (an epic has
 no session and stays writable).
+
+`batch --from FILE` (`-` reads stdin) runs a JSON list of writes as one transaction: one
+commit, one push. An operation is `{"op": ..., ...}` with the arguments of its command
+(create: title, type, kind, parent, slug, text or from, and `as` naming the new card for
+later operations as `$name` in id, other, parent; describe: id, text or from, rev;
+comment: id, text, author; move: id, to, resolution; set: id, pairs; link: id, other;
+publish: id, from). The whole list is checked before the board is touched; a failed
+operation or push leaves the board as it was.
 
 `import --from-local` moves the tasks of the `local` tracker (`.tasks/backlog` by default)
 onto the board: a preview without `--apply`, one transaction with it. Tasks in work and
@@ -152,6 +161,8 @@ class Board:
         # Relative to the root when git prints it relative; no --path-format (git 2.31+).
         self.common = (self.root / git(self.root, "rev-parse", "--git-common-dir")).resolve()
         self.id_re = re.compile(rf"^({re.escape(self.prefix)}-(\d+))(?:-[a-z0-9-]+)?$")
+        # Commit messages of the batch in progress: its writes commit once, at the end.
+        self.pending: Optional[List[str]] = None
 
     # ------------------------------------------------------------ location
     def worktrees(self) -> List[Dict[str, str]]:
@@ -328,6 +339,9 @@ class Board:
 
     # ---------------------------------------------------------------- commit
     def commit(self, message: str) -> None:
+        if self.pending is not None:
+            self.pending.append(message)
+            return
         board = self.board()
         for column in COLUMNS:
             col = board / column
@@ -634,6 +648,148 @@ def checkout(b: "Board", cid: str, target: Path, force: bool) -> str:
     return str(target)
 
 
+# op → (required arguments, optional arguments)
+BATCH_OPS: Dict[str, Tuple[Tuple[str, ...], Tuple[str, ...]]] = {
+    "create": (("title",), ("type", "kind", "parent", "slug", "text", "from", "as")),
+    "describe": (("id",), ("text", "from", "rev")),
+    "comment": (("id", "text"), ("author",)),
+    "move": (("id", "to"), ("resolution",)),
+    "set": (("id", "pairs"), ()),
+    "link": (("id", "other"), ()),
+    "publish": (("id", "from"), ()),
+}
+ALIAS_RE = re.compile(r"^\$[A-Za-z0-9_-]+$")
+
+
+def load_batch(b: "Board", source: str) -> List[Dict[str, Any]]:
+    """Read and check the whole batch before the board is touched: known operations and
+    arguments, values the commands accept, aliases defined before use; text files are read
+    now, so a retried transaction replays the same batch."""
+    raw = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    try:
+        ops = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise lib.OmixflowError(f"пакет: не JSON ({e})")
+    if not isinstance(ops, list) or not ops:
+        raise lib.OmixflowError("пакет: ожидается непустой JSON-список операций")
+    aliases: set = set()
+    out: List[Dict[str, Any]] = []
+    for n, op in enumerate(ops, 1):
+        def fail(msg: str) -> lib.OmixflowError:
+            return lib.OmixflowError(f"пакет, операция {n}: {msg}; доска не тронута")
+        if not isinstance(op, dict) or op.get("op") not in BATCH_OPS:
+            raise fail(f"ожидается объект с op из {tuple(BATCH_OPS)}")
+        required, optional = BATCH_OPS[op["op"]]
+        # null for an optional argument means "not given", as an omitted CLI flag
+        args = {k: v for k, v in op.items() if k != "op" and not (v is None and k in optional)}
+        missing = [k for k in required if args.get(k) in (None, "", [])]
+        unknown = sorted(set(args) - set(required) - set(optional))
+        if missing or unknown:
+            raise fail(f"{op['op']}: " + "; ".join(x for x in (missing and f"нет {', '.join(missing)}",
+                                                                unknown and f"лишнее {', '.join(unknown)}") if x))
+        not_text = sorted(k for k, v in args.items() if k != "pairs" and not isinstance(v, str))
+        if not_text:
+            raise fail(f"{op['op']}: значения {', '.join(not_text)} — строки")
+        refs = [args.get(k) for k in ("id", "other", "parent")]
+        if op["op"] == "set":
+            if not isinstance(args["pairs"], list) or not all(isinstance(p, str) for p in args["pairs"]):
+                raise fail("set: pairs — список строк KEY=VALUE")
+            for pair in args["pairs"]:
+                key, sep, value = pair.partition("=")
+                if not sep or key not in SETTABLE:
+                    raise fail(f"set: ожидается KEY=VALUE, KEY из {SETTABLE}: {pair!r}")
+                if key == "parent":
+                    refs.append(value)
+        for ref in refs:
+            if isinstance(ref, str) and ref.startswith("$") and ref not in aliases:
+                raise fail(f"алиас {ref} не задан созданием выше")
+        if op["op"] == "create":
+            args.setdefault("type", str(lib.config_get(b.cfg, "tracker.create_defaults.type") or "feature"))
+            args.setdefault("kind", "task")
+            if args["type"] not in TYPES or args["kind"] not in KINDS:
+                raise fail(f"create: тип из {TYPES}, вид из {KINDS}")
+            alias = args.get("as")
+            if alias is not None:
+                if not isinstance(alias, str) or not ALIAS_RE.match(alias) or alias in aliases:
+                    raise fail(f"as: новый алиас вида $имя, а не {alias!r}")
+                aliases.add(alias)
+        if op["op"] in ("create", "describe"):
+            if "text" in args and "from" in args:
+                raise fail(f"{op['op']}: text или from, не оба")
+            if "from" in args:
+                try:
+                    args["text"] = Path(args.pop("from")).read_text(encoding="utf-8")
+                except OSError as e:
+                    raise fail(f"{op['op']}: {e}")
+            if op["op"] == "describe" and "text" not in args:
+                raise fail("describe: нет text или from")
+        if op["op"] == "move" and (args["to"] not in COLUMNS or args.get("resolution") not in (None, *RESOLUTIONS)):
+            raise fail(f"move: колонка из {COLUMNS}, резолюция из {RESOLUTIONS}")
+        if op["op"] == "comment":
+            args.setdefault("author", lib.git(b.root, "config", "user.name") or "unknown")
+        if op["op"] == "publish":
+            args["from"] = str(Path(args["from"]).resolve())
+        out.append({"op": op["op"], **args})
+    return out
+
+
+def run_batch(b: "Board", ops: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], List[str]]:
+    """All operations in one transaction and one commit; returns the result and warnings."""
+    def apply() -> Tuple[Dict[str, str], List[str]]:
+        created: Dict[str, str] = {}
+        warnings: List[str] = []
+
+        def ref(value: Any) -> Any:
+            return created[value] if isinstance(value, str) and value.startswith("$") else value
+
+        b.pending = []
+        try:
+            for n, op in enumerate(ops, 1):
+                try:
+                    kind = op["op"]
+                    if kind == "create":
+                        cid = b.create(op["title"], op["type"], op["kind"], ref(op.get("parent")), op.get("slug"),
+                                       op.get("text", ""))
+                        created[op.get("as") or f"#{n}"] = cid
+                    elif kind == "describe":
+                        b.describe(ref(op["id"]), op["text"], op.get("rev"))
+                    elif kind == "comment":
+                        b.comment(ref(op["id"]), op["text"], op["author"])
+                    elif kind == "move":
+                        b.move(ref(op["id"]), op["to"], op.get("resolution"))
+                    elif kind == "set":
+                        pairs = [f"{k}={ref(v) if k == 'parent' else v}"
+                                 for k, _, v in (p.partition("=") for p in op["pairs"])]
+                        warnings += b.set_fields(ref(op["id"]), pairs)
+                    elif kind == "link":
+                        b.link(ref(op["id"]), ref(op["other"]))
+                    elif kind == "publish":
+                        publish(b, ref(op["id"]), Path(op["from"]))
+                except (lib.OmixflowError, OSError) as e:
+                    cls = type(e) if isinstance(e, lib.OmixflowError) else lib.OmixflowError
+                    raise cls(f"пакет, операция {n} ({op['op']}): {e}; доска не изменилась") from e
+            messages = b.pending
+        finally:
+            b.pending = None
+        b.commit(batch_message(b, messages))
+        return created, warnings
+
+    created, warnings = b.transaction(apply)
+    return {"commit": b.head()[:8], "created": created, "ops": len(ops)}, warnings
+
+
+def batch_message(b: "Board", messages: List[str]) -> str:
+    """Subject with the cards the batch touched, body with one line per write."""
+    lines = [m[len("board: "):] if m.startswith("board: ") else m for m in messages]
+    ids: List[str] = []
+    for line in lines:
+        for cid in re.findall(rf"\b{re.escape(b.prefix)}-\d+\b", line):
+            if cid not in ids:
+                ids.append(cid)
+    subject = f"board: batch — {len(lines)} записей: {', '.join(ids)}" if ids else f"board: batch — {len(lines)} записей"
+    return subject + "\n\n" + "\n".join(f"- {line}" for line in lines)
+
+
 class StaleRevision(lib.OmixflowError):
     pass
 
@@ -844,6 +1000,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p = sub.add_parser("link")
     p.add_argument("id")
     p.add_argument("other")
+    p = sub.add_parser("batch")
+    p.add_argument("--from", dest="source", required=True)
     p = sub.add_parser("publish")
     p.add_argument("id")
     p.add_argument("--from", dest="source", required=True)
@@ -912,6 +1070,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"omixflow: {warning}", file=sys.stderr)
         elif ns.cmd == "link":
             b.transaction(lambda: b.link(ns.id, ns.other))
+        elif ns.cmd == "batch":
+            result, warnings = run_batch(b, load_batch(b, ns.source))
+            for warning in warnings:
+                print(f"omixflow: {warning}", file=sys.stderr)
+            print(json.dumps(result, ensure_ascii=False))
         elif ns.cmd == "publish":
             source = Path(ns.source).resolve()
             print(b.transaction(lambda: publish(b, ns.id, source)))

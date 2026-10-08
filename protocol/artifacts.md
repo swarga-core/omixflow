@@ -16,7 +16,8 @@
 │   ├── research.md      Source Files Map, findings, design questions, Handoff (см. ниже)
 │   ├── spec.md          дельта: Summary, Changes, Dependencies, Decisions, Out of Scope; в S ещё Research и Steps
 │   ├── plan.md          шаги с файлами и тест-чекпоинтами (M, L)
-│   └── review/          findings reviewer'а по проходам: {phase}-pass{N}.json
+│   ├── review/          findings reviewer'а по проходам: {phase}-pass{N}.json
+│   └── reports/         отчёты coder'а и tester'а по заданиям: {phase}-{метка}.md (`runtime.md`, «Отчёт агента»)
 ├── {id}/                мультизадача
 │   ├── multitask.md     определение частей и их постановки, карта зависимостей, волны
 │   ├── state.yaml       состояние мультизадачи
@@ -32,7 +33,7 @@
 ## Коммит артефактов
 
 Скил, который говорит «коммит артефактов» (артефакты фазы, `state.yaml`, `log.md`,
-`review/`), действует по `artifacts.tracked`:
+`review/`, `reports/`), действует по `artifacts.tracked`:
 
 - `true` (дефолт): коммит путей каталога задачи `{artifacts.dir}/{id}/` в ветку задачи;
   в мультизадаче с `part_isolation: shared` — правило «Явные пути» (`multitask.md`).
@@ -106,7 +107,8 @@ steps_done: [1, 2]
 iteration: 1               # номер доработки после возврата; 1 = первая реализация
 agents:                    # живые continuation-агенты этой сессии
   coder: coder-AL-822
-  reviewer: reviewer-AL-822
+  reviewer: reviewer-AL-822          # ревьюер артефактов (Spec, Plan)
+  reviewer_code: reviewer-AL-822-code  # ревьюер кода (Review), review-cycle.md
 session: 3f2a…             # id сессии, в которой созданы agents
 syncs:                     # синхронизации с базой (порт workspace, sync; sync.py record)
   - {base_sha: 9f8e7d6, commit: 1a2b3c4, how: merge, at: 2026-10-04T12:00:00Z}

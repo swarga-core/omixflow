@@ -8,7 +8,7 @@
     state.py get DIR profile [--json]      # effective profile (full for legacy states); --json: with properties
     state.py set DIR KEY=VALUE ...         # dotted keys; JSON for lists/objects
     state.py unset DIR KEY ...
-    state.py finish DIR PHASE              # add to completed, advance phase (alias: complete)
+    state.py finish DIR PHASE [--no-publish]  # add to completed, advance phase, publish (alias: complete)
     state.py next DIR                      # print the next phase of the profile
     state.py step DIR done N | start N     # implement bookkeeping
     state.py agents DIR --session S        # drop agents from another session
@@ -331,7 +331,8 @@ def cmd_finish(ns: argparse.Namespace) -> int:
     state["phase"] = next_phase(state)
     save(d, state)
     print(state["phase"])
-    publish(d, state)
+    if not ns.no_publish:  # the caller publishes itself, e.g. inside a tracker batch
+        publish(d, state)
     lead = state.get("lead")
     if isinstance(lead, dict) and lead.get("name"):
         print(f"omixflow: под лидом {lead['name']}: отправь notice о фазе {phase} (protocol/lead.md)",
@@ -488,6 +489,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("finish", aliases=["complete"])
     p.add_argument("dir")
     p.add_argument("phase")
+    p.add_argument("--no-publish", action="store_true")
     p.set_defaults(fn=cmd_finish)
 
     p = sub.add_parser("next")

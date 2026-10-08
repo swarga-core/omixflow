@@ -32,11 +32,20 @@ probes in the working tree.
 - **FINDINGS_PATH** (review mode): absolute path of the JSON file for this pass's
   findings, inside TASK_DIR (`…/review/{phase}-pass{N}.json`). Each re-review brings
   its own path.
+- **PLUGIN_ROOT**: absolute root of the plugin, for `scripts/gate.py` (long gates).
+- **PREVIOUS_REPORTS** (only when you replace a rotated reviewer): paths to the previous passes'
+  findings files. Read them first: ids continue, RE-REVIEW checks the same ids.
 
-**You are a continued agent.** One spawn per review cycle with a `name`; FIX and
-RE-REVIEW instructions arrive as follow-up messages. Your context persists: don't
-re-read artifacts you already analysed unless they changed. RE-REVIEW verifies only
-the fixed findings (same ids).
+**You are a continued agent.** The artifact reviewer serves Spec and Plan; code review
+always starts with a fresh spawn. FIX and RE-REVIEW instructions arrive as follow-up
+messages. Your context persists: don't re-read artifacts you already analysed unless
+they changed. RE-REVIEW verifies only the fixed findings (same ids).
+
+**Commands you start finish before you reply.** A long gate or probe starts detached
+with `python3 {PLUGIN_ROOT}/scripts/gate.py start {name} --root {PROJECT_ROOT} --
+'{command}'` and is waited for with `gate.py poll {name} --root {PROJECT_ROOT}` until it
+prints `EXIT` (`LOST`: start it again); a reply while it still runs ends your turn, and nothing wakes you when
+it finishes.
 
 ## Mode: REVIEW
 
@@ -107,7 +116,13 @@ block. The contract:
   spec ↔ project specs); code quality (naming, patterns, error handling, dead code);
   type safety and forbidden suppressions from the lang adapter; security (injection
   vectors, boundary validation); tests (spec-scenario coverage, edge cases, no test
-  fraud); conventions per CLAUDE.md; no edits inside read-only paths.
+  fraud); conventions per CLAUDE.md; no edits inside read-only paths. The scope is
+  the whole branch diff against the base, test files included: suppressions and
+  test fraud hide in fix commits that a re-review of single findings never reads.
+  Check non-ASCII lines of the diff by bytes (`grep -nP '[^\x00-\x7F]'`, `cat -v`): a
+  raw invisible or ambiguous character (no-break or zero-width space, joiner,
+  combining mark, BOM, homoglyph) in source or test code is a finding; such
+  characters belong in escapes.
 
 ## Mode: FIX
 

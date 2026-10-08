@@ -32,25 +32,31 @@ workspace до гейтов и до ревью: ревью видит итого
 ### 1. Полный прогон гейтов
 
 Все гейты адаптера lang: typecheck, test, lint, плюс build и e2e, если заданы
-и их `when` затронут изменениями (`git diff --name-only {base}...HEAD`). Гейты
-с `background: true` в фоне с чтением вывода. Критерии чтения по адаптеру
+и их `when` затронут изменениями (`git diff --name-only {base}...HEAD`). Долгие гейты
+по `runtime.md`, «Гейты». Критерии чтения по адаптеру
 (zero-diagnostics, rerun-compare-set). Красный гейт до ревью: вернуть coder'у
-как шаг «починить гейт», не идти в ревью с красным.
+как шаг «починить гейт» (`REPORT_PATH: {TASK_DIR}/reports/review-gate-fix{K}.md`), не идти
+в ревью с красным.
 
 ### 2. Reviewer
 
-SendMessage живому `reviewer-{id}` или спавн с `name: reviewer-{id}` (часть:
-`reviewer-{id}-{part}`), `MODE: review`, `ADAPTERS.lang`, `ADAPTERS.workspace`,
-`RULES`, ASPECTS:
+Спавн с `name: reviewer-{id}-code` (часть: `reviewer-{id}-{part}-code`): ревью кода
+начинает свежий reviewer, ревьюер артефактов Spec и Plan сюда не переходит
+(`review-cycle.md`, шаг 4). Имя — в `agents.reviewer_code` (`state.py set`); живой агент
+оттуда в той же сессии (повторный запуск review) получает SendMessage, если порог
+ротации не сработал. `MODE: review`,
+`ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `PLUGIN_ROOT`, ASPECTS:
 
 - spec sync: код соответствует spec.md, project specs обновлены;
 - code quality: именование, паттерны, обработка ошибок, мёртвый код;
-- type safety и запрещённые подавления из адаптера;
+- type safety и запрещённые подавления из адаптера во всём диффе ветки, тесты тоже;
 - tests: покрытие сценариев spec, edge cases, отсутствие test fraud, мутационная
-  проверка отражена в NOTES coder'а;
+  проверка отражена в `MUTATIONS` отчётов coder'а (`reports/implement-step*.md`);
+- сырые невидимые и неоднозначные символы в диффе (проверка байтами);
 - conventions: CLAUDE.md проекта; read-only пути адаптера workspace не тронуты.
 
-`ARTIFACT_PATHS`: spec.md, plan.md (если есть), все изменённые файлы ветки.
+`ARTIFACT_PATHS`: spec.md, plan.md (если есть), все изменённые файлы ветки, отчёты
+`reports/`.
 Категории: code, tests, spec-sync, architecture.
 `FINDINGS_PATH: {TASK_DIR}/review/review-pass{N}.json`: findings читаются из файла.
 
@@ -63,20 +69,27 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 
 ### 4. FIX
 
-По исполнителю категории: code и spec-sync → coder (SendMessage `coder-{id}`
-или спавн с `name: coder-{id}`), tests → tester (спавн с `name: tester-{id}`,
-после coder), spec и plan → architect (SendMessage `architect-{id}` или спавн
-с `name: architect-{id}`), architecture → решение в точке `finding`. Re-review:
-SendMessage тому же reviewer по тем же id. Не больше `limits.review_passes` проходов (`review-cycle.md`, «Лимит проходов»),
-затем эскалация нерешённых findings в точке `finding`.
+По исполнителю категории: code и spec-sync → coder (SendMessage живому агенту из
+`agents.coder`, имя может быть с суффиксом ротации, или спавн с `name: coder-{id}`),
+tests → tester (спавн с `name: tester-{id}`, после coder), spec и plan → architect
+(SendMessage живому агенту из `agents.architect` или спавн с `name: architect-{id}`),
+architecture → решение в точке `finding`. Coder и tester
+получают `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md` (tester:
+`{TASK_DIR}/reports/review-tests-pass{N}.md`), отчёт читается и сверяется как в `implement`, 2.2. Перед
+каждым пакетом — порог ротации (`tiers.md`). Re-review: SendMessage ревьюеру кода из
+`agents.reviewer_code` по тем же id. Не больше `limits.review_passes` проходов
+(`review-cycle.md`, «Лимит проходов»), затем эскалация нерешённых findings в точке
+`finding`.
 
 ### 5. Коммит и состояние
 
-Фиксы кода одним коммитом; артефакты (`state.yaml`, `log.md`, `review/`) — в нём же
+Один коммит фиксов на проход ревью: пакет фиксов прохода N коммитится до повторного
+ревью, новые findings прохода N+1 дают свой коммит; прежний коммит не переписывается.
+Артефакты (`state.yaml`, `log.md`, `review/`, `reports/`) — в коммите своего прохода
 по правилу «Коммит артефактов» (`artifacts.md`):
 
 ```
-fix: address review findings for {id}
+fix: address review findings for {id} (pass {N})
 ```
 
 `state.py finish TASK_DIR review`; log.md:

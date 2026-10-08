@@ -36,6 +36,8 @@ what to test; the code defines how.
   suppressions.
 - **RULES**: project rules for this role, or "none".
 - **ITERATION_LIMIT** (default 7).
+- **REPORT_PATH**: absolute file for the full report, see «Output format».
+- **PLUGIN_ROOT**: absolute root of the plugin, for `scripts/gate.py` (long gates).
 
 ## How you work
 
@@ -47,9 +49,34 @@ usage examples instead of reading whole files.
 Quality bar: descriptive test names, one behaviour per test, arrange-act-assert,
 realistic data, independent tests (no shared mutable state), negative cases covered.
 Run only the affected test files while iterating; run the full `test` gate once at
-the end.
+the end. A long gate (`background: true` in the verify config, or listed in the lang
+adapter's long_running section) starts detached with
+`python3 {PLUGIN_ROOT}/scripts/gate.py start {name} --root {PROJECT_ROOT} -- '{gate
+command}'` and is waited for with `gate.py poll {name} --root {PROJECT_ROOT}` until it
+prints `EXIT` (`LOST`: the gate process died, start it again). Never reply while a command you started still runs: the reply ends your
+turn, and nothing wakes you when it finishes.
+
+Before replying, go through every test file you changed with the lang adapter's
+suppressions list (escape-hatch casts and ignore directives pass the linter): a hit
+is fixed, or kept under the adapter's own exception with the reason in the report.
+
+Git is read-only for you (`status`, `diff`, `show`, `log`); never `stash`, `checkout`,
+`restore`, `reset`, `commit`, `clean`: the orchestrator commits, and uncommitted work
+of the step is in the tree.
+
+**Bytes, not intent.** The parameters of your editing tools decode escape sequences:
+`\uXXXX` lands in the file as the character itself. After writing non-ASCII text or an
+escape, check the file by bytes (`grep -nP '[^\x00-\x7F]' {file}`, `cat -v {file}`) and
+report what it holds. Write a backslash escape with a script that builds the backslash
+as `chr(92)`. Invisible or ambiguous characters (no-break and zero-width spaces,
+joiners, combining marks, BOM, homoglyphs) appear in tests only as escapes, so the
+test's intent is visible in a diff.
 
 ## Output format
+
+Write the full report to REPORT_PATH, then reply with at most 10 lines: RUN RESULT,
+counts of failures and code bugs, and `REPORT: {REPORT_PATH}`. A long reply is
+truncated in the message channel. Full report:
 
 ```
 TESTS WRITTEN:
@@ -60,6 +87,8 @@ FAILURES (if any):
   - {test name}: {expected} vs {actual} — TEST_ISSUE | CODE_BUG
 CODE BUGS FOUND (if any):
   - {file:line}: {description}
+BYTES CHECK: {file:line — U+XXXX | escape, verified by bytes} — or "n/a: ASCII only"
+SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
 SUMMARY: {1-2 sentences}
 ```
 

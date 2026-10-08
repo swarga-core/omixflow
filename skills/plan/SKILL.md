@@ -23,13 +23,13 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 
 ## Алгоритм
 
-1. **Architect.** Если агент `architect-{id}` жив в этой сессии (`state.yaml`
-   `agents.architect`, `session` совпадает), SendMessage ему `MODE: plan`; иначе
+1. **Architect.** Если агент из `agents.architect` (`state.yaml`, имя может быть с суффиксом
+   ротации) жив в этой сессии (`session` совпадает), SendMessage ему `MODE: plan`; иначе
    спавн с `name: architect-{id}`, `MODE: plan`, `TASK_DIR`, `ADAPTERS.lang`,
    `RULES`. Формат: Overview, Steps (файлы CREATE/MODIFY, тест-чекпоинт), Project
    Specs to Update, Verification. Порядок: types → domain → application → infra →
    UI → integration → tests.
-2. **Reviewer.** Аналогично: SendMessage живому `reviewer-{id}` или спавн
+2. **Reviewer.** Аналогично: SendMessage живому агенту из `agents.reviewer` или спавн
    с `name: reviewer-{id}`. `MODE: review`, ASPECTS: coverage (план реализует всё
    из spec), ordering
    (порядок зависимостей), granularity (шаг атомарен и верифицируем), test
@@ -40,6 +40,7 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
    auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
    тому же reviewer по тем же id, не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
+   Живой architect и reviewer со Spec продолжают, если не сработал порог ротации (`tiers.md`).
 5. **Состояние.** `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
    steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов. Коммит артефактов (`artifacts.md`).
 

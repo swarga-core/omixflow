@@ -308,6 +308,15 @@ class ArtifactsTests(BoardCase):
         self.assertEqual(json.loads(self.ok("get", "T-1"))["state"]["steps_done"], [1])
         self.assertIn("board: T-1 publish", git(self.board, "log", "-1", "--format=%s"))
 
+    def test_finish_without_publish_leaves_the_card_alone(self):
+        work = self.start()
+        state("init", str(work), "--id", "T-1", "--kind", "task")
+        head = git(self.board, "rev-parse", "HEAD")
+        proc = state("finish", str(work), "refine", "--no-publish")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(git(self.board, "rev-parse", "HEAD"), head)
+        self.assertEqual(board.lib.yaml.safe_load((work / "state.yaml").read_text(encoding="utf-8"))["phase"], "start")
+
     def test_publish_is_additive(self):
         work = self.start()
         state("init", str(work), "--id", "T-1", "--kind", "task")
@@ -513,6 +522,121 @@ class DoctorHookTests(BoardCase):
         self.assertEqual(self.call("detect", project=bare)[1], "null")
 
 
+def write_batch(tmp: str, ops) -> str:
+    path = Path(tmp) / "batch.json"
+    path.write_text(json.dumps(ops, ensure_ascii=False), encoding="utf-8")
+    return str(path)
+
+
+class BatchTests(BoardCase):
+    def commits(self) -> int:
+        return int(git(self.board, "rev-list", "--count", "HEAD"))
+
+    def test_one_commit_with_aliases(self):
+        self.create("Старая")
+        before = self.commits()
+        out = self.ok("batch", "--from", write_batch(self.tmp.name, [
+            {"op": "create", "title": "Эпик", "kind": "epic", "as": "$e"},
+            {"op": "create", "title": "Первая", "parent": "$e", "text": "Постановка первой.", "as": "$a"},
+            {"op": "create", "title": "Вторая", "type": "bug"},
+            {"op": "set", "id": "T-4", "pairs": ["parent=$e", "owner=anna"]},
+            {"op": "link", "id": "$a", "other": "T-1"},
+            {"op": "comment", "id": "$a", "text": "заведена пакетом", "author": "anna"},
+            {"op": "move", "id": "$a", "to": "working"},
+        ]))
+        result = json.loads(out)
+        self.assertEqual(result["created"], {"$e": "T-2", "$a": "T-3", "#3": "T-4"})
+        self.assertEqual(result["ops"], 7)
+        self.assertEqual(self.commits(), before + 1, "a batch is one commit")
+        self.assertEqual(result["commit"], git(self.board, "rev-parse", "--short=8", "HEAD"))
+        subject = git(self.board, "log", "-1", "--format=%s")
+        self.assertTrue(subject.startswith("board: batch — "), subject)
+        self.assertIn("T-3 move backlog → working", git(self.board, "log", "-1", "--format=%b"))
+        a = json.loads(self.ok("get", "T-3"))
+        self.assertEqual((a["parent"], a["column"], a["state"]["links"]), ("T-2", "working", ["T-1"]))
+        self.assertIn("Постановка первой.", a["task_md"])
+        self.assertIn("anna: заведена пакетом", a["comments"])
+        self.assertEqual(json.loads(self.ok("get", "T-2"))["column"], "working", "the first child lifts the epic")
+        b = json.loads(self.ok("get", "T-4"))
+        self.assertEqual((b["parent"], b["owner"], b["type"]), ("T-2", "anna", "bug"))
+        self.assertIn("0/2 закрыто", (self.board / "board.md").read_text(encoding="utf-8"))
+        self.assertEqual(git(self.board, "status", "--porcelain"), "")
+
+    def test_publish_and_move_in_one_commit(self):
+        self.create("Задача")
+        work = self.root / ".tasks" / "T-1"
+        self.ok("checkout", "T-1", "--to", str(work))
+        (work / "spec.md").write_text("# Spec\n", encoding="utf-8")
+        before = self.commits()
+        self.ok("batch", "--from", write_batch(self.tmp.name, [
+            {"op": "publish", "id": "T-1", "from": str(work)},
+            {"op": "move", "id": "T-1", "to": "review"},
+        ]))
+        self.assertEqual(self.commits(), before + 1)
+        self.assertTrue((self.board / "review" / "T-1-zadacha" / "spec.md").exists())
+
+    def test_null_optional_arguments_count_as_omitted(self):
+        self.create("Задача")
+        self.ok("batch", "--from", write_batch(self.tmp.name, [
+            {"op": "create", "title": "Без родителя", "parent": None, "slug": None},
+            {"op": "move", "id": "T-1", "to": "working", "resolution": None},
+        ]))
+        self.assertEqual(json.loads(self.ok("get", "T-1"))["column"], "working")
+        self.assertIsNone(json.loads(self.ok("get", "T-2"))["parent"])
+
+    def test_failed_operation_leaves_the_board_unchanged(self):
+        self.create("Задача")
+        head = git(self.board, "rev-parse", "HEAD")
+        code, _, err = self.call("batch", "--from", write_batch(self.tmp.name, [
+            {"op": "create", "title": "Новая", "as": "$n"},
+            {"op": "link", "id": "$n", "other": "T-99"},
+        ]))
+        self.assertEqual(code, 2)
+        self.assertIn("операция 2 (link)", err)
+        self.assertIn("нет карточки T-99", err)
+        self.assertEqual(git(self.board, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(self.board, "status", "--porcelain"), "")
+        self.assertFalse(list(self.board.glob("*/T-2-*")))
+
+    def test_stale_revision_in_a_batch_keeps_its_exit_code(self):
+        self.create("Задача")
+        code, _, err = self.call("batch", "--from", write_batch(self.tmp.name, [
+            {"op": "comment", "id": "T-1", "text": "до правки"},
+            {"op": "describe", "id": "T-1", "text": "# T-1: Задача\n", "rev": "000000000000"},
+        ]))
+        self.assertEqual(code, 3, err)
+        self.assertNotIn("до правки", json.loads(self.ok("get", "T-1"))["comments"])
+
+    def test_whole_batch_is_checked_before_the_board_is_touched(self):
+        self.create("Задача")
+        head = git(self.board, "rev-parse", "HEAD")
+        bad = {
+            "пустой": [],
+            "не список": {"op": "create", "title": "X"},
+            "неизвестная op": [{"op": "create", "title": "X"}, {"op": "delete", "id": "T-1"}],
+            "алиас до создания": [{"op": "link", "id": "$x", "other": "T-1"},
+                                  {"op": "create", "title": "X", "as": "$x"}],
+            "повтор алиаса": [{"op": "create", "title": "X", "as": "$x"}, {"op": "create", "title": "Y", "as": "$x"}],
+            "чужой ключ set": [{"op": "set", "id": "T-1", "pairs": ["resolution=canceled"]}],
+            "лишний аргумент": [{"op": "move", "id": "T-1", "to": "done", "force": True}],
+            "нет аргумента": [{"op": "comment", "id": "T-1"}],
+            "колонка": [{"op": "move", "id": "T-1", "to": "archive"}],
+            "файла нет": [{"op": "create", "title": "X", "from": str(Path(self.tmp.name) / "nope.md")}],
+            "не строка": [{"op": "create", "title": 5}],
+            "id списком": [{"op": "comment", "id": ["T-1"], "text": "x"}],
+        }
+        for name, ops in bad.items():
+            with self.subTest(name):
+                code, _, err = self.call("batch", "--from", write_batch(self.tmp.name, ops))
+                self.assertEqual(code, 2, err)
+                self.assertIn("пакет", err)
+                self.assertEqual(git(self.board, "rev-parse", "HEAD"), head)
+        (Path(self.tmp.name) / "broken.json").write_text("[{", encoding="utf-8")
+        code, _, err = self.call("batch", "--from", str(Path(self.tmp.name) / "broken.json"))
+        self.assertEqual(code, 2)
+        self.assertIn("не JSON", err)
+
+
 class RemoteTests(unittest.TestCase):
     """Two developers: clones A and B of one bare origin, board pushed after each write."""
 
@@ -587,6 +711,30 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(cid, "T-2")
         self.assertEqual(self.origin_cards(), ["T-1-boris-uspel", "T-2-anna-pozzhe"])
 
+    def test_rejected_batch_is_replayed_with_shifted_ids(self):
+        self.ok(self.a, "init")
+        self.ok(self.b, "init")
+        anna = board.Board(self.a)
+        path = Path(self.tmp.name) / "batch.json"
+        path.write_text(json.dumps([
+            {"op": "create", "title": "Эпик Анны", "kind": "epic", "as": "$e"},
+            {"op": "create", "title": "Дочерняя", "parent": "$e", "as": "$c"},
+            {"op": "link", "id": "$c", "other": "$e"},
+        ], ensure_ascii=False), encoding="utf-8")
+        ops = board.load_batch(anna, str(path))
+        fired = []
+
+        def race():
+            if not fired:
+                fired.append(1)
+                self.assertEqual(self.ok(self.b, "create", "--title", "Борис успел"), "T-1")
+        anna._before_push = race
+        result, _ = board.run_batch(anna, ops)
+        self.assertEqual(result["created"], {"$e": "T-2", "$c": "T-3"})
+        self.assertEqual(self.origin_cards(), ["T-1-boris-uspel", "T-2-epik-anny", "T-3-dochernyaya"])
+        child = json.loads(self.ok(self.a, "get", "T-3"))
+        self.assertEqual((child["parent"], child["state"]["links"]), ("T-2", ["T-2"]))
+
     def test_stale_describe_across_clones(self):
         self.ok(self.a, "init")
         self.ok(self.a, "create", "--title", "Общая")
@@ -617,6 +765,27 @@ class RemoteTests(unittest.TestCase):
         self.assertEqual(counter.read_text(encoding="utf-8").count("call"), 1, "a server refusal is not retried")
         self.assertEqual(git(self.a / ".tasks" / "board", "rev-parse", "HEAD"), head)
         self.assertEqual(git(self.a / ".tasks" / "board", "status", "--porcelain"), "")
+
+    def test_batch_refused_by_the_server_is_rolled_back(self):
+        self.ok(self.a, "init")
+        self.ok(self.a, "create", "--title", "Первая")
+        local = self.a / ".tasks" / "board"
+        head, remote = git(local, "rev-parse", "HEAD"), git(self.origin, "rev-parse", "board")
+        hook = self.origin / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho 'Internal Server Error' >&2\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+        ops = [{"op": "create", "title": "Вторая", "as": "$b"}, {"op": "link", "id": "$b", "other": "T-1"}]
+        path = Path(self.tmp.name) / "batch.json"
+        path.write_text(json.dumps(ops, ensure_ascii=False), encoding="utf-8")
+        code, _, err = self.call(self.a, "batch", "--from", str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("отклонил push", err)
+        self.assertEqual(git(local, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(local, "status", "--porcelain"), "")
+        self.assertEqual(git(self.origin, "rev-parse", "board"), remote)
+        hook.unlink()
+        self.assertEqual(json.loads(self.ok(self.a, "batch", "--from", str(path)))["created"], {"$b": "T-2"})
+        self.assertEqual(self.origin_cards(), ["T-1-pervaya", "T-2-vtoraya"])
 
     def test_checkout_without_connection_reads_the_local_board(self):
         self.ok(self.a, "init")

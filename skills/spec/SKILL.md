@@ -59,10 +59,13 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. FIX: SendMessage `architect-{id}` с `MODE: fix` и принятыми findings. Re-review:
    SendMessage `reviewer-{id}` по тем же id. Не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
+   Перед каждым сообщением architect'у и reviewer'у — порог ротации (`tiers.md`, «Смена агента
+   по ходу задачи»).
 5. Состояние: `state.py finish TASK_DIR spec`. log.md: `## Spec ✅`, findings, проходов.
 
-Во всех тирах коммит артефактов после фазы (`artifacts.md`). Имена агентов записать в состояние:
-`state.py set TASK_DIR agents.architect=architect-{id} agents.reviewer=reviewer-{id}`.
+Во всех тирах коммит артефактов после фазы (`artifacts.md`). Фактические имена агентов (после
+ротации — с суффиксом) записать в состояние: `state.py set TASK_DIR agents.architect={имя}
+agents.reviewer={имя}`.
 
 ## Итог (mode manual)
 

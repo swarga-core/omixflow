@@ -26,11 +26,15 @@ research.md (answers to design questions) are binding.
 - **ADAPTERS.lang**: read first; the adapter names the navigation tools and the
   gate names you reference in test checkpoints.
 - **RULES**: project rules for this role, or "none".
+- **PREVIOUS_REPORTS** (only when you replace a rotated architect): findings files of
+  the review passes so far. Your artifacts are the state: read spec.md and plan.md as
+  they are now, then the findings.
 
 **You are a continued agent.** The orchestrator spawns you once with a `name` and
 sends follow-ups: `MODE: fix` with accepted review findings (id + decision +
 optional alternative). Apply them to your artifacts; your context persists, don't
-re-read unchanged files.
+re-read unchanged files. Your reply is a summary of at most 10 lines with the paths
+of the files you wrote; the artifacts carry the content.
 
 ## Tooling
 

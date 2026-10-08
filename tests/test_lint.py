@@ -224,6 +224,40 @@ class ArtifactsCommitLint(unittest.TestCase):
         self.assertEqual(hits, [], "коммит артефактов без ссылки на artifacts.md:\n" + "\n".join(hits))
 
 
+class AgentReportLint(unittest.TestCase):
+    """A long agent reply is truncated in the message channel (protocol/runtime.md, «Отчёт
+    агента»): coder and tester write the full report to REPORT_PATH, and every skill that
+    hands them work passes the path."""
+
+    def test_agents_write_reports_to_a_file(self):
+        for agent, markers in {"coder": ("REPORT_PATH", "TREE STATE", "MUTATIONS", "BYTES CHECK",
+                                         "SUPPRESSIONS CHECK", "gate.py"),
+                               "tester": ("REPORT_PATH", "BYTES CHECK", "SUPPRESSIONS CHECK", "gate.py")}.items():
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertEqual([m for m in markers if m not in body], [])
+
+    def test_skills_pass_report_path_to_coder_and_tester(self):
+        hits = []
+        for path in iter_files("skills"):
+            text = path.read_text(encoding="utf-8")
+            if re.search(r"name: (coder|tester)-\{id\}", text) and "REPORT_PATH" not in text:
+                hits.append(path.relative_to(ROOT).as_posix())
+        self.assertEqual(hits, [], "скил даёт работу coder/tester без REPORT_PATH:\n" + "\n".join(hits))
+
+    def test_report_labels_come_from_the_runtime_table(self):
+        text = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        section = text[text.index("## Отчёт агента"):text.index("## Модели")]
+        known = set(re.findall(r"^\| `([a-z-]+\{[A-Z]\})` \|", section, re.M))
+        self.assertTrue(known, "таблица меток в runtime.md не найдена")
+        used = set()
+        for path in iter_files("skills"):
+            used |= set(re.findall(r"reports/(?:\{phase\}|implement|review|finalize)-([a-z-]+\{[A-Z]\})\.md",
+                                   path.read_text(encoding="utf-8")))
+        self.assertTrue(used)
+        self.assertEqual(sorted(used - known), [], "метки отчётов вне таблицы runtime.md")
+
+
 class CardFieldsLint(unittest.TestCase):
     """omixflow_lib.CARD_FIELDS (used by state.py and the kanban board) is the formal record
     that protocol/artifacts.md lists in «Хранение в задаче трекера»."""

@@ -112,7 +112,9 @@
       "properties": {
         "coder_iterations": { "type": "integer", "minimum": 1, "default": 7 },
         "review_passes": { "type": "integer", "minimum": 1, "default": 3 },
-        "agent_rotation_steps": { "type": "integer", "minimum": 1, "default": 10 }
+        "agent_rotation_steps": { "type": "integer", "minimum": 1, "default": 10 },
+        "agent_rotation_context": { "type": "integer", "minimum": 50000, "default": 350000,
+          "description": "объём контекста continuation-агента (токены, по уведомлению о завершении), после которого его сменяет новый (protocol/tiers.md)" }
       }
     },
     "tiers": {

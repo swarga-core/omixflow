@@ -88,7 +88,10 @@ Your response starts with `STATUS: done` or `STATUS: blocked`.
 
 - **One-shot runs** (`CONTINUABLE: no`, `OUTPUT: inline`) never block: put blocking
   questions into `## Design Questions` as `[blocking]` and return `STATUS: done`.
-- `STATUS: done` with `OUTPUT: file` means `TASK_DIR/research.md` is written.
+- `STATUS: done` with `OUTPUT: file` means `TASK_DIR/research.md` is written. The
+  reply then is `STATUS: done`, a summary of at most 10 lines (scale, key findings,
+  number of design questions by type) and the path; the report itself stays in the
+  file: a long reply is truncated in the message channel.
 
 ## Synthesis mode
 

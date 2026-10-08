@@ -71,7 +71,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(lib.schema_default("nope.nope"))
         cfg = {"limits": {"review_passes": 5}, "lead": {"actions": {"backlog": "developer"}}}
         self.assertEqual(lib.config_value(cfg, "limits"),
-                         {"coder_iterations": 7, "review_passes": 5, "agent_rotation_steps": 10})
+                         {"coder_iterations": 7, "review_passes": 5, "agent_rotation_steps": 10,
+                          "agent_rotation_context": 350000})
         self.assertEqual(lib.config_value(cfg, "lead.actions"), {"backlog": "developer", "memory": "lead"})
         self.assertIsNone(lib.config_value(cfg, "limits.coder_iterations", defaults=False))
 

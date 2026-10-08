@@ -1,7 +1,7 @@
 ---
 port: tracker
 required: [identify, get, update_description, comment, set_status, current_user]
-optional: [comments, create, link, search, tag, parts_as_issues, artifacts]
+optional: [comments, create, link, search, tag, parts_as_issues, artifacts, batch]
 config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_map, tracker.create_defaults, tracker.dir, tracker.branch, tracker.push]
 ---
 
@@ -28,6 +28,7 @@ config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_ma
 | tag | нет | добавить или снять тег | multitask (`multitask`) |
 | parts_as_issues | нет | материализовать части мультизадачи дочерними задачами; зарезервировано | multitask, будущее |
 | artifacts | нет | хранить артефакты задачи в самой задаче трекера: `path`, `publish`, `checkout` (раздел «Артефакты в задаче») | start, implement, finalize, develop, lead |
+| batch | нет | выполнить несколько записей (create, link, comment, set_status, update_description, публикация `artifacts`) одной транзакцией: все или ни одной (раздел «Пакетная запись»); без возможности скилы вызывают операции по одной | refine (эпик), finalize |
 
 ## Управляемые блоки
 
@@ -44,7 +45,7 @@ config: [tracker.adapter, tracker.project, tracker.id_pattern, tracker.status_ma
 ## Артефакты в задаче
 
 Адаптер с возможностью `artifacts` хранит артефакты задачи (`task.md`, `state.yaml`,
-`log.md`, `research.md`, `spec.md`, `plan.md`, `review/`) в самой задаче трекера, а не на
+`log.md`, `research.md`, `spec.md`, `plan.md`, `review/`, `reports/`) в самой задаче трекера, а не на
 кодовой ветке. Три операции:
 
 | Операция | Что делает |
@@ -60,6 +61,15 @@ artifacts`), принимающим `path {id}`, `publish {id} --from {TASK_DIR}
 Когда ядро их вызывает и как рабочая копия соотносится с хранилищем, описывает
 `protocol/artifacts.md`, раздел «Хранение в задаче трекера». Без этой возможности
 артефакты живут на ветке задачи, как раньше.
+
+## Пакетная запись
+
+Адаптер с возможностью `batch` принимает список записей и выполняет их одной транзакцией:
+у трекера на ветке git это один коммит и один push. Отказ любой записи или публикации
+отменяет весь пакет, трекер остаётся как был. Задача, созданная в пакете, получает
+временное имя, на которое ссылаются следующие записи того же пакета (связь, родитель).
+Скил, которому нужно несколько записей подряд, при возможности `batch` собирает их
+в один пакет; формат пакета — в адаптере.
 
 ## Уточнённая формулировка
 
