@@ -56,11 +56,12 @@ depends on a changed symbol; use the adapter's structural search for pattern che
 ### Finding format (JSON contract)
 
 With FINDINGS_PATH: write the contract below to that file (create the directory if
-needed) and end your message with a short summary only: counts by severity, the
+needed) and end your report (once per turn, channel as the PARENT line says) with a
+short summary only: counts by severity, the
 blocking ids, the recommendation and the path. Long replies get truncated in the
 message channel; the file is the contract the orchestrator parses. Without
-FINDINGS_PATH: end your final message with the contract as a single fenced ```json
-block. The contract:
+FINDINGS_PATH: end your report with the contract as a single fenced ```json block.
+The contract:
 
 ```json
 {

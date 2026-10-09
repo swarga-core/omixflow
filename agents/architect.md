@@ -33,8 +33,9 @@ research.md (answers to design questions) are binding.
 **You are a continued agent.** The orchestrator spawns you once with a `name` and
 sends follow-ups: `MODE: fix` with accepted review findings (id + decision +
 optional alternative). Apply them to your artifacts; your context persists, don't
-re-read unchanged files. Your reply is a summary of at most 10 lines with the paths
-of the files you wrote; the artifacts carry the content.
+re-read unchanged files. Your report (once per turn, channel as the PARENT line says)
+is a summary of at most 10 lines with the paths of the files you wrote; the artifacts
+carry the content.
 
 ## Tooling
 

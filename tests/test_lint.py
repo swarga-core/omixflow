@@ -232,7 +232,8 @@ class AgentReportLint(unittest.TestCase):
     def test_agents_write_reports_to_a_file(self):
         for agent, markers in {"coder": ("REPORT_PATH", "TREE STATE", "MUTATIONS", "BYTES CHECK",
                                          "SUPPRESSIONS CHECK", "gate.py"),
-                               "tester": ("REPORT_PATH", "BYTES CHECK", "SUPPRESSIONS CHECK", "gate.py")}.items():
+                               "tester": ("REPORT_PATH", "TREE STATE", "MUTATIONS", "BYTES CHECK",
+                                          "SUPPRESSIONS CHECK", "gate.py", "agents/coder.md")}.items():
             _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
             with self.subTest(agent=agent):
                 self.assertEqual([m for m in markers if m not in body], [])
@@ -256,6 +257,33 @@ class AgentReportLint(unittest.TestCase):
                                    path.read_text(encoding="utf-8")))
         self.assertTrue(used)
         self.assertEqual(sorted(used - known), [], "метки отчётов вне таблицы runtime.md")
+
+    def test_parent_line_asks_for_one_report_per_turn(self):
+        """MEW-2: agents sent the summary with SendMessage and then a second, longer one as
+        their final text, which reached the orchestrator too (idle notice)."""
+        text = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        start = text.index("    PARENT: the orchestrator")
+        parent = text[start:text.index("PLUGIN_ROOT:", start)]
+        for marker in ("once per turn", "`sent`", "never a second summary"):
+            self.assertIn(marker, parent)
+
+    def test_agents_report_through_the_parent_channel(self):
+        """An agent's own «reply with a summary» wording beside the PARENT line gave MEW-2 a
+        second, longer report every turn: every agent's output section points to PARENT."""
+        for agent in ("architect", "coder", "researcher", "reviewer", "tester"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertIn("channel as the PARENT line says", " ".join(body.split()))
+
+    def test_rotation_measures_context_by_the_transcript_script(self):
+        """Named agents' idle notices carry no usage: tiers.md names agent_ctx.py, which exists."""
+        text = (ROOT / "protocol" / "tiers.md").read_text(encoding="utf-8")
+        start = text.index("## Смена агента по ходу задачи")
+        end = text.find("\n## ", start + 1)
+        section = text[start:end if end != -1 else len(text)]
+        self.assertIn("scripts/agent_ctx.py", section)
+        self.assertIn("неизвестен", section)
+        self.assertTrue((ROOT / "scripts" / "agent_ctx.py").is_file())
 
 
 class CardFieldsLint(unittest.TestCase):

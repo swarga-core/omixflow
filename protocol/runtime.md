@@ -48,6 +48,12 @@
    `notice` о пройденной фазе: после Start с веткой, базой, worktree, профилем
    и тиром, после Research с файлами Source Files Map.
 
+**Команды без `cd`.** Харнесс сохраняет рабочий каталог между вызовами Bash: `cd` в одной
+команде, даже внутри составной, уносит его для всех следующих. Скрипты плагина и адаптеров
+ищут `flow.yaml` от текущего каталога (MEW-2: после `cd` в scratchpad скрипт трекера упал
+«конфиг не найден»). Пути абсолютные, `git -C {путь}`, явные `--dir` в командах пакетных
+менеджеров. Чем ещё опасен чужой каталог — `worktree.md`, «Ловушки».
+
 ## Спавн агентов
 
 Роли: researcher, architect, coder, tester, reviewer, web-fetcher. Агент берётся
@@ -78,10 +84,12 @@ Agent tool:
       lang: {пути цепочки lang, через запятую}
       workspace: {пути цепочки workspace}          # coder, reviewer
     RULES: {пути проектных правил агента или "none"}
-    PARENT: the orchestrator of this session. Report only to it. The harness may label it
-      team-lead; it is not the OMIXFlow lead session: never message the lead, never call
-      your parent "lead".
-    PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты
+    PARENT: the orchestrator of this session. Report only to it, once per turn: with
+      SendMessage when you have that tool, then end your turn with the single line `sent`,
+      never a second summary; without SendMessage, or when the send fails, your final
+      reply is the report. The harness may label it team-lead; it is not the OMIXFlow
+      lead session: never message the lead, never call your parent "lead".
+    PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты; tester: рецепт пробы
     REPORT_PATH: {TASK_DIR}/reports/{phase}-{метка}.md   # coder, tester
     {параметры режима агента: MODE, STEP, ASPECTS, ARTIFACT_PATHS, FINDINGS_PATH, ...}
 ```
@@ -150,10 +158,25 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 | `tests-pass{N}` | тесты tester'а в пакете фиксов прохода N |
 | `sync{K}` | разрешение конфликтов K-й синхронизации с базой (K — следующий номер в `syncs` состояния) |
 | `sync-fix{K}` | поломки вне конфликтов после K-й синхронизации |
-| `gate-fix{K}` | K-я починка красного гейта до ревью |
+| `spec-sync-pass{N}` | строки спецификаций, называющие новые тесты tester'а прохода N, когда coder уже чинил код в этом проходе |
+| `gate-fix{K}` | K-я починка красного гейта вне шага плана и вне пакета фиксов прохода, в том числе проверки, которую оркестратор выполняет сам |
+| `tests-gate-fix{K}` | тесты tester'а в K-й починке красного гейта |
 
 Путь приходит в спавне или в сообщении задания. Оркестратор читает файл, а не ответ;
 `reports/` входит в артефакты задачи наравне с `review/` (`artifacts.md`).
+
+**Один отчёт за ход.** Сводку агент шлёт один раз: SendMessage и строка `sent` в конце
+хода, а без SendMessage или при сбое отправки — итоговым ответом (строка `PARENT`
+шаблона). В режиме команд агентов итоговый текст тоже доходит до оркестратора — `result`
+уведомления о простое; в MEW-2 агенты писали после сводки ещё и итог втрое длиннее,
+и каждый отчёт приходил дважды. Уведомление с `sent` — конец хода, не новый отчёт;
+отчёт в уведомлении бывает только у агента, который не отправил его сообщением.
+
+**Одно задание за раз.** Сообщение агенту, который ещё работает, доходит до него только
+после конца хода: в MEW-2 оба дополнения пришли агентам после их отчёта, а оркестратор
+принял отчёт без дополнения за потерю и повторил его. Новое задание или дополнение живому
+агенту уходит после его отчёта на текущее; решение, пришедшее раньше, ждёт. Если сообщение
+уже ушло, отчёт без него — не потеря: ответ придёт следующим ходом, повторять нельзя.
 
 **Ответ без итогов — не отчёт.** Агент отчитывается, когда все запущенные им команды
 закончились. Ответ `done`, в котором гейт ещё идёт («жду фоновые гейты», нет кода

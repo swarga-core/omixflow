@@ -123,8 +123,9 @@ in-file edits use plain Edit.
 
 ## Output format
 
-Write the full report to REPORT_PATH, then reply with the short form only: a long
-reply is truncated in the message channel, the orchestrator reads the file.
+Write the full report to REPORT_PATH, then report to PARENT with the short form only
+(once per turn, channel as the PARENT line says): a long reply is truncated in the
+message channel, the orchestrator reads the file.
 
 Full report (REPORT_PATH; in sync mode the per-file resolutions replace FILES):
 
@@ -156,7 +157,7 @@ SUMMARY: {1-2 sentences}
 NOTES: {concerns, edge cases, issues outside the step for the orchestrator}
 ```
 
-Reply (at most 10 lines):
+Short form (at most 10 lines):
 
 ```
 STEP: {N} — {name}

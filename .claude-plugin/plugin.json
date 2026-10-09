@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "omixflow",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "OMIXFlow: spec-driven development pipeline for Claude Code with pluggable adapters for trackers, forges, languages and workspaces",
   "author": {
     "name": "Swarga Core",

@@ -64,7 +64,8 @@ inside PROJECT_ROOT only.
 
 ## Report contract
 
-Your response starts with `STATUS: done` or `STATUS: blocked`.
+Your report (once per turn, channel as the PARENT line says) starts with `STATUS: done`
+or `STATUS: blocked`.
 
 - **Question types.** A **blocking** question changes the direction or scope of this
   part or task: you cannot finish a sound report without the answer. A **deferred**
@@ -72,7 +73,8 @@ Your response starts with `STATUS: done` or `STATUS: blocked`.
   answer. Tag them `Q{n} [blocking]:` (followed by `A{n}:` with the answer once given)
   and `Q{n} [deferred]:`.
 - **`STATUS: blocked`** is allowed **only with `CONTINUABLE: yes`**. Then stop and
-  return, and write no research.md (it exists only after `done`):
+  report the question (one report, as above), and write no research.md (it exists only
+  after `done`):
 
   ```
   STATUS: blocked
@@ -88,10 +90,11 @@ Your response starts with `STATUS: done` or `STATUS: blocked`.
 
 - **One-shot runs** (`CONTINUABLE: no`, `OUTPUT: inline`) never block: put blocking
   questions into `## Design Questions` as `[blocking]` and return `STATUS: done`.
-- `STATUS: done` with `OUTPUT: file` means `TASK_DIR/research.md` is written. The
-  reply then is `STATUS: done`, a summary of at most 10 lines (scale, key findings,
-  number of design questions by type) and the path; the report itself stays in the
-  file: a long reply is truncated in the message channel.
+- `STATUS: done` with `OUTPUT: file` means `TASK_DIR/research.md` is written. Your
+  report (once per turn, channel as the PARENT line says) then is `STATUS: done`, a
+  summary of at most 10 lines (scale, key findings, number of design questions by type)
+  and the path; the research itself stays in the file: a long reply is truncated in the
+  message channel.
 
 ## Synthesis mode
 
