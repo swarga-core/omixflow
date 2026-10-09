@@ -1,0 +1,31 @@
+---
+id: omixflow-agent-report-double
+title: Агент отчитывается дважды — SendMessage плюс длинный итоговый текст в idle-уведомлении
+status: draft
+type: bug
+created: 2026-10-09
+updated: 2026-10-09
+origin: разбор прогона MEW-2 в mewria 2026-10-09, сессия omixflow-lead
+target: omixflow
+external:
+links: [omixflow-coder-report-file, omixflow-agent-message-while-busy]
+---
+
+**Контекст.** 0.5.0 велит агенту писать полный отчёт в файл и отвечать сводкой до 10 строк.
+Строка `PARENT` шаблона спавна (`runtime.md`): «Report only to it».
+
+**Проблема.** В режиме teammates агенты MEW-2 (architect, reviewer, coder, tester) слали
+сводку через SendMessage, а затем писали ещё один итоговый текст — по-русски, для человека,
+3–3,5k символов; он приходил оркестратору как `result` в `idle_notification`. Объём за прогон:
+coder — 27k символов уведомлений против 8k отчётов, architect — 16k против 12k, reviewer — 12k
+против 13k. Каждый отчёт попадал в контекст оркестратора дважды, а второе сообщение на ход
+путало его с ответом на следующее задание (`omixflow-agent-message-while-busy`). Researcher
+SendMessage не использовал: его итоговый ответ пришёл одним `idle_notification` — так и надо.
+
+**Решение (0.5.1).** Отчёт — итоговый ответ агента, один на ход: в режиме teammates он
+приходит `result` уведомления о простое, у фонового агента — `result` уведомления о
+завершении. SendMessage для отчёта не используется, второй сводки нет. Правило — в строке
+`PARENT` шаблона спавна и в «Отчёте агента» `runtime.md`.
+
+**Критерии приёмки.** Шаблон спавна и раздел «Отчёт агента» описывают один канал; линт
+проверяет строку `PARENT`.
