@@ -30,7 +30,13 @@ OK, WARN, FAIL = "OK", "WARN", "FAIL"
 REVIEW_WORKTREE_WARN = 3  # review worktrees (.claude/worktrees/pr-*) tolerated before a warning
 RESEARCH_WORKTREE_WARN = 3  # research-worktrees (.claude/worktrees/research-*) of one foreign repo
 # External actions visible to others and hard to undo: confirming them by the lead alone warrants a WARN.
-LEAD_SENSITIVE = ("tracker.describe", "forge.pr", "workspace.integrate")
+# External points a lead should not confirm on its own, with the reason doctor prints.
+LEAD_SENSITIVE = {
+    "tracker.describe": "видно другим, трудно откатить",
+    "forge.pr": "видно другим, трудно откатить",
+    "workspace.integrate": "видно другим, трудно откатить",
+    "lang.window": "окно — ресурс разработчика (редактор, устройство), лид его не видит",
+}
 
 
 @dataclass
@@ -60,6 +66,13 @@ class Doctor:
         inside = lib.git(self.root, "rev-parse", "--is-inside-work-tree")
         self.add("env", "git repository", OK if inside == "true" else WARN,
                  str(self.root) if inside == "true" else "проект не в git: проверки веток пропущены")
+        value, source = lib.agent_teams_setting(self.root)
+        on = (value or "").strip().lower() in ("1", "true", "yes", "on")
+        self.add("env", "agent teams", WARN if on else OK,
+                 f"{lib.AGENT_TEAMS_ENV}={value} ({source}): агенты пайплайна станут teammates — уведомления "
+                 "без usage, кэш промпта 5 минут, /resume их не восстанавливает; плагин рассчитан на обычных "
+                 "субагентов (protocol/runtime.md, «Спавн агентов»), выставить 0" if on
+                 else "выключен: агенты пайплайна — обычные субагенты")
 
     # --------------------------------------------------------------- config
     def check_config(self) -> bool:
@@ -287,6 +300,7 @@ class Doctor:
     def check_verify(self) -> None:
         assert self.cfg is not None
         verify = self.cfg.get("verify") or {}
+        areas = self.cfg.get("areas") or {}
         for gate in lib.GATES:
             g = verify.get(gate)
             if not g:
@@ -295,9 +309,69 @@ class Doctor:
             cmd = str(g.get("cmd", ""))
             first = cmd.split()[0] if cmd.split() else ""
             found = bool(first) and lib.which(first) is not None
-            extra = f"[{g.get('criterion')}]" + (" background" if g.get("background") else "")
+            when = [str(w) for w in g.get("when") or []]
+            extra = f"[{g.get('criterion')}]" + (" background" if g.get("background") else "") \
+                + (f" when {when}" if when else "")
             self.add("verify", gate, OK if found else WARN,
                      f"{cmd} {extra}" if found else f"{first!r} не найден в PATH: {cmd}")
+            self.check_when("verify", gate, when, areas)
+            if when and gate in lib.STEP_GATES:
+                self.add("verify", f"{gate}.when", FAIL if gate == "test" else WARN,
+                         "в наборе шага when не действует, в полном делает гейт условным"
+                         + (": задача вне этих областей осталась бы без тестов" if gate == "test" else "")
+                         + " (adapters/lang/PORT.md, «Гейты»)")
+        self.check_areas(areas)
+        self.check_orchestrator_checks(areas)
+
+    def check_when(self, sec: str, name: str, when: List[str], areas: Dict[str, Any]) -> None:
+        unknown = [w for w in when if w not in areas]
+        if unknown:
+            self.add(sec, f"{name}.areas", FAIL, "областей из when нет в areas: " + ", ".join(unknown))
+
+    def check_areas(self, areas: Dict[str, Any]) -> None:
+        if not areas:
+            return
+        files = lib.git_paths(self.root, "ls-files", "-z") or []
+        for name, globs in areas.items():
+            hits = lib.area_files([str(g) for g in globs or []], files)
+            self.add("areas", name, OK if hits else WARN,
+                     f"{', '.join(map(str, globs or []))}: файлов {len(hits)}" if hits
+                     else f"{', '.join(map(str, globs or []))}: ни одного файла в git, опечатка в glob?")
+
+    def check_orchestrator_checks(self, areas: Dict[str, Any]) -> None:
+        assert self.cfg is not None
+        checks = self.cfg.get("checks") or {}
+        caps: List[str] = []
+        bodies: List[str] = []
+        for name in lib.adapters_for(self.cfg, "lang"):
+            try:
+                chain = lib.resolve_adapter("lang", name, self.root)
+            except lib.OmixflowError:
+                continue  # reported by check_ports
+            caps += lib.chain_capabilities(chain)
+            bodies += [lib.parse_frontmatter(a.path)[1] for a in chain]
+        declared = "orchestrator_checks" in caps
+        if not checks and not declared:
+            return
+        section = "\n".join(b.split("\n## orchestrator_checks", 1)[1].split("\n## ", 1)[0]
+                            for b in bodies if "\n## orchestrator_checks" in b)
+        described = re.findall(r"^### (\S+)\s*$", section, re.M)
+        if checks and not declared:
+            self.add("checks", "capability", FAIL,
+                     "в конфиге есть checks, а адаптер lang не объявляет orchestrator_checks")
+        for name in described:
+            if name not in checks:
+                self.add("checks", name, WARN, f"адаптер описывает проверку {name}, а в checks конфига её нет: "
+                         "не пойдёт ни в один момент")
+        for name, check in checks.items():
+            check = check or {}
+            when = [str(w) for w in check.get("when") or []]
+            moments = [str(m) for m in check.get("at") or []]
+            self.check_when("checks", name, when, areas)
+            ok = name in described
+            self.add("checks", name, OK if ok else WARN,
+                     (f"at {moments}" if moments else "по требованию задачи") + (f", when {when}" if when else "")
+                     + ("" if ok else "; в адаптере нет подраздела «### " + name + "» раздела orchestrator_checks"))
 
     # ------------------------------------------------------------ artifacts
     def check_artifacts(self) -> None:
@@ -371,7 +445,7 @@ class Doctor:
                    if kind == "внешнее" and policy.get(point, default) == "lead"]
         for point in by_lead:
             if point in LEAD_SENSITIVE:
-                self.add("lead", point, WARN, "лид подтверждает без разработчика: видно другим, трудно откатить")
+                self.add("lead", point, WARN, f"лид подтверждает без разработчика: {LEAD_SENSITIVE[point]}")
         routine = [p for p in by_lead if p not in LEAD_SENSITIVE]
         if routine:
             self.add("lead", "external", OK, "лид подтверждает без разработчика: " + ", ".join(routine))

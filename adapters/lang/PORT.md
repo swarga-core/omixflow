@@ -1,8 +1,8 @@
 ---
 port: lang
 required: [verify, test_conventions, suppressions, navigation, deps_setup]
-optional: [workspace_layout, long_running]
-config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e, verify.visual]
+optional: [workspace_layout, long_running, orchestrator_checks]
+config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e, verify.visual, areas, checks]
 ---
 
 # Порт lang
@@ -24,6 +24,7 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 | deps_setup | да | команда установки зависимостей | хук worktree, doctor |
 | workspace_layout | нет | как найти пакеты монорепо и запустить гейт в одном пакете | researcher, coder |
 | long_running | нет | какие гейты запускать отсоединённо через `scripts/gate.py` и ждать опросами (`protocol/runtime.md`, «Гейты»); проект добавляет свои через `background: true` в `verify.*` | coder, tester, reviewer |
+| orchestrator_checks | нет | проверки, которые выполняет оркестратор, а не агент: инструментом (MCP среды) или командой, которой нужен ресурс разработчика (раздел «Проверки оркестратора») | оркестратор, лид, doctor |
 
 ## Гейты
 
@@ -40,12 +41,51 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 | rerun-compare-set | красный прогон повторяется без изменений; совпавший набор упавших имён это дефект, изменившийся или пустой это прогрев |
 
 Форма записи гейта в конфиге: строка команды (критерий exit-code) или объект
-`{cmd, criterion, scope, background, when}`. `when` перечисляет области изменений,
-при которых гейт обязателен даже если по умолчанию он не в основном наборе.
+`{cmd, criterion, scope, background, when}`. `when` — имена областей изменений из ключа
+`areas` конфига (имя → glob'ы путей от корня проекта: `**` — через каталоги, `*` и `?` —
+в пределах одного). Область задета, если её glob совпал хоть с одним изменённым путём.
+
+Два набора гейтов:
+
+| Набор | Когда | Гейты |
+|---|---|---|
+| шага | каждый шаг implement, пакет фиксов ревью, починка гейта или поломки после синхронизации; изменения — незакоммиченные | typecheck, test, lint (какие заданы) всегда, плюс гейты с `when`, чью область задели изменения |
+| полный | Review, шаг 1; разрешение конфликтов синхронизации (как Review); перед сдачей; приёмка лида; изменения — вся ветка от общей с базой истории, с незакоммиченным слиянием синхронизации (у приёмки — слияние в интеграционную ветку) | гейты без `when`, плюс гейты с `when`, чью область задели изменения |
+
+`when` у typecheck, test и lint в наборе шага не действует, а в полном делает гейт
+условным: у `test` это ошибка конфига (задача только в другой зоне осталась бы без
+тестов), у typecheck и lint — предупреждение doctor. Какие гейты идут сейчас, считает
+`scripts/resolve.py verify --at {step|review|delivery|accept}`; ни агенты, ни оркестратор
+не выводят набор из прозы.
 
 Если сборка языка инкрементальна по времени изменения файлов, адаптер называет в разделе
 `verify` способ полной пересборки (флаг или команду): после мутационных проб coder и tester
 гоняют гейты им, потому что инкрементальный кэш может держать мутанта.
+
+## Проверки оркестратора
+
+Проверка, которую не выразить командой гейта для агента: её инструменты есть только
+у оркестратора (MCP среды разработки) или ей нужен ресурс разработчика (закрытый
+редактор, подключённое устройство). Пример — компиляция и тесты в редакторе игрового
+движка, прогон на устройстве. Возможность `orchestrator_checks`.
+
+Конфиг называет проверку и её условия: `checks.{имя}: {when, at, background}`. `when` —
+области из `areas` (без `when` — любые изменения), `background` — запуск командой идёт
+отсоединённо, как долгий гейт (инструментом — как получится), `at` — моменты из `step`, `review`,
+`delivery`, `accept` (наборы как у гейтов: шаг и полный; `review` — ещё и перед коммитом
+слияния синхронизации, по тому, что принесла база; `delivery` — перед сдачей, если после последнего зелёного полного
+прогона изменились области проверки; `accept` — приёмка лида на слитом дереве); без `at` проверка идёт по требованию задачи (решение Refine, Research
+или Spec: «прогон на устройстве на Review»). Какие проверки идут сейчас, отдаёт тот же
+`resolve.py verify`.
+
+Адаптер описывает каждую проверку подразделом `### {имя}` раздела `## orchestrator_checks`:
+- **как выполнить**: инструменты и запасная команда, по моментам, если они различаются;
+- **критерий**: что зелёное, что красное, где читать вердикт;
+- **ресурс разработчика**: нужен ли и какой (тогда вопрос в точке `lang.window`);
+- **проверить нельзя**: варианты для точки `deadlock`;
+- **след в log.md**: формат строки зелёного прогона и строки «не проверено».
+
+Что делает оркестратор с результатом — `protocol/runtime.md`, «Проверки оркестратора».
 
 ## Подавления
 
@@ -73,11 +113,17 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 
 ```yaml
 lang: [ts]
+areas:
+  i18n: [src/locales/**]
+  styles: ["**/*.css", "**/*.scss"]
+  mocks: [mocks/**]
 verify:
   typecheck: pnpm check-types
   test: pnpm test
   lint: { cmd: pnpm lint, criterion: zero-diagnostics }
   e2e: { cmd: pnpm e2e, criterion: rerun-compare-set, background: true, when: [i18n, styles, mocks] }
+checks:                      # адаптер с orchestrator_checks
+  browser: { when: [styles], at: [review] }
 ```
 
 ## Авторинг адаптера

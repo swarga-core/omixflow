@@ -445,7 +445,7 @@ class LeadConfigTests(unittest.TestCase):
             checks = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
             self.assertEqual(checks[("lead", "policy")]["status"], "OK")
             warned = {name for (section, name), c in checks.items() if section == "lead" and c["status"] == "WARN"}
-            self.assertEqual(warned, {"forge.pr", "workspace.integrate"})
+            self.assertEqual(warned, {"forge.pr", "workspace.integrate", "lang.window"})
             routine = checks[("lead", "external")]
             self.assertEqual(routine["status"], "OK")
             self.assertEqual(routine["detail"], "лид подтверждает без разработчика: "

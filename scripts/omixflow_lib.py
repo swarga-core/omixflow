@@ -27,6 +27,10 @@ CONFIG_REL = OVERRIDE_REL / "flow.yaml"
 SCHEMA_PATH = PLUGIN_ROOT / "schema" / "flow.schema.json"
 TEMPLATE_PATH = PLUGIN_ROOT / "templates" / "flow.yaml"
 GATES = ("typecheck", "test", "lint", "build", "e2e", "visual")
+# The step set (adapters/lang/PORT.md, «Гейты»): these run on every step whatever `when` says.
+STEP_GATES = ("typecheck", "test", "lint")
+# Moments at which `resolve.py verify` plans gates and orchestrator checks.
+MOMENTS = ("step", "review", "delivery", "accept")
 ROLES = ("researcher", "architect", "coder", "tester", "reviewer", "web-fetcher")
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # part slugs, workspace.repos names
 # The formal record of a task kept by a tracker with the capability `artifacts`
@@ -686,6 +690,29 @@ def normalize_remote(url: str) -> str:
 
 # -------------------------------------------------------------- mcp discovery
 
+AGENT_TEAMS_ENV = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
+
+
+def agent_teams_setting(root: Path) -> Tuple[Optional[str], str]:
+    """Effective value of the agent-teams flag for sessions in ROOT and where it comes from.
+
+    Claude Code reads it from the `env` of its settings, later files overriding earlier ones:
+    user (`$CLAUDE_CONFIG_DIR` or ~/.claude), then the project's `.claude/settings.json` and
+    `.claude/settings.local.json`; without any, the shell environment applies. Managed
+    settings are not looked at."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR")
+    user = (Path(config).expanduser() if config else Path.home() / ".claude") / "settings.json"
+    value, source = os.environ.get(AGENT_TEAMS_ENV), "окружение"
+    for path in (user, root / ".claude" / "settings.json", root / ".claude" / "settings.local.json"):
+        try:
+            env = (json.loads(path.read_text(encoding="utf-8")) or {}).get("env") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(env, dict) and AGENT_TEAMS_ENV in env:
+            value, source = str(env[AGENT_TEAMS_ENV]), str(path)
+    return value, source
+
+
 def known_mcp_servers(root: Path) -> List[str]:
     names: List[str] = []
     for path in (Path.home() / ".claude.json", root / ".mcp.json"):
@@ -716,3 +743,181 @@ def which(binary: str) -> Optional[str]:
 
 def env_flag(name: str) -> bool:
     return os.environ.get(name, "").lower() in ("1", "true", "yes")
+
+
+# ------------------------------------------------------------- verify plan
+
+def glob_regex(pattern: str) -> "re.Pattern[str]":
+    """A path glob from the project root: `**` crosses directories, `*` and `?` stay within
+    one; a trailing `/` means everything below the directory."""
+    if pattern.endswith("/"):
+        pattern += "**"
+    out, i = [], 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+def area_files(globs: List[str], files: List[str]) -> List[str]:
+    regs = [glob_regex(str(g)) for g in globs or []]
+    return [f for f in files if any(r.match(f) for r in regs)]
+
+
+def touched_areas(areas: Dict[str, Any], files: List[str]) -> List[str]:
+    """Names of the areas (config `areas`: name → globs) that FILES touch, in config order."""
+    return [name for name, globs in (areas or {}).items() if area_files(list(globs or []), files)]
+
+
+def git_paths(root: Path, *args: str) -> Optional[List[str]]:
+    """Paths printed by a git command run with `-z`: unquoted, any characters."""
+    out = git_raw(root, *args)
+    return None if out is None else [p for p in out.split("\0") if p]
+
+
+def git_raw(root: Path, *args: str) -> Optional[str]:
+    """git output as is (no strip): NUL-separated lists keep their last entry."""
+    try:
+        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return out.stdout
+
+
+def changed_files(root: Path, since: Optional[str] = None, skip_dir: Optional[str] = None) -> List[str]:
+    """Paths changed in the working tree against SINCE (a commit; HEAD when None): staged,
+    unstaged and untracked, ignored files left out. A rename counts as its old and its new
+    path (`--no-renames`), a deletion as the deleted path. SKIP_DIR (the artifacts
+    directory) is left out."""
+    diff = git_paths(root, "diff", "--name-only", "--no-renames", "-z", since or "HEAD")
+    untracked = git_paths(root, "ls-files", "-z", "--others", "--exclude-standard")
+    if diff is None or untracked is None:
+        raise OmixflowError(f"{root}: изменения не прочитаны (git diff {since or 'HEAD'})")
+    files = sorted(set(diff + untracked))
+    return outside_dir(files, skip_dir) if skip_dir else files
+
+
+def base_commit(root: Path, base: str) -> str:
+    """Merge base of HEAD with BASE (local branch, else origin/BASE)."""
+    for ref in (f"refs/heads/{base}", f"refs/remotes/origin/{base}", base):
+        if git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
+            continue
+        mb = git(root, "merge-base", ref, "HEAD")
+        if mb:
+            return mb
+    raise OmixflowError(f"база {base!r}: нет ни ветки, ни общей истории с HEAD")
+
+
+def relative_path(root: Path, path: str) -> str:
+    """PATH relative to ROOT when it is an absolute path inside it, else as given."""
+    p = Path(path)
+    if not p.is_absolute():
+        return path
+    for base in (root, root.resolve()):
+        try:
+            return p.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    try:
+        return p.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path
+
+
+def quiet_since_green(root: Path, areas: Dict[str, Any], when: List[str], green: str,
+                      skip_dir: str) -> bool:
+    """True when the tree changed nothing the check looks at since its green commit GREEN:
+    nothing in its `when` areas, or nothing outside the artifacts directory without `when`."""
+    if not green or git(root, "rev-parse", "--verify", "--quiet", f"{green}^{{commit}}") is None:
+        return False
+    since = changed_files(root, green, skip_dir)
+    if not when:
+        return not since
+    return not set(when) & set(touched_areas(areas, since))
+
+
+def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = None,
+                checked: Optional[Dict[str, Any]] = None,
+                paths: Optional[List[str]] = None, since: Optional[str] = None) -> Dict[str, Any]:
+    """Gates and orchestrator checks due at moment AT (adapters/lang/PORT.md, «Гейты»,
+    «Проверки оркестратора»).
+
+    step and accept look at the uncommitted changes (a step before its commit, the lead's
+    merge before its commit), review and delivery at the whole branch since its merge base
+    with BASE (a sync merge in progress included: the merge base is still the old fork
+    point). SINCE overrides where the changes start (a sync merge: HEAD, so only what the
+    base brings in). The artifacts directory never counts. PATHS replaces the changes for
+    planning (the files of plan steps; absolute paths are taken relative to ROOT): every
+    check with a moment is listed with its `at`, whatever AT is. CHECKED maps a check name to the commit of its last green
+    full run (state.yaml `checks`): at delivery the check is not due again when nothing in
+    its areas changed since that commit.
+    """
+    if at not in MOMENTS:
+        raise OmixflowError(f"момент {at!r}: ожидается один из {', '.join(MOMENTS)}")
+    schema = load_schema()
+    errors = [e for key in ("areas", "verify", "checks") if key in cfg
+              for e in validate(cfg[key], schema, schema["properties"][key], f"$.{key}")]
+    if errors:
+        raise OmixflowError("конфиг: " + "; ".join(errors))
+    branch = at in ("review", "delivery") and since is None and paths is None
+    if branch and not base:
+        raise OmixflowError(f"момент {at}: нужна база ветки (--base или --task с base в state.yaml)")
+    skip_dir = str(config_get(cfg, "artifacts.dir") or ".tasks")
+    if branch:
+        since = base_commit(root, base)
+    if paths is not None:
+        files = [relative_path(root, p) for p in paths]
+    else:
+        files = changed_files(root, since, skip_dir)
+    areas = cfg.get("areas") or {}
+    touched = touched_areas(areas, files)
+    verify = cfg.get("verify") or {}
+    gates, checks, skipped = [], [], []
+    for name in GATES:
+        gate = verify.get(name)
+        if not isinstance(gate, dict):
+            continue
+        when = [str(w) for w in gate.get("when") or []]
+        hit = [w for w in when if w in touched]
+        due = (name in STEP_GATES or bool(hit)) if at in ("step",) else (not when or bool(hit))
+        if due:
+            gates.append({"name": name, "cmd": gate.get("cmd"), "criterion": gate.get("criterion", "exit-code"),
+                          "scope": gate.get("scope", "root"), "background": bool(gate.get("background")),
+                          "when": when})
+        else:
+            skipped.append({"gate": name, "why": f"when {when}: области не задеты"
+                            if when else "не в наборе шага"})
+    head = git(root, "rev-parse", "HEAD")
+    on_demand = []
+    for name, check in (cfg.get("checks") or {}).items():
+        check = check or {}
+        moments = [str(m) for m in check.get("at") or []]
+        when = [str(w) for w in check.get("when") or []]
+        if not moments:
+            on_demand.append(name)
+            continue
+        if at not in moments and paths is None:
+            continue
+        if when and not [w for w in when if w in touched]:
+            skipped.append({"check": name, "why": f"when {when}: области не задеты"})
+        elif at == "delivery" and paths is None and quiet_since_green(root, areas, when, str((checked or {}).get(name) or ""),
+                                                    skip_dir):
+            green = str((checked or {}).get(name))
+            skipped.append({"check": name, "why": f"зелёная на {green[:7]}, после неё области не задеты"})
+        else:
+            checks.append({"name": name, "when": when, "at": moments, "background": bool(check.get("background"))})
+    return {"at": at, "head": head, "since": since, "files": len(files), "areas": touched,
+            "gates": gates, "checks": checks, "on_demand": on_demand, "skipped": skipped}

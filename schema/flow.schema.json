@@ -98,6 +98,28 @@
         "visual": { "$ref": "#/definitions/gate" }
       }
     },
+    "areas": {
+      "type": "object",
+      "description": "области изменений: имя → glob'ы путей от корня проекта (** — через каталоги, * и ? — в пределах одного, / в конце — всё ниже каталога); их называют when гейтов и проверок (adapters/lang/PORT.md, «Гейты»)",
+      "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } }
+    },
+    "checks": {
+      "type": "object",
+      "description": "проверки оркестратора: имя → области и моменты; как выполнять — подраздел ### {имя} раздела ## orchestrator_checks адаптера lang (adapters/lang/PORT.md)",
+      "propertyNames": { "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "when": { "type": "array", "items": { "type": "string" },
+            "description": "области (areas), изменения в которых требуют проверки; без when — любые изменения" },
+          "at": { "type": "array", "items": { "type": "string", "enum": ["step", "review", "delivery", "accept"] },
+            "description": "моменты проверки; без at — по требованию задачи" },
+          "background": { "type": "boolean", "default": false }
+        }
+      }
+    },
     "artifacts": {
       "type": "object",
       "additionalProperties": false,
@@ -175,7 +197,7 @@
         "policy": {
           "type": "object",
           "description": "режим по идентификатору точки решения из protocol/dialog.md",
-          "propertyNames": { "enum": ["statement", "decomposition", "design-question", "research-blocking", "handoff", "finding", "scope-change", "deadlock", "reconcile", "gotchas", "resume", "part-take", "part-blocked", "part-integrate", "delivery", "tracker.describe", "tracker.comment", "tracker.status", "forge.pr", "workspace.branch", "workspace.exit", "workspace.integrate"] },
+          "propertyNames": { "enum": ["statement", "decomposition", "design-question", "research-blocking", "handoff", "finding", "scope-change", "deadlock", "reconcile", "gotchas", "resume", "part-take", "part-blocked", "part-integrate", "delivery", "tracker.describe", "tracker.comment", "tracker.status", "forge.pr", "workspace.branch", "workspace.exit", "workspace.integrate", "lang.window"] },
           "additionalProperties": { "$ref": "#/definitions/leadMode" }
         }
       }

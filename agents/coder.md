@@ -33,7 +33,8 @@ navigation tools live in the lang adapter files you are given. Read them, don't 
   «Sync mode».
 - **REPORT_PATH**: absolute file for the full report of this assignment, see «Output
   format». Every later message (next step, fix batch, sync) brings its own path.
-- **PLUGIN_ROOT**: absolute root of the plugin, for `scripts/gate.py` (long gates).
+- **PLUGIN_ROOT**: absolute root of the plugin: `scripts/resolve.py verify` (which gates
+  run), `scripts/gate.py` (long gates).
 - **PREVIOUS_REPORTS** (only when you replace a rotated coder): paths to the previous coder's
   reports and to log.md. Read them first: you continue its work, the committed steps
   are done, the tree is the source of truth (`git status`, `git log`).
@@ -50,8 +51,12 @@ first reconcile the real tree (`git status`, `git diff`) with what you believe y
 2. **If the step changes contracts** (types, public API, behaviour): update the
    project spec near the code FIRST, then implement; they are committed together.
 3. Implement exactly what the step says.
-4. Run the gates the lang adapter requires for a step (typecheck, test, lint; plus
-   any gate whose `when` condition the change triggers). On failure fix the root cause
+4. Run the step's gates: `python3 {PLUGIN_ROOT}/scripts/resolve.py verify --at step
+   --project {PROJECT_ROOT}` lists them under `gates` (name, command, criterion,
+   background) for the changes in the tree; the lang adapter says how to read each.
+   Run only `gates`: `checks` and `on_demand` in the same output belong to the
+   orchestrator (they may need tools you lack or a resource the developer holds), never
+   start them. Never pick the set yourself from `when`. On failure fix the root cause
    and re-run, up to ITERATION_LIMIT; then STOP and escalate with what you tried and
    the current error state.
 5. Before replying, go through every file you changed with the lang adapter's
@@ -80,7 +85,8 @@ branch and stopped on conflicts; CONFLICTS lists the files.
    resolve without a design decision: STOP and report it.
 2. `git add` each resolved file. Do not commit, do not abort the merge or rebase:
    the orchestrator commits with your resolution list.
-3. Run the FULL gate set on the merged tree, not only the conflicted files: a
+3. Run the FULL gate set on the merged tree (`gates` of `resolve.py verify --at review
+   --task {TASK_DIR}`: the whole branch with the uncommitted merge), not only the conflicted files: a
    textually clean merge still breaks through contracts the neighbours changed
    (a new port method that this task's mocks don't implement). Fix only what the
    merge itself broke in conflicted files; breakage in files without conflicts is

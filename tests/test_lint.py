@@ -286,6 +286,40 @@ class AgentReportLint(unittest.TestCase):
         self.assertTrue((ROOT / "scripts" / "agent_ctx.py").is_file())
 
 
+class VerifyLint(unittest.TestCase):
+    """Gate sets and orchestrator checks are computed by `resolve.py verify` at fixed places
+    (adapters/lang/PORT.md, «Гейты»): before 0.6.0 the orchestrator ran a check only when it
+    remembered the adapter section, and four files read `when` differently."""
+
+    PLACES = {"skills/implement/SKILL.md": ("step", "review"), "skills/review/SKILL.md": ("review", "step"),
+              "skills/finalize/SKILL.md": ("delivery",), "skills/lead/SKILL.md": ("accept",),
+              "protocol/lead.md": ("accept",), "agents/coder.md": ("step", "review")}
+    CALL_RE = re.compile(r"resolve\.py verify --at (\w+)([^`]*)")
+
+    def test_places_call_the_plan_for_their_moments(self):
+        for rel, moments in self.PLACES.items():
+            text = " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+            calls = self.CALL_RE.findall(text)
+            for moment in moments:
+                with self.subTest(file=rel, moment=moment):
+                    self.assertIn(moment, [m for m, _ in calls])
+            for moment, args in calls:
+                with self.subTest(file=rel, call=moment + args):
+                    self.assertIn(moment, lib.MOMENTS)
+                    if moment in ("review", "delivery"):  # the branch view needs its base
+                        self.assertRegex(args, r"--task|--base")
+
+    def test_moments_and_step_gates_match_the_port(self):
+        text = (ROOT / "adapters" / "lang" / "PORT.md").read_text(encoding="utf-8")
+        row = next(line for line in text.splitlines() if line.startswith("| шага |"))
+        for gate in lib.STEP_GATES:
+            self.assertIn(gate, row)
+        schema = lib.load_schema()["properties"]["checks"]["additionalProperties"]["properties"]["at"]
+        self.assertEqual(tuple(schema["items"]["enum"]), lib.MOMENTS)
+        for moment in lib.MOMENTS:
+            self.assertIn(f"`{moment}`", text)
+
+
 class CardFieldsLint(unittest.TestCase):
     """omixflow_lib.CARD_FIELDS (used by state.py and the kanban board) is the formal record
     that protocol/artifacts.md lists in «Хранение в задаче трекера»."""

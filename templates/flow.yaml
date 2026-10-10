@@ -52,8 +52,17 @@ workspace:
   #     ref: auto                      # ветка | тег | sha | auto (базовая ветка того проекта)
   #     setup: false                   # выполнять его workspace.setup в research-worktree
 
+# Области изменений: имя → glob'ы путей от корня (** — через каталоги, * — в пределах одного).
+# Их называют when гейтов и проверок (adapters/lang/PORT.md, «Гейты»); doctor считает файлы.
+# areas:
+#   i18n: [src/locales/**]
+#   styles: ["**/*.css", "**/*.scss"]
+#   mocks: [mocks/**]
+#   uikit: [packages/uikit/**]
+
 # Гейты проверки. Строка = команда с критерием exit-code; объект даёт критерий,
-# фон и условия обязательности. Имена фиксированы: typecheck, test, lint, build, e2e, visual.
+# фон и области (when). Имена фиксированы: typecheck, test, lint, build, e2e, visual.
+# Набор шага — typecheck, test, lint и гейты, чьи области задеты; полный — на Review и сдаче.
 verify:
   test: "echo 'configure verify.test'"
   # typecheck: pnpm check-types
@@ -61,6 +70,12 @@ verify:
   # build: { cmd: "pnpm build", background: true }
   # e2e: { cmd: "pnpm e2e", criterion: rerun-compare-set, background: true, when: [i18n, styles, mocks] }
   # visual: { cmd: "pnpm test:visual", background: true, when: [styles, uikit] }
+
+# Проверки оркестратора: что не выразить командой гейта для агента (инструменты среды
+# через MCP, ресурс разработчика). Как выполнять — раздел orchestrator_checks адаптера lang.
+# at: step | review | delivery | accept; без at — по требованию задачи.
+# checks:
+#   browser: { when: [styles, uikit], at: [review] }
 
 # Артефакты задач.
 artifacts:

@@ -112,6 +112,8 @@ agents:                    # живые continuation-агенты этой се�
 session: 3f2a…             # id сессии, в которой созданы agents
 syncs:                     # синхронизации с базой (порт workspace, sync; sync.py record)
   - {base_sha: 9f8e7d6, commit: 1a2b3c4, how: merge, at: 2026-10-04T12:00:00Z}
+checks:                    # проверка оркестратора → полный sha HEAD её последнего зелёного полного прогона
+  editor: 4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e   # (runtime.md, «Проверки оркестратора»)
 lead:                      # только у задачи, запущенной с лидом (lead.md)
   name: lead-omix          # имя сессии лида
   journal: /abs/…/_lead/journal.jsonl   # путь журнала лида из brief
