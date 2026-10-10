@@ -4,15 +4,15 @@ title: Фильтр изоляции worktree-сессии — конкретн�
 status: draft
 type: docs
 created: 2026-10-06
-updated: 2026-10-06
-origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06)
+updated: 2026-10-10
+origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06); Swarga AI Studio T-1 (G-8 лида swais-lead, 2026-10-10)
 target: omixflow
 external:
 links: [omixflow-worktree-mcp-root]
 ---
 
 **Контекст.** Ограничение харнесса: изолированная сессия отклоняет команды, которые не может
-проверить. В 0.3.0 записано общее (`protocol/worktree.md:87-93`: переменные shell, heredoc,
+проверить. В 0.3.0 записано общее (`protocol/worktree.md:89-95`: переменные shell, heredoc,
 `python -c`, скрипт файлом), конкретики не хватает.
 
 **Проблема.**
@@ -20,18 +20,42 @@ links: [omixflow-worktree-mcp-root]
   `comm <(git …) <(git …)`, `$W` в позиции опции (AL-1151, AL-1154); `node -e` со
   `spawn(…, {detached: true})` — «computed at runtime» (AL-1162); `perl` с переменными
   окружения, `lsof -p $P` (AL-1161).
-- Расхождение: AL-1161 сообщает отказ `bash script.sh`, а `worktree.md:91-92` обещает, что
-  скрипт-файл одной командой проходит — проверить.
+- Swarga AI Studio T-1 (2026-10-10, 0.5.1, сверено по транскриптам): 23 отказа изоляции у
+  оркестратора и четырёх агентов (coder-T-1 — 6, coder-T-1-2 — 8, reviewer-T-1 и
+  reviewer-T-1-code — по 3, оркестратор — 3). Новые формы:
+  - `PATH=…:$PATH pnpm …` и `export PATH=…:$PATH; …` — переменная в команде;
+  - цикл с переменной (`for v in …; do gh api …$v…`), `R=…; sed … $R`;
+  - `docker ps --format '{{.Names}}'`, `docker run --entrypoint sh …` — второе отклонено
+    даже простой командой («cannot be shown not to be git»);
+  - `ast-grep run -p '$A!'` в составной команде — метапеременная выглядит как переменная
+    shell; одна простая команда проходит;
+  - `env -u X node …`, `sed -E 's/…/'` после конвейера, `$(date +%s)` в арифметике;
+  - цикл `for f in … .gitignore …` — «names git»: фильтр срабатывает на подстроку `git`
+    в имени файла.
+  Обходили скриптом в scratchpad: оркестратор сам вписал рецепт в промпт спавна
+  («ENVIRONMENT AND CONSTRAINTS: … write a script to the scratchpad … run it with
+  `zsh <path>`»). В определениях агентов и в шаблоне спавна (`runtime.md`) рецепта нет.
+- Харнесс в отказе сам говорит, как надо: «Split it into plain, separate commands and run
+  them from {worktree}» / «Run the plain command from {worktree}».
+- Расхождение AL-1161 (отказ `bash script.sh`) снято: в T-1 `bash {scratchpad}/f6_check.sh`
+  и `zsh {scratchpad}/m.zsh` прошли — скрипт-файл одной командой не отклоняется.
 - `adapters/workspace/git.md:75` сам содержит цепочку `git -C … add -A && … commit … || true`.
 - Finalize, `delivery: integrate` из worktree-сессии: интеграция — шаг 4, `ExitWorktree` —
   шаг 7, а чужие деревья из изолированной сессии недоступны.
-- В определениях агентов строки о простых командах нет.
+- Рядом, не изоляция: `rm -rf` отклоняется deny-правилом пользователя (T-1: coder-T-1,
+  coder-T-1-2, reviewer-T-1); coder нашёл замену — `mv` каталога в scratchpad.
 
-**Предложение.** Список в «Ловушках»: git — по одной простой команде от cwd worktree
-(`add` + `commit` отдельно), фоновые процессы и вычисляемые аргументы — только скрипт-файлом
-с литеральными путями. Агентам — строка «в worktree команды простые, скрипты файлами».
-Рецепт `git.md:75` разбить на простые вызовы. Finalize: `ExitWorktree keep` до интеграции
-одиночной задачи.
+**Предложение.**
+- Список в «Ловушках» `worktree.md` с формами выше: git — по одной простой команде
+  с абсолютными путями (`git -C {worktree}`, `add` и `commit` отдельно), без `$VAR`, без
+  `PATH=…:$PATH` в команде; фоновые процессы, вычисляемые аргументы и длинные цепочки — скрипт
+  файлом в scratchpad (инструментом Write) и одна команда `zsh {путь}`.
+- Строка рецепта в шаблон спавна `runtime.md` для сессий в worktree (условная, как строка
+  «В worktree все пути абсолютные») — вместо импровизации оркестратора; линт проверяет её
+  наличие в шаблоне.
+- Рецепт `git.md:75` разбить на простые вызовы.
+- Finalize: `ExitWorktree keep` до интеграции одиночной задачи.
 
-**Критерии приёмки.** «Ловушки» и `git.md` с конкретикой; Finalize с выходом до интеграции;
-пункт про `bash script.sh` проверен.
+**Критерии приёмки.** «Ловушки» и `git.md` с конкретикой; рецепт в шаблоне спавна для
+worktree; Finalize с выходом до интеграции; в прогоне под worktree нет отказов изоляции на
+типовых командах (гейты, git-статус, пробы).
