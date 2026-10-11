@@ -4,8 +4,8 @@ title: Фильтр изоляции worktree-сессии — конкретн�
 status: draft
 type: docs
 created: 2026-10-06
-updated: 2026-10-10
-origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06); Swarga AI Studio T-1 (G-8 лида swais-lead, 2026-10-10)
+updated: 2026-10-11
+origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06); Swarga AI Studio T-1 и T-6 (G-8 лида swais-lead, 2026-10-10/11)
 target: omixflow
 external:
 links: [omixflow-worktree-mcp-root]
@@ -35,6 +35,12 @@ links: [omixflow-worktree-mcp-root]
   Обходили скриптом в scratchpad: оркестратор сам вписал рецепт в промпт спавна
   («ENVIRONMENT AND CONSTRAINTS: … write a script to the scratchpad … run it with
   `zsh <path>`»). В определениях агентов и в шаблоне спавна (`runtime.md`) рецепта нет.
+- Swarga AI Studio T-6 (2026-10-11, 0.6.1, G-8 swais-lead, сверено по транскриптам): 22 отказа
+  у оркестратора (3) и девяти агентов, 12 из них — «computed at runtime»: переменная shell
+  в позиции программы, опции или аргумента — `R=…; pnpm … $R`, `S=…; python3 $S/…`,
+  `P=…; sed -n … $P/…`, `time pnpm --dir $P`, `find "$R/…"`, `python3 -c` с путём из
+  переменной («runs python with a program computed at runtime»). Помогали литеральные
+  абсолютные пути.
 - Харнесс в отказе сам говорит, как надо: «Split it into plain, separate commands and run
   them from {worktree}» / «Run the plain command from {worktree}».
 - Расхождение AL-1161 (отказ `bash script.sh`) снято: в T-1 `bash {scratchpad}/f6_check.sh`
