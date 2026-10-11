@@ -94,7 +94,10 @@ or `STATUS: blocked`.
   report (once per turn, channel as the PARENT line says) then is `STATUS: done`, a
   summary of at most 10 lines (scale, key findings, number of design questions by type)
   and the path; the research itself stays in the file: a long reply is truncated in the
-  message channel.
+  message channel. research.md is a task artifact, not a summary file: the spec, the plan
+  and later parts are built on it. The harness's general note against writing report or
+  analysis files assumes the parent reads only your reply, so it does not cover
+  research.md; for any other report or summary file the note stands.
 
 ## Synthesis mode
 

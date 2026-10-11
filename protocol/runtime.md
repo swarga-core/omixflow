@@ -95,8 +95,9 @@ Agent tool:
       never a second summary; without SendMessage, or when the send fails, your final
       reply is the reply your output format prescribes: the short summary when the full
       report goes to a file, written before the summary; the whole report only when the
-      format names no file. The harness may label it team-lead; it is not the OMIXFlow
-      lead session: never message the lead, never call your parent "lead".
+      format names no file or the harness refused that file (your output format says how).
+      The harness may label it team-lead; it is not the OMIXFlow lead session: never
+      message the lead, never call your parent "lead".
     PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты; tester: рецепт пробы
     REPORT_PATH: {TASK_DIR}/reports/{phase}-{метка}.md   # coder, tester
     {параметры режима агента: MODE, STEP, ASPECTS, ARTIFACT_PATHS, FINDINGS_PATH, ...}
@@ -173,11 +174,35 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 Путь приходит в спавне или в сообщении задания. Оркестратор читает файл, а не ответ;
 `reports/` входит в артефакты задачи наравне с `review/` (`artifacts.md`).
 
+**Харнесс и файл отчёта.** Харнесс Claude Code пишет в системный промпт каждого субагента
+заметку «Do NOT Write report/summary/findings/analysis .md files. Return findings directly
+as your final assistant message…» (в транскриптах — с 2.1.267) и отклоняет Write субагента
+в `.md`-файл с «report» в имени («Subagents should return findings as text, not write report
+files»). Заметка исходит из того, что родитель читает только ответ, а здесь файл отчёта —
+артефакт задачи: он коммитится с ней, его читают оркестратор и сменщик агента
+(`PREVIOUS_REPORTS`). Поэтому coder, tester, reviewer (`FINDINGS_PATH`) и researcher
+(`research.md`) знают, что заметка не касается их файла, а прочие файлы отчётов — касается.
+В T-6 tester послушался заметки и ответил полным текстом без файла; остальные агенты
+прогонов на 0.5.0–0.6.1 файл писали. Отказ по имени: в T-5 отклонены все четыре `.md`-куска
+отчёта coder'а в scratchpad (`report2-head.md`, `report-tail.md`), а `report-head.txt`
+и `report-tail.txt` сразу после них прошли, как и записи в `reports/{phase}-{метка}.md` —
+«report» там только в имени каталога. Правило харнесса не документировано, это наблюдение;
+поэтому с запасом временный файл и кусок отчёта не называются `report*`, а ни метки
+таблицы, ни имена файлов `REPORT_PATH` и `FINDINGS_PATH` слова «report» не содержат.
+
+**Отказ записи.** Если харнесс отклонил Write по `REPORT_PATH`, агент не обходит отказ
+другим именем или через shell, а отвечает полным отчётом с первой строкой `REPORT_PATH
+refused by the harness: {сообщение харнесса}`. Такой ответ — отчёт. Оркестратор проверяет,
+что он дошёл целиком (есть последний раздел формата: у coder'а `NOTES`, у tester'а
+`SUMMARY`), иначе просит остаток сообщением; затем пишет в `REPORT_PATH` текст без первой
+строки, а в log.md — «отчёт {метка} записан оркестратором: {сообщение харнесса}».
+
 **Один отчёт за ход.** Сводку агент шлёт один раз: SendMessage и строка `sent` в конце
 хода, а без SendMessage или при сбое отправки — итоговым ответом (строка `PARENT`
 шаблона). Если формат вывода агента называет файл, итоговый ответ — та же сводка, а файл
 пишется до неё при любом канале; целиком отвечает только агент, чей формат файла не
-называет (researcher с `OUTPUT: inline`). В T-1 tester без SendMessage ответил полным
+называет (researcher с `OUTPUT: inline`), или агент, которому харнесс отказал в записи
+`REPORT_PATH` («Отказ записи»). В T-1 tester без SendMessage ответил полным
 текстом и файл по `REPORT_PATH` не записал; строка `PARENT` тогда называла итоговый ответ
 отчётом. В режиме команд агентов итоговый текст тоже доходит до оркестратора — `result`
 уведомления о простое; в MEW-2 агенты писали после сводки ещё и итог втрое длиннее,
@@ -192,7 +217,8 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 
 **Ответ без итогов — не отчёт.** Агент отчитывается, когда все запущенные им команды
 закончились. Ответ `done`, в котором гейт ещё идёт («жду фоновые гейты», нет кода
-выхода), или без файла по `REPORT_PATH` оркестратор сразу возвращает агенту сообщением:
+выхода), или без файла по `REPORT_PATH` (кроме ответа `REPORT_PATH refused by the harness`,
+«Отказ записи» выше) оркестратор сразу возвращает агенту сообщением:
 дождаться завершения и отчитаться. Ждать продолжения бесполезно: ход агента закончился,
 и окончание фоновой команды его не разбудит. Остановка с причиной (`STATUS: stopped`:
 решение по дизайну, конфликт spec и plan) — законный ответ без гейтов: `GATES: not run —

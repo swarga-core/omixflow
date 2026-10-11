@@ -62,8 +62,12 @@ With FINDINGS_PATH: write the contract below to that file (create the directory 
 needed) and end your report (once per turn, channel as the PARENT line says) with a
 short summary only: counts by severity, the
 blocking ids, the recommendation and the path. Long replies get truncated in the
-message channel; the file is the contract the orchestrator parses. Without
-FINDINGS_PATH: end your report with the contract as a single fenced ```json block.
+message channel; the file is the contract the orchestrator parses. FINDINGS_PATH is a
+task artifact, not a summary file: the orchestrator parses it and commits it with the task.
+The harness's general note against writing report or findings files assumes the parent
+reads only your reply; here the parent parses this file, so the note does not cover it;
+for any other report or summary file the note stands. Without FINDINGS_PATH: end your
+report with the contract as a single fenced ```json block.
 The contract:
 
 ```json

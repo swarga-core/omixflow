@@ -1,7 +1,7 @@
 ---
 id: omixflow-rotation-step-growth
 title: Ротация по контексту — прогноз по росту за задание проверен по транскриптам и отвергнут
-status: done
+status: draft
 type: feature
 created: 2026-10-11
 updated: 2026-10-11

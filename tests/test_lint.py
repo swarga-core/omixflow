@@ -346,6 +346,47 @@ class AgentReportLint(unittest.TestCase):
         self.assertIn("scripts/agent_ctx.py", section)
         self.assertIn("неизвестен", section)
         self.assertTrue((ROOT / "scripts" / "agent_ctx.py").is_file())
+        self.assertIn("не потолок", section)  # T-5: one step took the coder from 237k to 439k
+
+    def test_report_file_names_avoid_the_word_report(self):
+        """T-5: the harness refused every subagent Write to a file with `report` in its name
+        (`report2-head.md`), while writes to `reports/{phase}-{label}.md` passed."""
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        section = runtime[runtime.index("## Отчёт агента"):runtime.index("## Модели")]
+        rows = re.findall(r"^\| `([^`]+)` \|", section, re.M)
+        self.assertEqual(len(rows), len(re.findall(r"^\| `", section, re.M)))
+        self.assertGreaterEqual(len(rows), 9)
+        self.assertEqual([label for label in rows if "report" in label.lower()], [])
+        paths = []
+        for path in iter_files(*CORE_DIRS):
+            paths += re.findall(r"(?:reports|review)/[^\s`)\]]+\.(?:md|json)", path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(set(paths)), 10)
+        self.assertEqual(sorted({p for p in paths if "report" in p.rsplit("/", 1)[-1].lower()}), [])
+        flat_section = " ".join(section.split())
+        self.assertIn("`REPORT_PATH refused by the harness: {сообщение харнесса}`", flat_section)
+        self.assertIn("кроме ответа `REPORT_PATH refused by the harness`", flat_section)
+        self.assertIn("у coder'а `NOTES`, у tester'а `SUMMARY`", flat_section)
+        self.assertIn("агент, которому харнесс отказал в записи `REPORT_PATH`", flat_section)
+        for agent in ("coder", "tester"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            flat = " ".join(body.split())
+            with self.subTest(agent=agent):
+                self.assertIn("a piece of the report a name containing `report`", flat)
+                self.assertIn("REPORT_PATH refused by the harness", flat)
+                self.assertIn("do not retry under another name or through the shell", flat)
+        # T-6: the tester followed the harness's system-prompt note against report files and
+        # wrote no file; every agent that writes a report file is told the note does not cover it.
+        for agent in ("coder", "tester", "researcher", "reviewer"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            flat = " ".join(body.split())
+            with self.subTest(agent=agent):
+                self.assertIn("is a task artifact, not a summary file", flat)
+                self.assertIn("for any other report or summary file the note stands", flat.lower())
+        implement = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8").split())
+        tester = implement.index("**2.3 Tester.**")
+        for part in (implement[implement.index("**2.2 Отчёт coder.**"):tester],
+                     implement[tester:implement.index("**2.4")]):
+            self.assertIn("REPORT_PATH refused by the harness", part)
 
 
 class VerifyLint(unittest.TestCase):

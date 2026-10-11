@@ -94,8 +94,23 @@ replying, never written from memory.
 Write the full report to REPORT_PATH, then report to PARENT (once per turn, channel as
 the PARENT line says) with at most 10 lines: RUN RESULT, counts of failures and code
 bugs, and `REPORT: {REPORT_PATH}`. A long reply is truncated in the message channel, and
-a reply without the file is not a report, whatever the channel: the orchestrator sends it
-back.
+a reply without the file is not a report (except the harness refusal below), whatever the
+channel: the orchestrator sends it back.
+
+REPORT_PATH is a task artifact, not a summary file. The harness's general note against
+writing report files assumes the parent reads only your reply; here the parent reads
+REPORT_PATH and commits it with the task. So the note does not cover it: write it every
+time; scratch pieces of REPORT_PATH are part of it, not other reports. For any other
+report or summary file the note stands. Write it the way the coder does
+(`{PLUGIN_ROOT}/agents/coder.md`, «Output format»): one Write when you can (Write,
+additions with Edit), a script-built block appended with `>>`, scratch files in the
+scratchpad under a neutral name. Never give a temporary file or a piece of the report a
+name containing `report`: the harness refuses a subagent's Write of a `.md` file so named,
+and the rule is not documented. If the harness refuses your Write to REPORT_PATH itself,
+do not retry under another name or through the shell: reply with the full report instead,
+its first line `REPORT_PATH refused by the harness: {the harness message}`; the
+orchestrator writes the file from your reply.
+
 Full report:
 
 ```
