@@ -57,7 +57,7 @@ omixflow/
 | `/omixflow:start`, `research`, `spec`, `plan`, `implement`, `review`, `finalize` | фазы по отдельности; каждая единственный источник своей логики |
 | `/omixflow:pr-review {pr}` | ревью PR или ветки с публикацией через адаптер forge |
 | `/omixflow:doctor [--init]` | проверка и настройка проекта |
-| `/omixflow:lead [--integration=BRANCH]` | лид: координирует сессии задач, отвечает на их вопросы по политике или передаёт разработчику, ведёт журнал (`protocol/lead.md`) |
+| `/omixflow:lead [--integration=BRANCH]` | лид: запускает сессии задач по слову разработчика (в фоне — все в `claude agents` — или в окнах Terminal), отвечает на их вопросы по политике или передаёт разработчику, ведёт журнал (`protocol/lead.md`) |
 
 Три слоя:
 
@@ -126,6 +126,7 @@ python3 scripts/state.py get .tasks/AL-1          # состояние зада�
 python3 scripts/multitask.py validate --from d.md # блок мультизадачи: validate/meta/waves/ready/set/seed/file
 python3 scripts/lead.py show                      # журнал лида: decide/escalate/resolve/replace/rule/oblige/approve/accept/register/list
 python3 scripts/sync.py check .tasks/AL-1         # сдвиг базы и стратегия синхронизации (record)
+python3 scripts/sessions.py probe --root .         # запуск сессий задач лидом: probe/launch/status/watch/respawn
 python3 scripts/accept.py plan task/AL-1 --into main  # приёмка мержа лидом: plan/prepare/merge/commit/abort/cleanup
 ```
 
@@ -157,6 +158,9 @@ SendMessage, исполнитель фикса ревью по файлам пр
 `0.6.2`: исправления по прогонам T-5 и T-6 — агенты пишут файл отчёта, хотя общая заметка харнесса
 против файлов отчётов говорит иное; временные файлы не `report*`; запасной путь, когда харнесс
 отклоняет запись; порог ротации — проверка между заданиями, не потолок.
+`0.7.0`: лид запускает сессии задач сам — в фоне (`claude --bg`, все сессии в одном терминале
+`claude agents`) или в окнах Terminal; режим спрашивается на первой задаче; сессия в режиме
+разрешений лида; наблюдение за фоновыми сессиями, которые ждут разработчика, и подъём остановленных.
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

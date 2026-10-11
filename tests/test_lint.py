@@ -389,6 +389,55 @@ class AgentReportLint(unittest.TestCase):
             self.assertIn("REPORT_PATH refused by the harness", part)
 
 
+class LeadLaunchLint(unittest.TestCase):
+    """The lead launches task sessions by the developer's word, in the background or in a
+    window (protocol/lead.md, «Запуск сессий»); the second SwAIS wave ran T-18, T-8 and T-9
+    in the background."""
+
+    def section(self, text: str, start: str) -> str:
+        begin = text.index(start)
+        end = text.find("\n## ", begin + 1)
+        return " ".join(text[begin:end if end != -1 else len(text)].split())
+
+    def test_protocol_describes_the_launch(self):
+        lead_md = (ROOT / "protocol" / "lead.md").read_text(encoding="utf-8")
+        self.assertNotIn("сессии не запускает", " ".join(lead_md.split()))
+        launch = self.section(lead_md, "## Запуск сессий")
+        for marker in ("`scripts/sessions.py launch`", "санкция `A-{n}`", "в реестре есть сессия без `done`",
+                       "остановленную предлагает поднять", "через Bash или скриптом",
+                       "`launch` в `lead.yaml`", "`background` или `terminal`", "`part_runner: sequential`",
+                       "в режиме разрешений лида", "`permissionMode`", '{"bgIsolation": "none"}', "статус `waiting`",
+                       "`sessions.py watch`", "`sessions.py respawn {имя}`", "постоянной санкции",
+                       "во временном worktree", "`claude rm`", "Workspace not trusted"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, launch)
+
+    def test_skill_asks_the_mode_once_and_watches_background_sessions(self):
+        skill = (ROOT / "skills" / "lead" / "SKILL.md").read_text(encoding="utf-8")
+        flat = " ".join(skill.split())
+        launch = self.section(skill, "## 1a. Запуск задачи")
+        for marker in ("lead.py list --type session --task {id}", "--task {id}/{part}", "SESSIONS probe --root",
+                       "Где запускать {id} и все следующие задачи?", "в фоне", "в отдельных окнах Terminal",
+                       "(рекомендую)", "`launch: background | terminal`", 'lead.py approve --action "запуск {имя}',
+                       "SESSIONS launch {имя} --root {корень} --mode {launch}",
+                       "/omixflow:develop {id} --lead={имя лида} --worktree", "`part_runner: sequential`",
+                       "--owner {имя лида} --notify", "`bg_isolation`"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, launch)
+        self.assertIn("SESSIONS respawn {имя} --root {корень}", flat)
+        self.assertIn("постоянной санкции «поднимай остановленные сам»", flat)
+        self.assertIn("Исключение — режим запуска на первой задаче", flat)
+
+    def test_named_subcommands_exist(self):
+        parsers = set(re.findall(r'add_parser\(\s*"([a-z-]+)"', (ROOT / "scripts" / "sessions.py").read_text(encoding="utf-8")))
+        used = set()
+        for rel in ("protocol/lead.md", "skills/lead/SKILL.md", "README.md", "CHANGELOG.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            used |= set(re.findall(r"(?:sessions\.py|SESSIONS)`? ([a-z]+)\b", text))
+        self.assertTrue(used)
+        self.assertEqual(sorted(used - parsers), [])
+
+
 class VerifyLint(unittest.TestCase):
     """Gate sets and orchestrator checks are computed by `resolve.py verify` at fixed places
     (adapters/lang/PORT.md, «Гейты»): before 0.6.0 the orchestrator ran a check only when it
