@@ -66,10 +66,13 @@ first reconcile the real tree (`git status`, `git diff`) with what you believe y
 
 **Background gates.** A long gate (`background: true` in the verify config, or listed in
 the lang adapter's long_running section) starts detached with
-`python3 {PLUGIN_ROOT}/scripts/gate.py start step{N}-{gate} --root {PROJECT_ROOT} --
+`python3 {PLUGIN_ROOT}/scripts/gate.py start {label}-{gate} --root {PROJECT_ROOT} --
 '{gate command}'` and is waited for with `python3 {PLUGIN_ROOT}/scripts/gate.py poll
-step{N}-{gate} --root {PROJECT_ROOT}`: `EXIT {code}` with the output tail means
-finished, `RUNNING` means poll again, `LOST` means the gate process died: start it again. **Never end your reply while a command you
+{label}-{gate} --root {PROJECT_ROOT}`: `EXIT {code}` with the output tail means
+finished, `RUNNING` means poll again, `LOST` means the gate process died: start it again.
+`{label}` is the file name of REPORT_PATH without `.md` (`implement-step3-build`,
+`review-sync1-build`): never invent a name, the orchestrator reads the log by it, and the
+report names it on the gate's line. **Never end your reply while a command you
 started is still running**: a reply like "waiting for the gates" ends your turn, and
 nothing wakes you when the gate finishes. The report comes after every gate has an
 exit code.
@@ -100,9 +103,12 @@ Every NEW test you write must be verified by mutation: temporarily revert the co
 change it guards (or break the specific behaviour), confirm the test goes red, then
 restore the code. A test that stays green under mutation is false-green: strengthen
 the fixture (watch for no-op writes that skip notifications, defaulted values, mocks
-that pass by definition). Report every probe in MUTATIONS, one line per probe with
-its outcome; a summary like "every mutation fails" is not a report: a probe you did
-not run is a gap the reviewer finds later.
+that pass by definition). MUTATIONS has a line for every NEW test: `{test} ← {probe} →
+{outcome}`. A test caught by several probes gets a line for each, a probe that turns
+several tests red appears under each of them. A summary like "every mutation fails" or
+a catalogue of probes without the tests they guard is not a report: the orchestrator
+checks each new test of the step against MUTATIONS and returns the step when one is
+missing (T-4: 47 probes listed by function, rollback tests absent).
 
 A probe may temporarily change any file, including one the adapters forbid you to
 change (a banned-symbols list, a shared config), when it is restored within the same
@@ -131,7 +137,8 @@ in-file edits use plain Edit.
 
 Write the full report to REPORT_PATH, then report to PARENT with the short form only
 (once per turn, channel as the PARENT line says): a long reply is truncated in the
-message channel, the orchestrator reads the file.
+message channel, the orchestrator reads the file. A reply without the file is not a
+report, whatever the channel: the orchestrator sends it back.
 
 Full report (REPORT_PATH; in sync mode the per-file resolutions replace FILES):
 
@@ -149,9 +156,10 @@ GATES:
   - test: PASS ({passed}/{total}) | FAIL ({passed}/{total})
   - lint: PASS | FAIL ({diagnostics}) | n/a
   - {other gates run}: ...
+  — a background gate adds its gate.py name: `build: PASS (gate.py {label}-build, EXIT 0)`
 FIX ITERATIONS: {N}/{ITERATION_LIMIT}
 MUTATIONS:
-  - {test} ← {mutation} → RED | GREEN, then {how the test was strengthened}
+  - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened}   (a line per new test)
   — or "none: no new tests"
 BYTES CHECK:
   - {file:line} — {U+XXXX | escape \uXXXX}, verified by bytes

@@ -267,6 +267,68 @@ class AgentReportLint(unittest.TestCase):
         for marker in ("once per turn", "`sent`", "never a second summary"):
             self.assertIn(marker, parent)
 
+    def test_parent_line_keeps_the_report_in_the_file(self):
+        """T-1: a subagent without SendMessage answered with the full text and wrote no file at
+        REPORT_PATH; the PARENT line then called its final reply the report."""
+        text = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        start = text.index("    PARENT: the orchestrator")
+        parent = " ".join(text[start:text.index("PLUGIN_ROOT:", start)].split())
+        self.assertNotIn("final reply is the report", parent)
+        for marker in ("the short summary when the full report goes to a file", "written before the summary"):
+            self.assertIn(marker, parent)
+        for agent in ("coder", "tester"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertIn("a reply without the file is not a report", " ".join(body.split()).lower())
+
+    def test_background_gate_names_come_from_the_report_label(self):
+        """T-3: the coder named a sync gate itself (`step-sync-build`) and the orchestrator's
+        `poll build` found no log: an agent's gate name is `{label}-{gate}`, the label being
+        its report file's name."""
+        runtime = " ".join((ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8").split())
+        gates = runtime[runtime.index("## Гейты"):runtime.index("## Проверки оркестратора")]
+        for marker in ("`{метка}-{gate}`", "`{moment}-{gate}`", "`delivery-build`"):
+            self.assertIn(marker, gates)
+        self.assertNotIn("{phase}-{gate}", gates)  # `delivery` is a moment, not a phase
+        self.assertIn("{moment}-{gate}", (ROOT / "scripts" / "gate.py").read_text(encoding="utf-8"))
+        for agent in ("coder", "tester", "reviewer"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            calls = re.findall(r"gate\.py\s+(?:start|poll)\s+(\S+)", body)
+            with self.subTest(agent=agent):
+                self.assertTrue(calls)
+                self.assertEqual(sorted(set(calls)), ["{label}-{gate}"])
+        _, tester = lib.parse_frontmatter(ROOT / "agents" / "tester.md")
+        self.assertIn("gate.py {label}-{gate}, EXIT {code}", tester)
+        implement = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("`gate.py poll {имя}`", implement)
+
+    def test_mutations_have_a_line_per_new_test(self):
+        """T-4: the coder listed 47 probes by function, implement 2.2 checks every new test
+        against MUTATIONS, and the step went back."""
+        for agent in ("coder", "tester"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            flat = " ".join(body.split()).lower()
+            with self.subTest(agent=agent):
+                self.assertIn("mutations has a line for every new test", flat)
+                self.assertNotIn("one line per probe", flat)
+        implement = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("Каждый новый тест шага", implement)
+
+    def test_review_fixes_are_routed_by_the_files_they_touch(self):
+        """T-2: a `code` finding in a test file would have gone to the coder by category while
+        the tester fixed the same file in the same pass."""
+        cycle = " ".join((ROOT / "protocol" / "review-cycle.md").read_text(encoding="utf-8").split())
+        self.assertIn("исполнитель по файлам правки", cycle)
+        self.assertNotIn("исполнитель по категории", cycle)
+        review = " ".join((ROOT / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("по файлам правки", review)
+        self.assertNotIn("По исполнителю категории", review)
+        _, body = lib.parse_frontmatter(ROOT / "agents" / "reviewer.md")
+        flat = " ".join(body.split())
+        self.assertIn("by the files the fix touches", flat)
+        for stale in ("tells the orchestrator who fixes it", "agent for the category"):
+            self.assertNotIn(stale, flat)
+
     def test_agents_report_through_the_parent_channel(self):
         """An agent's own «reply with a summary» wording beside the PARENT line gave MEW-2 a
         second, longer report every turn: every agent's output section points to PARENT."""

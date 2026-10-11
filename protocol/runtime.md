@@ -93,7 +93,9 @@ Agent tool:
     PARENT: the orchestrator of this session. Report only to it, once per turn: with
       SendMessage when you have that tool, then end your turn with the single line `sent`,
       never a second summary; without SendMessage, or when the send fails, your final
-      reply is the report. The harness may label it team-lead; it is not the OMIXFlow
+      reply is the reply your output format prescribes: the short summary when the full
+      report goes to a file, written before the summary; the whole report only when the
+      format names no file. The harness may label it team-lead; it is not the OMIXFlow
       lead session: never message the lead, never call your parent "lead".
     PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты; tester: рецепт пробы
     REPORT_PATH: {TASK_DIR}/reports/{phase}-{метка}.md   # coder, tester
@@ -173,10 +175,14 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 
 **Один отчёт за ход.** Сводку агент шлёт один раз: SendMessage и строка `sent` в конце
 хода, а без SendMessage или при сбое отправки — итоговым ответом (строка `PARENT`
-шаблона). В режиме команд агентов итоговый текст тоже доходит до оркестратора — `result`
+шаблона). Если формат вывода агента называет файл, итоговый ответ — та же сводка, а файл
+пишется до неё при любом канале; целиком отвечает только агент, чей формат файла не
+называет (researcher с `OUTPUT: inline`). В T-1 tester без SendMessage ответил полным
+текстом и файл по `REPORT_PATH` не записал; строка `PARENT` тогда называла итоговый ответ
+отчётом. В режиме команд агентов итоговый текст тоже доходит до оркестратора — `result`
 уведомления о простое; в MEW-2 агенты писали после сводки ещё и итог втрое длиннее,
 и каждый отчёт приходил дважды. Уведомление с `sent` — конец хода, не новый отчёт;
-отчёт в уведомлении бывает только у агента, который не отправил его сообщением.
+сводка в уведомлении бывает только у агента, который не отправил её сообщением.
 
 **Одно задание за раз.** Сообщение агенту, который ещё работает, доходит до него только
 после конца хода: в MEW-2 оба дополнения пришли агентам после их отчёта, а оркестратор
@@ -206,7 +212,15 @@ e2e. Команду и критерий даёт адаптер и конфиг 
 короткими опросами: `scripts/gate.py start {имя} --root {корень} -- '{команда}'`, затем
 `gate.py poll {имя} --root {корень}` до `EXIT` (`LOST` — процесс гейта умер, запустить
 заново). Вывод и код выхода лежат в git-каталоге дерева: не попадают
-ни в коммит, ни в публикацию артефактов. Один вызов скрипта с литеральными путями
+ни в коммит, ни в публикацию артефактов. Имя выводится, а не придумывается: у агента —
+`{метка}-{gate}`, где метка — имя файла его отчёта без расширения (`REPORT_PATH`,
+у reviewer'а `FINDINGS_PATH`): `implement-step3-build`, `review-sync1-build`,
+`review-pass2-e2e`; у оркестратора — `{moment}-{gate}` по моменту `resolve.py verify --at`
+(`review-build`, `delivery-build`, `accept-e2e`, приёмка лида тоже), фоновая проверка
+оркестратора — `{moment}-check-{имя}`: имя проверки может совпасть с именем гейта. Метки уникальны на задание («Отчёт агента»),
+повторный запуск того же имени заменяет прежний прогон (`gate.py` снимает идущий).
+Агент называет имя в строке гейта отчёта: в T-3 coder в синхронизации назвал гейт сам
+и не написал имени, и `gate.py poll build` оркестратора не нашёл лога. Один вызов скрипта с литеральными путями
 проходит изолированную worktree-сессию, цикл shell с `$?` — нет. Ответ агента, пока его
 гейт идёт, — не отчёт («Отчёт агента»). Набор гейтов шага обязателен перед коммитом
 шага и пакета фиксов, полный — на Review, при синхронизации с базой, перед сдачей и на приёмке лида. Какие гейты

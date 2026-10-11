@@ -73,12 +73,14 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 
 ### 4. FIX
 
-По исполнителю категории: code и spec-sync → coder (SendMessage живому агенту из
+Исполнитель — по файлам правки каждого finding (`review-cycle.md`, шаг 3), не по
+категории: правка задевает исходники → coder целиком (SendMessage живому агенту из
 `agents.coder`, имя может быть с суффиксом ротации, или спавн с `name: coder-{id}`),
-tests → tester (спавн с `name: tester-{id}`), spec и plan → architect
+правка только в тестах и тестовой поддержке любой категории → tester (спавн с
+`name: tester-{id}`; файл, который в этом проходе правит coder, — coder'у), spec и plan → architect
 (SendMessage живому агенту из `agents.architect` или спавн с `name: architect-{id}`),
-architecture → решение в точке `finding`. Порядок coder и tester — `review-cycle.md`,
-шаг 3. Coder получает `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md`, второе
+architecture → решение в точке `finding`. Один файл в проходе — один агент. Порядок
+coder и tester — `review-cycle.md`, шаг 3. Coder получает `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md`, второе
 задание прохода — `{TASK_DIR}/reports/review-spec-sync-pass{N}.md`; tester —
 `{TASK_DIR}/reports/review-tests-pass{N}.md`. Отчёт coder'а сверяется как в `implement`,
 2.2, отчёт tester'а — как в 2.3. Перед

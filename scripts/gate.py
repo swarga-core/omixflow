@@ -4,7 +4,8 @@
     gate.py start NAME --root DIR -- CMD [ARG...]
     gate.py poll NAME --root DIR [--timeout SEC] [--tail N]
 
-NAME labels one gate run (`step3-test`); its output, exit code and runner live in the
+NAME labels one gate run: `{report label}-{gate}` for an agent (`implement-step3-test`),
+`{moment}-{gate}` for the orchestrator (`delivery-build`; protocol/runtime.md, «Гейты»); its output, exit code and runner live in the
 git directory of DIR (`{git-dir}/omixflow-gates/NAME.log`, `.exit`, `.pid`): per
 worktree, never tracked, never published with the task artifacts.
 
