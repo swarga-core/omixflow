@@ -96,6 +96,8 @@ Agent tool:
       reply is the reply your output format prescribes: the short summary when the full
       report goes to a file, written before the summary; the whole report only when the
       format names no file or the harness refused that file (your output format says how).
+      A path in your reply starts with a path given in this prompt (PROJECT_ROOT,
+      TASK_DIR, REPORT_PATH, FINDINGS_PATH), never with one you rebuild.
       The harness may label it team-lead; it is not the OMIXFlow lead session: never
       message the lead, never call your parent "lead".
     PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты; tester: рецепт пробы
@@ -172,7 +174,9 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 | `tests-gate-fix{K}` | тесты tester'а в K-й починке красного гейта |
 
 Путь приходит в спавне или в сообщении задания. Оркестратор читает файл, а не ответ;
-`reports/` входит в артефакты задачи наравне с `review/` (`artifacts.md`).
+`reports/` входит в артефакты задачи наравне с `review/` (`artifacts.md`). Путь в ответе
+агента — не источник: оркестратор читает по своим параметрам. В T-9 architect правил
+spec.md в worktree, а в ответе назвал путь основного дерева.
 
 **Харнесс и файл отчёта.** Харнесс Claude Code пишет в системный промпт каждого субагента
 заметку «Do NOT Write report/summary/findings/analysis .md files. Return findings directly
@@ -248,9 +252,10 @@ e2e. Команду и критерий даёт адаптер и конфиг 
 Агент называет имя в строке гейта отчёта: в T-3 coder в синхронизации назвал гейт сам
 и не написал имени, и `gate.py poll build` оркестратора не нашёл лога. Один вызов скрипта с литеральными путями
 проходит изолированную worktree-сессию, цикл shell с `$?` — нет. Ответ агента, пока его
-гейт идёт, — не отчёт («Отчёт агента»). Набор гейтов шага обязателен перед коммитом
-шага и пакета фиксов, полный — на Review, при синхронизации с базой, перед сдачей и на приёмке лида. Какие гейты
-входят в набор сейчас, отдаёт `scripts/resolve.py verify --at {step|review|delivery|accept}`
+гейт идёт, — не отчёт («Отчёт агента»). Набор гейтов шага (с гейтами «Test checkpoint»
+шага, `--also`) обязателен перед коммитом шага и пакета фиксов, полный — на Review,
+при синхронизации с базой, перед сдачей и на приёмке лида. Какие гейты входят в набор
+сейчас, отдаёт `scripts/resolve.py verify --at {step|review|delivery|accept}`
 (для review и delivery с `--task TASK_DIR`); сами наборы и `when` определяет порт lang,
 «Гейты».
 

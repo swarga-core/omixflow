@@ -17,7 +17,7 @@ scripts: {}
 
 | Гейт | Дефолт команды | Критерий | Примечания |
 |---|---|---|---|
-| typecheck | `pnpm check-types` | exit-code | в монорепо запускается через turbo; отдельный пакет: команда из каталога пакета |
+| typecheck | `pnpm check-types` | exit-code | в монорепо запускается через turbo; отдельный пакет: `pnpm --dir {пакет} check-types` |
 | test | `pnpm test` | exit-code | e2e и visual в него не входят |
 | lint | `pnpm exec biome check {path}` | zero-diagnostics или no-new-diagnostics | вывод biome обрезан на двадцати диагностиках: маленькое число из него это артефакт обрезки, не факт; для `no-new-diagnostics` baseline замеряется на базовой ветке в начале задачи с `--max-diagnostics` достаточного размера |
 | build | `pnpm build` | exit-code | долгий |
@@ -71,8 +71,8 @@ scripts: {}
 ## workspace_layout
 
 Монорепо определяется по `pnpm-workspace.yaml`; пакеты по его globs. Гейт в одном
-пакете: команда из каталога пакета, а не фильтр turbo. Не все пакеты имеют все
-скрипты: перед запуском прочитать `package.json` пакета.
+пакете: `pnpm --dir {пакет} {скрипт}` (каталог — опцией, без `cd`), а не фильтр turbo.
+Не все пакеты имеют все скрипты: перед запуском прочитать `package.json` пакета.
 
 ## long_running
 

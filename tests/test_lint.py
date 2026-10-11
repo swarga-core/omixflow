@@ -389,6 +389,64 @@ class AgentReportLint(unittest.TestCase):
             self.assertIn("REPORT_PATH refused by the harness", part)
 
 
+class AgentRulesLint(unittest.TestCase):
+    """Field rules of 0.7.1 (Swarga AI Studio T-9, T-18)."""
+
+    def body(self, agent: str) -> str:
+        _, text = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+        return " ".join(text.split())
+
+    def flat(self, rel: str) -> str:
+        return " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+
+    def test_checkpoint_gates_come_with_also(self):
+        """T-9: the step 6 checkpoint named build, outside the step set; the coder ran only `gates`."""
+        coder = self.body("coder")
+        self.assertIn("Add `--also {gate}` for every gate the step's test checkpoint names", coder)
+        self.assertIn("`also_missing`", coder)
+        self.assertIn("«Test checkpoint» шага (plan.md; у тира S", self.flat("skills/implement/SKILL.md"))
+        self.assertIn("only those the project declares", self.body("architect"))
+        tester = self.body("tester")
+        self.assertIn("- **CHECKPOINT_GATES** (implement steps only; absent means none):", tester)
+        self.assertIn("Run the gates of CHECKPOINT_GATES too, and only those", tester)
+        self.assertIn("`CHECKPOINT_GATES` (гейты «Test checkpoint» шага кроме `test`", self.flat("skills/implement/SKILL.md"))
+        self.assertIn("`resolve.py verify --at step --also {gate}`", self.flat("adapters/lang/PORT.md"))
+
+    def test_probes_cover_existing_behaviour_and_unnamed_probes(self):
+        """T-18: «the schema is unchanged and it checks existing behaviour», «none was requested»."""
+        for agent in ("coder", "tester"):
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("pins behaviour that already existed", body)
+                self.assertIn('"no probe was requested" are not reasons', body)
+                self.assertIn("{new test} — no probe possible: {why}", body)
+        implement = self.flat("skills/implement/SKILL.md")
+        self.assertIn("почему пробу не построить", implement)
+        self.assertIn("«пробу не просили» — не причины", implement)
+        for agent in ("coder", "tester"):
+            self.assertIn("a test that stays green is strengthened, not excused", self.body(agent))
+
+    def test_agents_run_commands_without_cd(self):
+        """T-18: the coder ran `cd` twice; no agent definition had the rule."""
+        shell = [p.stem for p in sorted((ROOT / "agents").glob("*.md"))
+                 if "Bash" in (lib.parse_frontmatter(p)[0].get("tools") or "")]
+        self.assertEqual(shell, ["coder", "researcher", "reviewer", "tester"])
+        for agent in shell:
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("ommands without `cd`", body)
+                self.assertIn("`git -C {dir}`", body)
+                self.assertNotIn("persists between your shell calls", body)  # a subagent's cwd is reset
+
+    def test_reply_paths_are_copied_not_rebuilt(self):
+        """T-9: the architect edited spec.md in the worktree and named the main tree's path."""
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        start = runtime.index("    PARENT: the orchestrator")
+        parent = " ".join(runtime[start:runtime.index("PLUGIN_ROOT:", start)].split())
+        self.assertIn("A path in your reply starts with a path given in this prompt", parent)
+        self.assertIn("Путь в ответе агента — не источник", " ".join(runtime.split()))
+
+
 class LeadLaunchLint(unittest.TestCase):
     """The lead launches task sessions by the developer's word, in the background or in a
     window (protocol/lead.md, «Запуск сессий»); the second SwAIS wave ran T-18, T-8 and T-9

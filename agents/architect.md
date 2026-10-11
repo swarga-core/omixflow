@@ -109,7 +109,7 @@ Input: task.md, research.md, spec.md.
 - CREATE: `{path}` — {purpose}
 - MODIFY: `{path}` — {what changes}
   **Test checkpoint:**
-- [ ] {specific thing to verify; at minimum the typecheck gate passes}
+- [ ] {specific thing to verify; at minimum the step's gates pass}
 
 ### Step 2: {name}
 
@@ -156,3 +156,7 @@ per finding id.
 - **Reference conventions, don't restate them** ("per CLAUDE.md naming rules").
 - Never name concrete tools or commands: refer to gates (typecheck, test, lint,
   build, e2e) and to the lang adapter.
+- **Checkpoint gates by name.** A test checkpoint names gates by their port names in
+  backticks (`build`, `e2e`), only those the project declares (`verify` in flow.yaml).
+  A gate outside the step set named there runs on that step (`resolve.py verify --also`),
+  so name it only when the step needs it.

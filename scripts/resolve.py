@@ -11,6 +11,7 @@
     resolve.py route POINT             [--project DIR]            # lead route: JSON {point, kind, mode, timeout}
     resolve.py lead                    [--project DIR]            # lead settings: JSON {default, timeout, stall, actions, notify}
     resolve.py verify --at MOMENT      [--project DIR] [--task DIR | --base B] [--since REF] [--paths P...]
+                                       [--also GATE...]
         gates and orchestrator checks due at MOMENT (step | review | delivery | accept):
         JSON {at, head, since, files, areas, gates, checks, on_demand, skipped}
         (adapters/lang/PORT.md, «Гейты», «Проверки оркестратора»). review and delivery
@@ -19,6 +20,9 @@
         without --project, the project root. --since REF counts the changes from REF (a sync
         merge: HEAD, what the base brings in). --paths plans for these paths instead of the
         tree's changes (the files of plan steps): checks of every moment, each with its `at`.
+        --also GATE puts a declared gate into `gates` whatever the set says, with `"also": true`
+        (the gates a plan step's test checkpoint names); an undeclared port gate is listed in
+        `also_missing`, a name outside the port's gates is an error (exit 2).
 
 Without --json prints one path per line, base → leaf.
 
@@ -89,7 +93,7 @@ def cmd_verify(ns: argparse.Namespace, root: Path) -> int:
         state = lib.yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         base = base or state.get("base")
         checked = state.get("checks") or {}
-    plan = lib.verify_plan(lib.load_config(root), root, ns.at, base, checked, ns.paths, ns.since)
+    plan = lib.verify_plan(lib.load_config(root), root, ns.at, base, checked, ns.paths, ns.since, ns.also)
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     return 0
 
@@ -108,6 +112,7 @@ def main(argv=None) -> int:
     ap.add_argument("--task", type=Path, default=None)
     ap.add_argument("--paths", nargs="+", default=None)
     ap.add_argument("--since", default=None)
+    ap.add_argument("--also", nargs="+", action="extend", default=None)
     ns = ap.parse_args(argv)
 
     foreign_bare = False  # foreign repository without its own flow.yaml

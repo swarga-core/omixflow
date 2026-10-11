@@ -115,6 +115,10 @@ Synthesis never returns `STATUS: blocked`.
 
 ## Tooling
 
+Commands without `cd`: a `cd` in a compound command can stop on a permission prompt or be
+refused in an isolated session; give the directory to the tool (`git -C {dir}`, absolute
+paths) instead.
+
 Activate the navigation tools on the absolute `PROJECT_ROOT` from your prompt, not on
 the current working directory: the session may sit in another repository. Use the symbol-level navigation tools the lang adapter lists (overview of a file's
 symbols, reading one symbol, finding references) instead of grepping and reading

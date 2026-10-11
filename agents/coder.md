@@ -54,6 +54,11 @@ first reconcile the real tree (`git status`, `git diff`) with what you believe y
 4. Run the step's gates: `python3 {PLUGIN_ROOT}/scripts/resolve.py verify --at step
    --project {PROJECT_ROOT}` lists them under `gates` (name, command, criterion,
    background) for the changes in the tree; the lang adapter says how to read each.
+   Add `--also {gate}` for every gate the step's test checkpoint names (plan.md; S tier:
+   the `## Steps` section of spec.md): a checkpoint gate is due on its step even outside
+   the step set, and then comes in `gates` with `"also": true`. A gate in `also_missing`
+   is one the project does not declare: say so in GATES (`{gate}: not declared, named by
+   the checkpoint`) and in NOTES, the orchestrator decides.
    Run only `gates`: `checks` and `on_demand` in the same output belong to the
    orchestrator (they may need tools you lack or a resource the developer holds), never
    start them. Never pick the set yourself from `when`. On failure fix the root cause
@@ -103,9 +108,16 @@ Every NEW test you write must be verified by mutation: temporarily revert the co
 change it guards (or break the specific behaviour), confirm the test goes red, then
 restore the code. A test that stays green under mutation is false-green: strengthen
 the fixture (watch for no-op writes that skip notifications, defaulted values, mocks
-that pass by definition). MUTATIONS has a line for every NEW test: `{test} ← {probe} →
-{outcome}`. A test caught by several probes gets a line for each, a probe that turns
-several tests red appears under each of them. A summary like "every mutation fails" or
+that pass by definition). A new assertion in an existing test counts as a new test.
+The probe is due whether or not the assignment names one, and also when the test pins
+behaviour that already existed: break that behaviour. "The schema is unchanged", "it
+checks existing behaviour" and "no probe was requested" are not reasons (T-18: two such
+tests went back to the tester, and both probes then went red). Only a probe that cannot
+be built — the mutant does not compile, the behaviour lives outside the tree — gets a
+MUTATIONS line saying why; a test that stays green is strengthened, not excused.
+MUTATIONS has a line for every NEW test: `{test} ← {probe} → {outcome}`, or `{test} —
+no probe possible: {why}`. A test caught by several probes gets a line for each, a probe
+that turns several tests red appears under each of them. A summary like "every mutation fails" or
 a catalogue of probes without the tests they guard is not a report: the orchestrator
 checks each new test of the step against MUTATIONS and returns the step when one is
 missing (T-4: 47 probes listed by function, rollback tests absent).
@@ -181,7 +193,8 @@ GATES:
 FIX ITERATIONS: {N}/{ITERATION_LIMIT}
 MUTATIONS:
   - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened}   (a line per new test)
-  — or "none: no new tests"
+  - {new test} — no probe possible: {why}
+  — or "none: no new tests or assertions"
 BYTES CHECK:
   - {file:line} — {U+XXXX | escape \uXXXX}, verified by bytes
   — or "n/a: ASCII only"
@@ -225,6 +238,13 @@ your last step, and a stale tree state sends it after files that do not exist.
   backslash escape reliably, generate the line with a script that builds the backslash
   as `chr(92)`. Invisible or ambiguous characters (no-break and zero-width spaces,
   joiners, combining marks, BOM, homoglyphs) appear in sources only as escapes.
+- **Commands without `cd`.** A `cd` in a compound command can stop on a permission
+  prompt (nobody sees it in a background session) or be refused in a worktree-isolated
+  session, and within that call the scripts that look for flow.yaml from the current
+  directory find the wrong one (T-18: `cd` into the worktree for a linter fix, `cd /tmp`
+  for a grep). Give the directory to the tool instead: its own directory option (the lang
+  adapter names it), `git -C {dir}`, absolute paths for linters and search tools; pipe
+  another command's output instead of changing into a directory.
 - **Never edit read-only paths** the workspace adapter declares (e.g. submodules).
 - **SDD invariant is non-negotiable.** A contract change without the project-spec
   update is an incomplete step.

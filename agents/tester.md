@@ -41,6 +41,8 @@ your tests»). The spec defines what to test; the code defines how.
 - **REPORT_PATH**: absolute file for the full report, see «Output format».
 - **PLUGIN_ROOT**: absolute root of the plugin: `scripts/gate.py` (long gates),
   `agents/coder.md` (the mutation probe recipe).
+- **CHECKPOINT_GATES** (implement steps only; absent means none): the gates besides `test`
+  that the step's test checkpoint names and that run your tests (e2e, visual).
 
 ## How you work
 
@@ -65,6 +67,15 @@ Before replying, go through every test file you changed with the lang adapter's
 suppressions list (escape-hatch casts and ignore directives pass the linter): a hit
 is fixed, or kept under the adapter's own exception with the reason in the report.
 
+Commands without `cd`: a `cd` in a compound command can stop on a permission prompt or be
+refused in an isolated session, so give the directory to the tool (its own directory option
+from the lang adapter, `git -C {dir}`, absolute paths) instead of changing into it.
+
+Run the gates of CHECKPOINT_GATES too, and only those: their commands come from
+`python3 {PLUGIN_ROOT}/scripts/resolve.py verify --at step --also {gate} --project
+{PROJECT_ROOT}`; report each in CHECKPOINT GATES. A gate in `also_missing` is one the
+project does not declare: `{gate}: not declared` there, as the coder does.
+
 Git is read-only for you (`status`, `diff`, `show`, `log`); never `stash`, `checkout`,
 `restore`, `reset`, `commit`, `clean`: the orchestrator commits, and uncommitted work
 of the step is in the tree.
@@ -84,7 +95,13 @@ source, confirm the test goes red, restore the source. A test that stays green u
 mutation is false-green: strengthen it and probe again. The recipe is the coder's, read it
 before your first probe: `{PLUGIN_ROOT}/agents/coder.md`, section «Mutation-check your
 tests» (copy next to the file, restore with `cp`, full rebuild after a series of probes;
-MUTATIONS has a line for every new test, as that section says).
+MUTATIONS has a line for every new test, as that section says). Every new test and every
+new assertion in an existing test is probed, whether or not the assignment names a probe,
+and also when it pins behaviour that already existed: break that behaviour. "The schema is
+unchanged", "it checks existing behaviour" and "no probe was requested" are not reasons.
+Only a probe that cannot be built (the mutant does not compile, the behaviour lives outside
+the tree) gets a MUTATIONS line saying why; a test that stays green is strengthened, not
+excused.
 Afterwards no `.orig` copy is left and `git diff` of every source file you probed is what it
 was before the probe; TREE STATE in the report is `git status --short` taken right before
 replying, never written from memory.
@@ -120,6 +137,7 @@ RUN RESULT: PASS ({passed}/{total}) | FAIL ({passed}/{total})
 BACKGROUND GATES:
   - {gate}: gate.py {label}-{gate}, EXIT {code}
   — or "none"
+CHECKPOINT GATES: {gate}: PASS | FAIL | not declared — or "none"
 ITERATIONS: {M}/{ITERATION_LIMIT}
 FAILURES (if any):
   - {test name}: {expected} vs {actual} — TEST_ISSUE | CODE_BUG
@@ -127,7 +145,8 @@ CODE BUGS FOUND (if any):
   - {file:line}: {description}
 MUTATIONS:
   - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened}   (a line per new test)
-  — or "none: no new tests"
+  - {new test} — no probe possible: {why}
+  — or "none: no new tests or assertions"
 BYTES CHECK: {file:line — U+XXXX | escape, verified by bytes} — or "n/a: ASCII only"
 SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
 TREE STATE:

@@ -110,6 +110,26 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(p["on_demand"], ["device"])
         self.assertEqual(p["gates"][2]["criterion"], "zero-diagnostics")
 
+    def test_also_adds_the_gates_a_checkpoint_names(self):
+        """T-9: the step 6 checkpoint asked for build, which has no `when` and is outside the step set."""
+        self.write("tools/x.py")
+        p = lib.verify_plan(self.cfg, self.root, "step", also=["build", "lint", "visual", "visual"])
+        self.assertEqual(self.names(p["gates"]), ["typecheck", "test", "lint", "build"])
+        self.assertEqual([g.get("also") for g in p["gates"]], [None, None, None, True])
+        self.assertEqual((p["gates"][3]["cmd"], p["gates"][3]["background"]), ("bb", True))
+        self.assertNotIn("build", [s.get("gate") for s in p["skipped"]])
+        self.assertIn({"gate": "e2e", "why": "when ['client']: области не задеты"}, p["skipped"])
+        self.assertEqual(p["also_missing"], ["visual"])  # a port gate the project does not declare
+        self.assertNotIn("also_missing", self.plan("step"))
+        with self.assertRaises(lib.OmixflowError):
+            lib.verify_plan(self.cfg, self.root, "step", also=["deploy"])
+        res = run("resolve.py", "verify", "--at", "step", "--project", str(self.root), "--also", "build", "e2e")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(self.names(json.loads(res.stdout)["gates"]), ["typecheck", "test", "lint", "build", "e2e"])
+        res = run("resolve.py", "verify", "--at", "step", "--project", str(self.root), "--also", "deploy")
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("не имя гейта", res.stderr)
+
     def test_step_looks_only_at_uncommitted_changes(self):
         self.write("sim/core.cs")
         self.commit_all("sim")

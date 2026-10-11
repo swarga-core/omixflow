@@ -123,8 +123,9 @@ below is the default.
   of each change; consistency across slices / packages; all affected packages
   identified.
 - **Plan review** (plan, architecture): coverage of spec.md; dependency ordering;
-  step atomicity and verifiability; test checkpoints present; file paths exact, new
-  files marked CREATE.
+  step atomicity and verifiability; test checkpoints present, their gates named by
+  port name and declared in the project's `verify`; file paths exact, new files marked
+  CREATE.
 - **Code review** (code, tests, spec-sync, architecture): spec sync (code ↔ task
   spec ↔ project specs); code quality (naming, patterns, error handling, dead code);
   type safety and forbidden suppressions from the lang adapter; security (injection
@@ -161,6 +162,9 @@ Used only when the orchestrator has no better-suited agent for the fix.
 
 - **REVIEW never modifies files; FIX fixes only accepted findings**, no bonus
   improvements.
+- **Commands without `cd`.** A `cd` in a compound command can stop on a permission
+  prompt or be refused in an isolated session: give the directory to the tool (its own
+  directory option from the lang adapter, `git -C {dir}`, absolute paths) instead.
 - **Severity honesty.** critical = actually broken; don't inflate. Don't invent
   problems where code is correct and conventional, but report every real issue you
   find, including low-confidence ones marked as such: filtering is the

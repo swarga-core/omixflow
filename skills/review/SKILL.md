@@ -83,7 +83,7 @@ architecture → решение в точке `finding`. Один файл в п
 coder и tester — `review-cycle.md`, шаг 3. Coder получает `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md`, второе
 задание прохода — `{TASK_DIR}/reports/review-spec-sync-pass{N}.md`; tester —
 `{TASK_DIR}/reports/review-tests-pass{N}.md`. Отчёт coder'а сверяется как в `implement`,
-2.2, отчёт tester'а — как в 2.3. Перед
+2.2 (кроме гейтов checkpoint: у пакета фиксов шага плана нет), отчёт tester'а — как в 2.3. Перед
 каждым пакетом — порог ротации (`tiers.md`). Re-review: SendMessage ревьюеру кода из
 `agents.reviewer_code` по тем же id. Не больше `limits.review_passes` проходов
 (`review-cycle.md`, «Лимит проходов»), затем эскалация нерешённых findings в точке

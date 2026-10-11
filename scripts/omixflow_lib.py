@@ -851,7 +851,8 @@ def quiet_since_green(root: Path, areas: Dict[str, Any], when: List[str], green:
 
 def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = None,
                 checked: Optional[Dict[str, Any]] = None,
-                paths: Optional[List[str]] = None, since: Optional[str] = None) -> Dict[str, Any]:
+                paths: Optional[List[str]] = None, since: Optional[str] = None,
+                also: Optional[List[str]] = None) -> Dict[str, Any]:
     """Gates and orchestrator checks due at moment AT (adapters/lang/PORT.md, «Гейты»,
     «Проверки оркестратора»).
 
@@ -863,7 +864,10 @@ def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = 
     planning (the files of plan steps; absolute paths are taken relative to ROOT): every
     check with a moment is listed with its `at`, whatever AT is. CHECKED maps a check name to the commit of its last green
     full run (state.yaml `checks`): at delivery the check is not due again when nothing in
-    its areas changed since that commit.
+    its areas changed since that commit. ALSO names gates due whatever the set says (a plan
+    step's test checkpoint asks for them: T-9 named build, which is outside the step set);
+    they carry `"also": true`. A port gate the config does not declare goes to `also_missing`
+    (the plan names a gate that cannot run); a name outside the port's gates is an error.
     """
     if at not in MOMENTS:
         raise OmixflowError(f"момент {at!r}: ожидается один из {', '.join(MOMENTS)}")
@@ -885,6 +889,11 @@ def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = 
     areas = cfg.get("areas") or {}
     touched = touched_areas(areas, files)
     verify = cfg.get("verify") or {}
+    forced = list(dict.fromkeys(also or []))
+    for name in forced:
+        if name not in GATES:
+            raise OmixflowError(f"--also {name}: не имя гейта порта lang ({', '.join(GATES)})")
+    missing = [g for g in forced if not isinstance(verify.get(g), dict)]
     gates, checks, skipped = [], [], []
     for name in GATES:
         gate = verify.get(name)
@@ -893,10 +902,13 @@ def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = 
         when = [str(w) for w in gate.get("when") or []]
         hit = [w for w in when if w in touched]
         due = (name in STEP_GATES or bool(hit)) if at in ("step",) else (not when or bool(hit))
-        if due:
-            gates.append({"name": name, "cmd": gate.get("cmd"), "criterion": gate.get("criterion", "exit-code"),
-                          "scope": gate.get("scope", "root"), "background": bool(gate.get("background")),
-                          "when": when})
+        if due or name in forced:
+            entry = {"name": name, "cmd": gate.get("cmd"), "criterion": gate.get("criterion", "exit-code"),
+                     "scope": gate.get("scope", "root"), "background": bool(gate.get("background")),
+                     "when": when}
+            if not due:
+                entry["also"] = True
+            gates.append(entry)
         else:
             skipped.append({"gate": name, "why": f"when {when}: области не задеты"
                             if when else "не в наборе шага"})
@@ -919,5 +931,8 @@ def verify_plan(cfg: Dict[str, Any], root: Path, at: str, base: Optional[str] = 
             skipped.append({"check": name, "why": f"зелёная на {green[:7]}, после неё области не задеты"})
         else:
             checks.append({"name": name, "when": when, "at": moments, "background": bool(check.get("background"))})
-    return {"at": at, "head": head, "since": since, "files": len(files), "areas": touched,
+    plan = {"at": at, "head": head, "since": since, "files": len(files), "areas": touched,
             "gates": gates, "checks": checks, "on_demand": on_demand, "skipped": skipped}
+    if also is not None:
+        plan["also_missing"] = missing
+    return plan
