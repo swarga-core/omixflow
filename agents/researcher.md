@@ -119,6 +119,12 @@ Commands without `cd`: a `cd` in a compound command can stop on a permission pro
 refused in an isolated session; give the directory to the tool (`git -C {dir}`, absolute
 paths) instead.
 
+Experiments, clones and builds go only into SCRATCH_DIR (without it — the scratchpad your
+environment names, `{your name}/`, or `researcher/` when you have none): never bare `/tmp`,
+never the project tree. Remove them before the report. If a removal command is denied, do
+not try another form of removal: leave them and name them in your ≤10-line reply as
+`SCRATCH: {path} {size}` (MEW-17: a researcher's 101 MB stayed in `/tmp`).
+
 Activate the navigation tools on the absolute `PROJECT_ROOT` from your prompt, not on
 the current working directory: the session may sit in another repository. Use the symbol-level navigation tools the lang adapter lists (overview of a file's
 symbols, reading one symbol, finding references) instead of grepping and reading

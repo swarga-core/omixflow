@@ -13,7 +13,8 @@
     state.py step DIR done N | start N     # implement bookkeeping
     state.py agents DIR --session S        # drop agents from another session
     state.py ask DIR ITEM:wait|nowait ...  # open the next question to the lead, print its #n
-    state.py ack DIR N ITEM=ACK ...        # record the lead's ack per item (решаю | E-n)
+    state.py ack DIR N ITEM=ACK ... [--add]  # the lead's ack per item (решаю | E-n); --add, last:
+                                             # a subitem ITEM-suffix the lead split off
     state.py close DIR N [ITEM ...]        # close items (all when none given), print what stays open
 
 DIR is the task directory (.tasks/{id} or .tasks/{id}/{part}).
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -407,6 +409,8 @@ def cmd_ask(ns: argparse.Namespace) -> int:
             raise lib.OmixflowError(f"пункт задаётся как МЕТКА:wait или МЕТКА:nowait, получено {spec!r}")
         if label in items:
             raise lib.OmixflowError(f"пункт {label} повторяется")
+        if "-" in label:  # a hyphenated label is a subitem the lead splits off (`ack --add`)
+            raise lib.OmixflowError(f"пункт {label}: метка сессии без дефиса, подпункты заводит лид")
         items[label] = wait
     n = int(lead["asked"]) + 1
     lead["asked"] = n
@@ -416,13 +420,23 @@ def cmd_ask(ns: argparse.Namespace) -> int:
     return 0
 
 
+SUBITEM_RE = re.compile(r"-[a-z0-9]+")
+
+
 def cmd_ack(ns: argparse.Namespace) -> int:
     d = Path(ns.dir).resolve()
     state = load(d)
     q = open_question(lead_of(state), int(ns.n))
     for pair in ns.pairs:
         label, sep, value = pair.partition("=")
-        if not sep or label not in q["items"]:
+        if sep and value and label not in q["items"] and ns.add:
+            # a subitem the lead split off an item (protocol/lead.md, «Ответы лида»): `F6-pass`
+            if not any(SUBITEM_RE.fullmatch(label[len(item):]) for item in q["items"]
+                       if label.startswith(item)):
+                raise lib.OmixflowError(f"--add {label!r}: подпункт — ПУНКТ-суффикс из a-z и цифр, "
+                                        f"пункты вопроса: {list(q['items'])}")
+            q["items"][label] = "wait"
+        if not sep or not value or label not in q["items"]:
             raise lib.OmixflowError(f"ожидается ПУНКТ=ack для пунктов {list(q['items'])}, получено {pair!r}")
         q["ack"][label] = value
     save(d, state)
@@ -517,6 +531,7 @@ def main(argv=None) -> int:
     p.add_argument("dir")
     p.add_argument("n")
     p.add_argument("pairs", nargs="+")
+    p.add_argument("--add", action="store_true")
     p.set_defaults(fn=cmd_ack)
 
     p = sub.add_parser("close")

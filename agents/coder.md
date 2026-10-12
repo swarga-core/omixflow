@@ -164,8 +164,8 @@ How to write it: one Write of the whole file when you can. When a script builds 
 block (MUTATIONS), Write the sections before it, then append the block and every later
 section in order with `>>` (the script appends itself, or `cat {scratch file} >>
 {REPORT_PATH}`; never `>`, it overwrites the file); read the file again before any Edit
-after such an append. A scratch file goes to the scratchpad directory your environment
-names, never the project tree, under a neutral name (`mutations-step4.txt`). Never give a
+after such an append. A scratch file goes into SCRATCH_DIR («Rules»), never the project
+tree, under a neutral name (`mutations-step4.txt`). Never give a
 temporary file or a piece of the report a name containing `report` (`report-head.md`,
 `report2-tail.md`): the harness refuses a subagent's Write of a `.md` file so named, and
 the rule is not documented, so keep the word out of every name. If the harness refuses
@@ -199,6 +199,7 @@ BYTES CHECK:
   - {file:line} — {U+XXXX | escape \uXXXX}, verified by bytes
   — or "n/a: ASCII only"
 SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
+SCRATCH: clean | {path} {size} — left outside the tree, could not remove
 TREE STATE:
   {output of `git status --short` taken right before replying, verbatim}
 SUMMARY: {1-2 sentences}
@@ -245,6 +246,14 @@ your last step, and a stale tree state sends it after files that do not exist.
   for a grep). Give the directory to the tool instead: its own directory option (the lang
   adapter names it), `git -C {dir}`, absolute paths for linters and search tools; pipe
   another command's output instead of changing into a directory.
+- **Scratch outside the task.** Probes, experiments, clones and builds that are not part
+  of the step's change go only into SCRATCH_DIR, a subdirectory per report label
+  (`{SCRATCH_DIR}/{label}/`; without SCRATCH_DIR — the scratchpad your environment names,
+  `{your name}/`): never bare `/tmp`, never the project tree (a mutation probe's `.orig`
+  copy next to the file is the exception, removed within the probe). Remove what you made
+  before replying. If a removal command is denied, do not try another form of removal
+  (`rm -r`, `find -delete`, a script, `mv` elsewhere): leave it and list it in SCRATCH with
+  its size (MEW-17: 118 MB of agents' probes stayed in `/tmp`).
 - **Never edit read-only paths** the workspace adapter declares (e.g. submodules).
 - **SDD invariant is non-negotiable.** A contract change without the project-spec
   update is an incomplete step.

@@ -100,6 +100,8 @@ by the harness` — отчёт: оркестратор проверяет, чт�
   шаг возвращается coder'у. Гейт `not declared` — дефект плана: строка в log.md, шаг
   дальше без него.
 - Дифф шага с не-ASCII строками требует `BYTES CHECK` с проверкой байтами.
+- `SCRATCH` не `clean` — в log.md строкой `- SCRATCH {метка}: {путь} {размер}`
+  (`runtime.md`, «Временные файлы агента»).
 - Фоновый гейт в `GATES` — с именем `gate.py` (`{метка}-{gate}`, `runtime.md`, «Гейты»);
   исход под сомнением — `gate.py poll {имя}` и чтение лога, без листинга каталога гейтов.
 
@@ -108,11 +110,11 @@ by the harness` — отчёт: оркестратор проверяет, чт�
 вручную / Пропустить шаг / Остановить. NOTES с замечаниями вне scope шага копировать
 в log.md, не чинить.
 
-**2.3 Tester.** Спавн `tester` с `name: tester-{id}`, `SPEC_PATH`, `CODE_PATHS`
-файлов шага, `TEST_TYPES` по конвенциям адаптера lang, `ADAPTERS.lang`, `PLUGIN_ROOT`,
-`CHECKPOINT_GATES` (гейты «Test checkpoint» шага кроме `test`, которые гоняют его тесты:
-e2e, visual; иначе `none`), `REPORT_PATH: {TASK_DIR}/reports/implement-tests-step{N}.md`,
-когда:
+**2.3 Tester.** Спавн `tester` с `name: tester-{id}` (часть: `tester-{id}-{part}`),
+`SPEC_PATH`, `CODE_PATHS` файлов шага, `TEST_TYPES` по конвенциям адаптера lang,
+`ADAPTERS.lang`, `PLUGIN_ROOT`, `CHECKPOINT_GATES` (гейты «Test checkpoint» шага
+кроме `test`, которые гоняют его тесты: e2e, visual; иначе `none`),
+`REPORT_PATH: {TASK_DIR}/reports/implement-tests-step{N}.md`, когда:
 coder тесты не написал, а шаг меняет поведение; шаг это UI-компонент и адаптер
 требует тестов доступности. Не нужен, когда шаг чисто типы или контракты и гейта
 typecheck достаточно, или coder уже покрыл шаг тестами с мутационной проверкой.
@@ -121,7 +123,7 @@ refused by the harness` — как в 2.2. Гейты `CHECKPOINT_GATES` tester 
 и называет в `CHECKPOINT GATES`. Отчёт tester'а сверяется
 как в 2.2: `TREE STATE`, `MUTATIONS` по каждому его новому тесту (пробы tester делает
 сам, временной правкой исходника), `BYTES CHECK`, `BACKGROUND GATES` с именами `gate.py`,
-`CHECKPOINT GATES`; пропуск — задание возвращается tester'у.
+`CHECKPOINT GATES`, `SCRATCH`; пропуск — задание возвращается tester'у.
 
 **2.4 Проверки оркестратора.** `python3 {корень плагина}/scripts/resolve.py verify --at step`
 до коммита: каждая проверка из `checks` выполняется по своему подразделу адаптера lang,

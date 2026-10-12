@@ -116,6 +116,37 @@ class LeadStateTests(unittest.TestCase):
             self.assertEqual([q["n"] for q in self.lead(d)["open"]], [2])
             self.assertEqual(run("state.py", "ask", d, "P1:wait").stdout.strip(), "3")
 
+    def test_ack_add_keeps_a_subitem_the_lead_split_off(self):
+        """T-8#6: the lead decided F6 and escalated its 4th review pass as `F6-pass` (E-29);
+        `close F6` must not close the question while F6-pass waits for the developer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self.init(tmp, "--lead", "lead-omix")
+            run("state.py", "ask", d, "F6:nowait")
+            proc = run("state.py", "ack", d, "1", "F6-pass=E-29")  # no --add
+            self.assertEqual(proc.returncode, 2)
+            self.assertTrue(proc.stderr.startswith("omixflow:"), proc.stderr)
+            proc = run("state.py", "ack", d, "1", "F6=решаю", "F6-pass=E-29", "--add")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(self.lead(d)["open"][0], {"n": 1, "items": {"F6": "nowait", "F6-pass": "wait"},
+                                                      "ack": {"F6": "решаю", "F6-pass": "E-29"}})
+            self.assertEqual(run("state.py", "ack", d, "1", "F6-pass=E-30").returncode, 0)  # re-ack, no --add
+            self.assertEqual(self.lead(d)["open"][0]["ack"]["F6-pass"], "E-30")
+            self.assertEqual(json.loads(run("state.py", "close", d, "1", "F6").stdout), {"F6-pass": "wait"})
+            self.assertEqual([q["n"] for q in self.lead(d)["open"]], [1])
+            run("state.py", "close", d, "1", "F6-pass")
+            self.assertEqual(self.lead(d)["open"], [])
+            run("state.py", "ask", d, "Q1:wait")
+            for bad in ("X1-pass=E-1", "Q1-=E-1", "Q1-Pass=E-1", "Q1-pa,ss=E-1", "Q1pass=E-1", "Q1-pass="):
+                with self.subTest(bad=bad):
+                    proc = run("state.py", "ack", d, "2", bad, "--add")
+                    self.assertEqual(proc.returncode, 2)
+                    self.assertTrue(proc.stderr.startswith("omixflow:"), proc.stderr)
+                    self.assertIn("['Q1']", proc.stderr)  # the bad label never joined the items
+            self.assertEqual(self.lead(d)["open"][0]["items"], {"Q1": "wait"})
+            run("state.py", "ack", d, "2", "Q1-a=E-31", "Q1-b=E-32", "--add")
+            run("state.py", "close", d, "2")  # without labels: the subitems go too
+            self.assertEqual(self.lead(d)["open"], [])
+
     def test_init_continues_question_numbering(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = self.init(tmp, "--lead", "lead-omix", "--asked", "2")
@@ -132,6 +163,7 @@ class LeadStateTests(unittest.TestCase):
                 ("ask", d, "Q1"),                 # no wait flag
                 ("ask", d, "Q1:maybe"),           # unknown wait flag
                 ("ask", d, "Q1:wait", "Q1:nowait"),  # duplicate label
+                ("ask", d, "F6-pass:wait"),       # hyphen: subitems are the lead's
                 ("ack", d, "1", "Q9=решаю"),      # unknown item
                 ("ack", d, "1", "Q1"),            # no value
                 ("ack", d, "5", "Q1=решаю"),      # question not open

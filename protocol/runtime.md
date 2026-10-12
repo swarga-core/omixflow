@@ -102,6 +102,7 @@ Agent tool:
       message the lead, never call your parent "lead".
     PLUGIN_ROOT: {абсолютный корень плагина}             # coder, tester, reviewer: долгие гейты; tester: рецепт пробы
     REPORT_PATH: {TASK_DIR}/reports/{phase}-{метка}.md   # coder, tester
+    SCRATCH_DIR: {scratchpad оркестратора}/{имя агента}   # coder, tester, reviewer, researcher
     {параметры режима агента: MODE, STEP, ASPECTS, ARTIFACT_PATHS, FINDINGS_PATH, ...}
 ```
 
@@ -146,11 +147,12 @@ Agent tool:
     REPO: {name} ref={ref} sha={sha}
     CONTINUABLE: yes
     PARENT: {как в основном шаблоне}
+    SCRATCH_DIR: {как в основном шаблоне}
     {INPUTS, HANDOFF, ANSWERS}
 ```
 
 Агент берётся из домашнего проекта (сессия регистрирует только его агентов),
-правила из чужого репозитория. Пишет агент только в `TASK_DIR`.
+правила из чужого репозитория. Пишет агент только в `TASK_DIR` и `SCRATCH_DIR`.
 
 ## Отчёт агента
 
@@ -177,6 +179,17 @@ reviewer — `FINDINGS_PATH` (`review-cycle.md`), researcher — `research.md`, 
 `reports/` входит в артефакты задачи наравне с `review/` (`artifacts.md`). Путь в ответе
 агента — не источник: оркестратор читает по своим параметрам. В T-9 architect правил
 spec.md в worktree, а в ответе назвал путь основного дерева.
+
+**Временные файлы агента** — пробы, эксперименты, клоны, сборки вне задачи — только
+в `SCRATCH_DIR` из шаблона спавна: `{scratchpad оркестратора}/{имя агента}`. Имя агента
+уникально (у части — с `-{part}`, «Спавн агентов»), каталог один на все его задания,
+внутри — подкаталог на метку отчёта; в голый `/tmp` и в дерево проекта — нельзя. Агент
+убирает их сам. Если команду удаления запретили, другую форму удаления он не подбирает:
+оставляет и называет строкой `SCRATCH: {путь} {размер}` в отчёте (у reviewer'а
+и researcher'а — в ответе). Оркестратор любой фазы переносит её в log.md строкой
+`- SCRATCH {метка}: {путь} {размер}`; итог Finalize и `done` лиду (поле `scratch`)
+называют остаток разработчику. В MEW-17 пробы агентов в `/tmp` — 118 МБ — остались,
+удалить их агентам не дали.
 
 **Харнесс и файл отчёта.** Харнесс Claude Code пишет в системный промпт каждого субагента
 заметку «Do NOT Write report/summary/findings/analysis .md files. Return findings directly

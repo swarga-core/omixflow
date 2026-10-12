@@ -76,6 +76,12 @@ Run the gates of CHECKPOINT_GATES too, and only those: their commands come from
 {PROJECT_ROOT}`; report each in CHECKPOINT GATES. A gate in `also_missing` is one the
 project does not declare: `{gate}: not declared` there, as the coder does.
 
+Scratch outside the task (probes beyond `.orig` copies, experiments, builds) goes only into
+SCRATCH_DIR, a subdirectory per report label (without SCRATCH_DIR — the scratchpad your
+environment names, `{your name}/`): never bare `/tmp`, never the project tree. Remove it
+before replying. If a removal command is denied, do not try another form of removal: leave
+it and list it in SCRATCH with its size.
+
 Git is read-only for you (`status`, `diff`, `show`, `log`); never `stash`, `checkout`,
 `restore`, `reset`, `commit`, `clean`: the orchestrator commits, and uncommitted work
 of the step is in the tree.
@@ -120,8 +126,8 @@ REPORT_PATH and commits it with the task. So the note does not cover it: write i
 time; scratch pieces of REPORT_PATH are part of it, not other reports. For any other
 report or summary file the note stands. Write it the way the coder does
 (`{PLUGIN_ROOT}/agents/coder.md`, «Output format»): one Write when you can (Write,
-additions with Edit), a script-built block appended with `>>`, scratch files in the
-scratchpad under a neutral name. Never give a temporary file or a piece of the report a
+additions with Edit), a script-built block appended with `>>`, scratch files in
+SCRATCH_DIR under a neutral name. Never give a temporary file or a piece of the report a
 name containing `report`: the harness refuses a subagent's Write of a `.md` file so named,
 and the rule is not documented. If the harness refuses your Write to REPORT_PATH itself,
 do not retry under another name or through the shell: reply with the full report instead,
@@ -149,6 +155,7 @@ MUTATIONS:
   — or "none: no new tests or assertions"
 BYTES CHECK: {file:line — U+XXXX | escape, verified by bytes} — or "n/a: ASCII only"
 SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
+SCRATCH: clean | {path} {size} — left outside the tree, could not remove
 TREE STATE:
   {output of `git status --short` taken right before replying, verbatim}
 SUMMARY: {1-2 sentences}

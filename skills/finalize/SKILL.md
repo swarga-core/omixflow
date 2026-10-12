@@ -146,6 +146,10 @@ PR или сдача лиду → in_review (Recommended); интеграция 
 
 ### 8. Состояние и итог
 
+Строки `SCRATCH` из log.md (`runtime.md`, «Временные файлы агента») собрать до удаления
+`TASK_DIR` и выхода из worktree: их называет итог Finalize — задачи, research, части,
+мультизадачи — и поле `scratch` в `done` лиду.
+
 `state.py finish TASK_DIR finalize` (фаза становится `done`). Коммит артефактов
 (`artifacts.md`) до выхода из worktree. Трекер с возможностью `artifacts`: `finish` публикует
 итог, тоже до выхода из worktree; статус задачи `done` → ещё раз `publish {id} --from
@@ -161,6 +165,7 @@ TASK_DIR` и при коде 0 удалить `TASK_DIR` (`finish` при сбо
 ```
 Задача {id} финализирована: log.md обновлён, трекер {да/нет}, сдача {PR url |
 squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставлен/снесён/н/д}.
+Временные файлы агентов вне дерева: {из строк `SCRATCH` в log.md | нет}.
 ```
 
 ## Задача с `finalize_artifact: research`
@@ -175,7 +180,8 @@ squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставл�
    Трекер с возможностью `artifacts`: шаги 3–4 не выполняются, итог исследования
    живёт в задаче трекера.
 5. Трекер: комментарий с итогами исследования в точке `tracker.comment`, как в шаге 5.
-6. Статус и worktree как в шагах 6–7; `state.py finish TASK_DIR finalize`.
+6. Статус и worktree как в шагах 6–7; `state.py finish TASK_DIR finalize`; итог как
+   в шаге 8, с остатком `SCRATCH`.
 
 ## Часть мультизадачи (`--part`)
 
@@ -197,11 +203,12 @@ review части завершены по её состоянию.
    `part-integrate`: Интегрировать (Recommended) / Оставить in-review / Пропустить
    часть (skipped).
 3. Интеграция по адаптеру workspace (`integrate`): `state.py finish {PART_DIR} finalize`
-   (состояние части уходит в squash завершённым); закоммитить всё в worktree
-   части, включая log.md и state.yaml; `ExitWorktree keep`; убедиться, что дерево
-   на ветке мультизадачи, иначе временный worktree; rebase ветки части на ветку
-   мультизадачи; squash; гейты и проверки `resolve.py verify --at accept` по застейдженному
-   squash до коммита (как приёмка лида); проверить, что застейджены только файлы части
+   (состояние части уходит в squash завершённым; остаток `SCRATCH` части — в итог,
+   шаг 8); закоммитить всё в worktree части, включая log.md и state.yaml;
+   `ExitWorktree keep`; убедиться, что дерево на ветке мультизадачи, иначе временный
+   worktree; rebase ветки части на ветку мультизадачи; squash; гейты и проверки
+   `resolve.py verify --at accept` по застейдженному squash до коммита (как приёмка лида);
+   проверить, что застейджены только файлы части
    (`git diff --cached --stat`), иначе СТОП в точке `deadlock`; один коммит `feat({id}): {part} —
    {title}`; push при `multitask.push`; снести worktree и ветку части. Пустая часть:
    не коммитить, статус `skipped`.
@@ -226,7 +233,8 @@ researcher'ы работают. Предусловие: research.md части �
 
 1. Открытые вопросы `### Open Questions for Dependents` из `## Handoff` research.md
    части: спросить в точке `handoff`, ответы записать в Handoff research.md части.
-2. log.md части: `## Finalize ✅`; `state.py finish {PART_DIR} finalize`.
+2. log.md части: `## Finalize ✅`; `state.py finish {PART_DIR} finalize`; остаток
+   `SCRATCH` части — в итог (шаг 8).
 3. Коммит только каталога части: пути `.tasks/{id}/{part}/` явно, сообщение
    `docs({id}): research {part} — {title}`. Никогда не «все изменения».
 4. Push при `multitask.push` по правилу общей ветки: fetch; если `origin/task/{id}`
@@ -255,7 +263,8 @@ researcher'ы работают. Предусловие: research.md части �
    мультизадачи проверить research-worktree по детерминированному пути
    `{repo_path}/.claude/worktrees/research-{id}` и снести существующие
    с подтверждением в точке `workspace.exit`, в порядке адаптера workspace.
-6. `state.py finish` для мультизадачи до `done`. При `part_isolation: shared`
+6. `state.py finish` для мультизадачи до `done`; итог — с остатком `SCRATCH` всех частей
+   (их log.md). При `part_isolation: shared`
    коммиты называют пути явно (`state.yaml`, `log.md`, `research.md` мультизадачи),
    push по правилу общей ветки.
 

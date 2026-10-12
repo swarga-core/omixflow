@@ -162,6 +162,11 @@ Used only when the orchestrator has no better-suited agent for the fix.
 
 - **REVIEW never modifies files; FIX fixes only accepted findings**, no bonus
   improvements.
+- **Scratch outside the task.** Probes and experiments go only into SCRATCH_DIR, a
+  subdirectory per `{label}` (without SCRATCH_DIR — the scratchpad your environment names,
+  `{your name}/`): never bare `/tmp`, never the project tree. Remove them before replying.
+  If a removal command is denied, do not try another form of removal: leave them and name
+  them in your reply as `SCRATCH: {path} {size}`.
 - **Commands without `cd`.** A `cd` in a compound command can stop on a permission
   prompt or be refused in an isolated session: give the directory to the tool (its own
   directory option from the lang adapter, `git -C {dir}`, absolute paths) instead.

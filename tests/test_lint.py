@@ -446,6 +446,44 @@ class AgentRulesLint(unittest.TestCase):
         self.assertIn("A path in your reply starts with a path given in this prompt", parent)
         self.assertIn("Путь в ответе агента — не источник", " ".join(runtime.split()))
 
+    def test_scratch_goes_to_the_scratchpad_and_leftovers_are_reported(self):
+        """MEW-17: agents' probes stayed in bare /tmp (118 MB) and could not be removed."""
+        shell = [p.stem for p in sorted((ROOT / "agents").glob("*.md"))
+                 if "Bash" in (lib.parse_frontmatter(p)[0].get("tools") or "")]
+        for agent in shell:
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("never bare `/tmp`", body)
+                self.assertIn("do not try another form of removal", " ".join(body.split()))
+                self.assertIn("SCRATCH_DIR", body)
+                self.assertIn("SCRATCH: ", body)
+        for agent in ("coder", "tester"):
+            self.assertIn("SCRATCH: clean | {path} {size}", self.body(agent))
+        self.assertIn("**Временные файлы агента**", self.flat("protocol/runtime.md"))
+        runtime = self.flat("protocol/runtime.md")
+        self.assertIn("SCRATCH_DIR: {scratchpad оркестратора}/{имя агента}", runtime)
+        self.assertIn("`- SCRATCH {метка}: {путь} {размер}`", runtime)
+        self.assertIn("`SCRATCH` не `clean` — в log.md строкой `- SCRATCH {метка}: {путь} {размер}`",
+                      self.flat("skills/implement/SKILL.md"))
+        self.assertIn("`CHECKPOINT GATES`, `SCRATCH`; пропуск", self.flat("skills/implement/SKILL.md"))
+        finalize = self.flat("skills/finalize/SKILL.md")
+        self.assertIn("Временные файлы агентов вне дерева", finalize)
+        self.assertIn("собрать до удаления `TASK_DIR`", finalize)
+        self.assertIn("`scratch` — остаток временных файлов агентов", self.flat("protocol/lead.md"))
+        self.assertIn("(поле `scratch` из `done`", self.flat("skills/lead/SKILL.md"))
+
+    def test_a_subitem_the_lead_splits_off_is_added_to_the_question(self):
+        """T-8#6: the lead split F6-pass off F6; `state.py ack` refused it and `close F6` closed the question."""
+        lead_md = self.flat("protocol/lead.md")
+        self.assertIn("`state.py ack … F6-pass=E-29 --add`", lead_md)
+        self.assertIn("(подпункт, выделенный лидом, — с `--add`; метку со статусом из `open`", lead_md)
+        self.assertIn("до `decision`, закрывающего пункт", lead_md)
+        self.assertIn("с `open: F6-pass E-29`", lead_md)
+        self.assertIn("SCRATCH_DIR: {как в основном шаблоне}", self.flat("protocol/runtime.md"))
+        self.assertEqual(self.flat("skills/finalize/SKILL.md").count("остатком `SCRATCH`"), 2)
+        self.assertIn("заводит только лид, свои метки сессия без дефиса", lead_md)
+        self.assertIn("выделить подпункт `{метка}-{суффикс}` в `ack` до `decision`", self.flat("skills/lead/SKILL.md"))
+
 
 class LeadLaunchLint(unittest.TestCase):
     """The lead launches task sessions by the developer's word, in the background or in a
