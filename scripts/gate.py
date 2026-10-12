@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Long gates in the background, waited for in short foreground polls.
+"""Long gates in the background, waited for by a foreground poll (one long poll:
+`--timeout 540` under the Bash tool's 600000 ms; RUNNING → poll again).
 
     gate.py start NAME --root DIR -- CMD [ARG...]
     gate.py poll NAME --root DIR [--timeout SEC] [--tail N]

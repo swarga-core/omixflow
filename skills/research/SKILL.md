@@ -8,14 +8,23 @@ description: Research phase of the OMIXFlow pipeline — investigates the codeba
 Исследование кодовой базы и, при необходимости, внешних источников. Результат:
 Source Files Map, текущее состояние, паттерны, findings, ответы на design questions.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Порты: lang; workspace для
-кросс-репо research-worktree; tracker для блока и комментариев в режиме планировщика.
-Тиры: `${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Профили:
-`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порты: lang; workspace для кросс-репо research-worktree; tracker для блока и комментариев
+в режиме планировщика.
+Сначала: `runtime.md` «Пролог скила»; `artifacts.md` «research.md», «Коммит артефактов»;
+`dialog.md` «Design questions».
+По условию: тир M, L или профиль без триажа → `runtime.md` «Спавн агентов» и `tiers.md`
+«Модели агентов по тиру»; повторное сообщение researcher'у → `tiers.md` «Смена агента
+по ходу задачи»; обрыв агента (`failed`) → `runtime.md` «Отчёт агента» («Обрыв сбоем»);
+часть мутирующей мультизадачи → `multitask.md` «Карта зависимостей»;
+`--parts` → `multitask.md` «Жизненный цикл» (подсекции «Часть профиля research»,
+«Планировщик», «Синтез», «Кросс-репо»), «Дисциплина записи блока» и `worktree.md`
+«Research-worktree»; точка решения → `dialog.md` целиком.
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 ## Активация
 
@@ -127,11 +136,13 @@ A1: {ответ разработчика дословно}
 ### 6. Состояние и журнал
 
 ```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" research   # не у части планировщика
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" research
 ```
 
 `log.md`: `## Research ✅` с числом файлов в карте, вопросов и ответов, веб-ресёрч
-да/нет, пометка `(inline)` для S. Коммит артефактов (`artifacts.md`; в мультизадаче с
+да/нет, пометка `(inline)` для S и строка стоимости из `cost.py phase TASK_DIR research`
+(`runtime.md`, «Стоимость»). Коммит артефактов (`artifacts.md`; в мультизадаче с
 `part_isolation: shared` только пути каталога части, правило «Явные пути»
 multitask.md).
 
@@ -179,8 +190,9 @@ Research завершён: {артефакт}, файлов в карте: {N}, 
    (готовые, заблокированные с причинами, ждущие). Если `all_terminal`: синтез,
    спавн `researcher-{id}` с `MODE: synthesis` и `INPUTS` всех частей; отложенные
    вопросы в точке `design-question`, ответы в `.tasks/{id}/research.md`; коммит
-   `docs({id}): research synthesis` с явными путями;
-   `state.py finish {TASK_DIR} research`.
+   `docs({id}): research synthesis` с явными путями; строка стоимости всех частей
+   и синтеза — `cost.py phase {TASK_DIR} research` на мультизадаче (`runtime.md`,
+   «Стоимость»); `state.py finish {TASK_DIR} research`.
 7. Резюм в новой сессии: для моих частей `in-work` коммит части в `task/{id}` есть →
    довести блок до `done`; research.md есть, но не закоммичен → `finalize --part`;
    research.md нет → новый `researcher-{id}-{part}` с `ANSWERS` из `log.md` части.

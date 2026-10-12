@@ -8,11 +8,18 @@ description: Starts development of a task — resolves the base branch, creates 
 Setup разработки: ветка или worktree, артефакты, статус в трекере. Аналитика
 постановки это `refine`, здесь только запуск.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Порты: tracker, workspace.
-Артефакты и состояние: `${CLAUDE_PLUGIN_ROOT}/protocol/artifacts.md`. Worktree:
-`${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
-`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порты: tracker, workspace.
+Сначала: `runtime.md` «Пролог скила»; `artifacts.md` «Коммит артефактов», «task.md»;
+`worktree.md` «Ловушки».
+По условию: `--worktree`, `workspace.worktree: always` или сессия уже в worktree →
+`worktree.md` «Параметры», «Базовая ветка»; блок мультизадачи или `--part` →
+`multitask.md` «Жизненный цикл» (с подсекцией «Кросс-репо»), «Дисциплина записи блока»; профиль со
+свойством `mutates: false` или `part_isolation: shared` (`state.py get … profile --json`)
+→ `profiles.md` «Свойства»; трекер с возможностью `artifacts` → `artifacts.md` «Хранение
+в задаче трекера»; точка решения → `dialog.md` целиком.
 
 ## Активация
 
@@ -48,7 +55,7 @@ Setup разработки: ветка или worktree, артефакты, ст
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" base      # при --base не нужен
 git branch --show-current
-[ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ] && echo in-worktree
+git rev-parse --path-format=absolute --git-dir --git-common-dir   # два пути: равны — основное дерево, разные — worktree
 ```
 
 - Уже в worktree (enter-first): не ветвиться, подтвердить «работаем в `{path}`
@@ -81,10 +88,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" init "{TASK_DIR}" --id {id} --k
   [--lead {NAME} --asked {K}]
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" refine
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
 ```
 
-`--tier` не передаётся при `triage: false`. `log.md`: секция `## Start ✅` с веткой,
-базой, профилем, статусом трекера. Коммит артефактов (`artifacts.md`).
+`--tier` не передаётся при `triage: false`. `cost.py phase TASK_DIR start` ставит курсор
+стоимости: следующие фазы считаются от задачи (`runtime.md`, «Стоимость»); его строка —
+в `## Start ✅`. `log.md`: секция `## Start ✅` с веткой,
+базой, профилем, статусом трекера, стоимостью. Коммит артефактов (`artifacts.md`).
 
 ### 4. Трекер
 
@@ -122,7 +132,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
    `state.py set {TASK_DIR} 'repos.{name}={"ref":"{ref}","sha":"{sha}"}'`.
    Репозиторий, впервые появившийся в части после старта, снимается при старте его
    первой части.
-5. `state.py finish` refine и start. Коммит; при `part_isolation: shared` пути
+5. `state.py finish` refine и start; `cost.py phase {TASK_DIR} start` (`runtime.md`,
+   «Стоимость»). Коммит; при `part_isolation: shared` пути
    явно (`state.yaml`, `multitask.md`, `log.md` мультизадачи), никогда не «все
    изменения».
 6. Статус трекера in_work в точке `tracker.status`; `comment` в точке
@@ -157,7 +168,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
    в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}
    [--lead {NAME} --asked {K}]`
    (профиль наследуется из состояния мультизадачи, `--tier` только при
-   `triage: true`); затем `state.py finish` refine и start; `log.md`. Коммит; при
+   `triage: true`); затем `state.py finish` refine и start; при `part_runner: sequential`
+   ещё `cost.py phase {TASK_DIR} start` (`runtime.md`, «Стоимость»; части планировщика
+   стоимость не считают); `log.md`. Коммит; при
    `part_isolation: shared` только пути каталога части.
 5. Статус самой задачи не трогать: он уровня мультизадачи.
 

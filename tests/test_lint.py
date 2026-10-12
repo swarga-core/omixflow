@@ -207,6 +207,200 @@ class ScriptCallLint(unittest.TestCase):
         self.assertEqual(hits, [], "state.py complete вместо finish:\n" + "\n".join(hits))
 
 
+class CostLint(unittest.TestCase):
+    """Every phase that leaves a trace records its cost (protocol/runtime.md, «Стоимость»):
+    the phase skill calls `cost.py phase` before `state.py finish`, Finalize reports the total."""
+    PHASES = ("start", "research", "spec", "plan", "implement", "review", "finalize")
+
+    def test_phase_skills_record_the_phase_cost(self):
+        missing = []
+        for phase in self.PHASES:
+            text = (ROOT / "skills" / phase / "SKILL.md").read_text(encoding="utf-8")
+            calls = (f"cost.py phase TASK_DIR {phase}", f'cost.py" phase "{{TASK_DIR}}" {phase}')
+            if not any(c in text for c in calls) or "«Стоимость»" not in text:
+                missing.append(phase)
+        self.assertEqual(missing, [], "скил фазы не вызывает cost.py phase со ссылкой на runtime.md «Стоимость»")
+        finalize = (ROOT / "skills" / "finalize" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("cost.total_eq", finalize)
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        self.assertIn("## Стоимость", runtime)
+        self.assertIn("cost:", (ROOT / "protocol" / "artifacts.md").read_text(encoding="utf-8"))
+
+
+class ProtocolDietLint(unittest.TestCase):
+    """A skill names the protocol sections to read first and the conditions for the rest
+    (protocol/runtime.md, «Чтение протокола»): the session does not read 110–175k characters
+    of protocol before its first action. Section references must resolve to real headings."""
+    PROTOCOL = sorted(p.stem for p in (ROOT / "protocol").glob("*.md"))
+    WHOLE_OK = {"dialog", "phases"}                       # short files a prologue may read whole
+    WHOLE_OK_CONDITIONAL = {"multitask"}                   # whole only under a condition («По условию»)
+    WHOLE_OK_BY_SKILL = {"lead": {"lead"}}                 # the lead is lead.md's only full reader
+    FILE_RE = re.compile(r"`?(?:protocol/)?(" + "|".join(PROTOCOL) + r")\.md`?")
+    QUOTE_RE = re.compile(r"«([^»]+)»")
+
+    ANY_MD_RE = re.compile(r"`?([A-Za-z0-9_.-]+)\.md`?")
+    KNOWN_MD = {"SKILL", "CLAUDE", "README", "CHANGELOG", "PORT", "task", "log", "research", "spec", "plan",
+                "multitask", "state", "comments", "review"}
+
+    @classmethod
+    def headings(cls, name: str) -> set:
+        """Section titles as `resolve.py section` sees them: `##`/`###` headings and the bold
+        labels that open a paragraph, fence-aware (a heading inside a template is not one)."""
+        text = (ROOT / "protocol" / f"{name}.md").read_text(encoding="utf-8")
+        return {s["title"] for s in lib.sections_of(text)}
+
+    @classmethod
+    def all_headings(cls) -> dict:
+        return {name: cls.headings(name) for name in cls.PROTOCOL}
+
+    @staticmethod
+    def prologue(path: Path) -> str:
+        """The skill text between its frontmatter (not YAML-parsed: descriptions hold colons)
+        and its first `## ` heading; a `---` rule later in the body is not a frontmatter end."""
+        text = path.read_text(encoding="utf-8")
+        m = re.match(r"\A---[ \t]*\n.*?\n---[ \t]*\n", text, re.S)
+        body = text[m.end():] if m else text
+        return body.split("\n## ", maxsplit=1)[0]
+
+    def test_prologues_name_sections_first_and_conditions_for_the_rest(self):
+        problems = []
+        for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
+            skill = path.parent.name
+            if skill == "doctor":
+                continue
+            text = self.prologue(path)
+            if "resolve.py\" section" not in text or "Сначала:" not in text:
+                problems.append(f"{skill}: в прологе нет команды `resolve.py section` и «Сначала:»")
+                continue
+            for stem in self.ANY_MD_RE.findall(text):
+                if stem not in self.PROTOCOL and stem not in self.KNOWN_MD and stem != "{файл}":
+                    problems.append(f"{skill}: пролог называет неизвестный файл {stem}.md")
+            first, _, rest = text.split("Сначала:", maxsplit=1)[1].partition("По условию:")
+            for part_name, part, conditional in (("Сначала", first, False), ("По условию", rest, True)):
+                tokens = [(m.start(), m.group(1)) for m in self.FILE_RE.finditer(part)]
+                for i, (pos, name) in enumerate(tokens):
+                    end = tokens[i + 1][0] if i + 1 < len(tokens) else len(part)
+                    tail = part[pos:end]
+                    whole_ok = (name in self.WHOLE_OK or name in self.WHOLE_OK_BY_SKILL.get(skill, set())
+                                or (conditional and name in self.WHOLE_OK_CONDITIONAL))
+                    if "целиком" in tail and not whole_ok:
+                        problems.append(f"{skill}: «{part_name}» читает {name}.md целиком")
+                    elif "целиком" not in tail and not self.QUOTE_RE.search(tail) and "из пролога" not in tail:
+                        problems.append(f"{skill}: «{part_name}» называет {name}.md без секции")
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        prologue = lib.section_lines(runtime, "Пролог скила")
+        self.assertIsNotNone(prologue)
+        self.assertIn("После сжатия контекста", "\n".join(prologue[1]),
+                      "«Пролог скила» должен велеть перечитать «Сначала» после сжатия контекста")
+        self.assertEqual(problems, [], "пролог скила:\n" + "\n".join(problems))
+
+    def test_section_references_resolve_to_headings(self):
+        headings = self.all_headings()
+        everywhere = set().union(*headings.values())
+        problems = []
+        for path in iter_files("skills", "protocol", "agents", "adapters"):
+            rel = path.relative_to(ROOT).as_posix()
+            text = path.read_text(encoding="utf-8")
+            tokens = [(m.end(), m.group(1)) for m in self.FILE_RE.finditer(text)]
+            for i, (pos, name) in enumerate(tokens):
+                # the quotes that belong to this file mention: up to the next mention, within
+                # one clause («A», «B», «C» after `file.md`), not a quote of a later sentence
+                end = min(tokens[i + 1][0] if i + 1 < len(tokens) else len(text), pos + 160)
+                clause = re.split(r"[.;]\s|\n\n", text[pos:end], maxsplit=1)[0]
+                # a clause that opens with a quote — after punctuation or a parenthesised word —
+                # is a list of sections of this file: `file.md` «A», «B»; (`file.md`, раздел «A»);
+                # elsewhere only a known heading counts as a reference
+                reference_list = re.match(r"^[` ,:()—]*(?:\([^)]*\)\s*|раздел[ыа]?\s+|секци[яи]\s+)?«", clause) is not None
+                for q in self.QUOTE_RE.findall(clause):
+                    title = " ".join(q.split())
+                    if title in headings[name]:
+                        continue
+                    # a quoted message («дождись гейтов и отчитайся») is lower-case and no file name;
+                    # a section title is upper-case or a file name (artifacts.md «log.md»)
+                    looks_like_title = title[:1].isupper() or re.fullmatch(r"[\w.-]+\.(md|yaml|json)", title)
+                    if title in everywhere or (reference_list and looks_like_title):
+                        owner = [n for n, hs in headings.items() if title in hs]
+                        problems.append(f"{rel}: «{title}» после {name}.md — "
+                                        + (f"секция файла {', '.join(owner)}" if owner else "такой секции нет"))
+            # the quote-before-file form: «Коммит артефактов» (`artifacts.md`)
+            for m in re.finditer(r"«([^»]+)»\s*\(\s*`?(?:protocol/)?(" + "|".join(self.PROTOCOL) + r")\.md`?", text):
+                title, name = " ".join(m.group(1).split()), m.group(2)
+                if title not in headings[name] and (title in everywhere or title[:1].isupper()):
+                    problems.append(f"{rel}: «{title}» перед {name}.md — такой секции нет (склонение?)")
+        self.assertEqual(problems, [], "ссылка на секцию протокола не резолвится:\n" + "\n".join(problems))
+
+
+class RequestEconomyLint(unittest.TestCase):
+    """Every tool call is a model request at the agent's full context (CHANGELOG 0.8.0): the
+    rules that cut calls stay in the agents and the skills."""
+
+    def body(self, agent: str) -> str:
+        return " ".join(lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")[1].split())
+
+    def skill(self, name: str) -> str:
+        return " ".join((ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8").split())
+
+    def test_architect_writes_each_artifact_once(self):
+        architect = self.body("architect")
+        self.assertIn("## How you write", architect)
+        self.assertIn("single Write per file", architect)
+        self.assertIn("Edit is for MODE: fix", architect)
+
+    def test_mutation_probes_go_through_the_script(self):
+        for agent in ("coder", "tester"):
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("probe.py", body)
+                self.assertIn("batch", body)
+        self.assertIn("One call per probe: `probe.py`", self.body("coder"))
+        self.assertIn("restore from a copy, never from git", self.body("coder").lower())
+
+    def test_long_gates_are_polled_once_with_a_long_timeout(self):
+        for agent in ("coder", "tester", "reviewer"):
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("--timeout 540", body)
+                self.assertIn("600000", body)
+        self.assertIn("G-56", self.body("coder"))
+
+    def test_agents_batch_independent_reads(self):
+        for agent in ("coder", "tester", "reviewer", "researcher"):
+            with self.subTest(agent=agent):
+                body = self.body(agent)
+                self.assertIn("together", body)
+                self.assertIn("in one message", body)
+                self.assertRegex(body, r"never `cat` a whole file|never `cat`\s+a whole file")
+
+    def test_reports_are_checked_by_the_script(self):
+        implement = self.skill("implement")
+        self.assertIn("report.py check --role coder", implement)
+        self.assertIn("--role tester", implement)
+        self.assertIn("report.py check --role coder|tester", self.skill("review"))
+        runtime = " ".join((ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8").split())
+        self.assertIn("scripts/report.py check", runtime)
+        self.assertIn("report.py baseline", implement)
+        self.assertIn("report.py baseline", self.skill("review"))
+
+    def test_report_sections_match_the_agents_output_formats(self):
+        """The parser's section lists are the agents' Output format blocks: a renamed section
+        in an agent would silently stop being checked."""
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import report as rp  # noqa: E402
+        for agent in ("coder", "tester"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            block = body.split("Full report", 1)[1].split("```", 2)[1]
+            headers = []
+            for line in block.splitlines():
+                m = re.match(r"^([A-Z][A-Z ]*[A-Z])(?: \(if any\))?:", line)
+                if m:
+                    name = "FILES" if m.group(1).startswith("FILES ") else m.group(1)
+                    if name not in headers and name not in rp.OPTIONAL:
+                        headers.append(name)
+            with self.subTest(agent=agent):
+                self.assertEqual(headers, rp.SECTIONS[agent])
+                self.assertEqual(headers[-1], rp.LAST[agent])
+
+
 class ArtifactsCommitLint(unittest.TestCase):
     """Whether task artifacts are committed depends on artifacts.tracked (protocol/artifacts.md,
     «Коммит артефактов»): skills name the commit only together with that rule."""
@@ -296,7 +490,8 @@ class AgentReportLint(unittest.TestCase):
             calls = re.findall(r"gate\.py\s+(?:start|poll)\s+(\S+)", body)
             with self.subTest(agent=agent):
                 self.assertTrue(calls)
-                self.assertEqual(sorted(set(calls)), ["{label}-{gate}"])
+                # `{label}-probes`: a long probe.py batch run through gate.py (coder, tester)
+                self.assertEqual(sorted(set(calls) - {"{label}-probes"}), ["{label}-{gate}"])
         _, tester = lib.parse_frontmatter(ROOT / "agents" / "tester.md")
         self.assertIn("gate.py {label}-{gate}, EXIT {code}", tester)
         implement = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8").split())
@@ -365,6 +560,7 @@ class AgentReportLint(unittest.TestCase):
         flat_section = " ".join(section.split())
         self.assertIn("`REPORT_PATH refused by the harness: {сообщение харнесса}`", flat_section)
         self.assertIn("кроме ответа `REPORT_PATH refused by the harness`", flat_section)
+        self.assertIn("ответ целиком, с первой строкой", flat_section)   # report.py check reads that line
         self.assertIn("у coder'а `NOTES`, у tester'а `SUMMARY`", flat_section)
         self.assertIn("агент, которому харнесс отказал в записи `REPORT_PATH`", flat_section)
         for agent in ("coder", "tester"):
@@ -437,6 +633,96 @@ class AgentRulesLint(unittest.TestCase):
                 self.assertIn("ommands without `cd`", body)
                 self.assertIn("`git -C {dir}`", body)
                 self.assertNotIn("persists between your shell calls", body)  # a subagent's cwd is reset
+                # isolation refusals of 0.3–0.7 are shell variables / `$(…)`, heredocs and `git -C`
+                # elsewhere; the agent item is a pointer to the ISOLATION line and the refusal text,
+                # and it must not send ordinary chains into separate calls (each one a request).
+                self.assertIn("`ISOLATION` line", body)
+                self.assertIn("This session is isolated in the worktree", body)
+                for phrase in ("literal absolute paths", "heredoc", "`git -C` only on this worktree",
+                               "script in SCRATCH_DIR run as the whole command", "do not split them"):
+                    self.assertIn(phrase, body)
+                self.assertNotIn("one plain command per call", body)
+
+    def test_isolation_recipe_is_in_the_spawn_template_and_the_protocol(self):
+        """T-1: the orchestrator wrote the isolation recipe into the spawn prompt by hand; MEW-15
+        and T-11: heredocs and `commit -F -` refused, a commit message file left in TASK_DIR.
+        The transcripts show chains and pipes without a variable or heredoc passing (`git add
+        … && git commit …` 199/0), so the recipe must not split them."""
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        template = runtime[runtime.index("Agent tool:"):runtime.index("{параметры режима агента")]
+        self.assertIn("    ISOLATION: this session is isolated in its worktree", template)
+        self.assertIn("other than `gate.py start`", template)
+        self.assertNotIn("separately", template)
+        section = lib.section_lines(runtime, "Формы команд в изоляции")
+        self.assertIsNotNone(section)
+        self.assertEqual(section[0]["level"], 2)                        # a heading: the whole text prints
+        recipe = " ".join("\n".join(section[1]).split())                # what resolve.py section prints
+        for phrase in ("без `$VAR`, `$(…)`", "без heredoc", "`git -C` — только свой worktree",
+                       "commit -F", "не в `TASK_DIR`", "`zsh {путь}`", "кроме `gate.py start`",
+                       "Обычные цепочки и конвейеры без этого проходят", "алиас `complete`",
+                       "пути основного дерева (shared checkout)", "This session is isolated in the worktree"):
+            self.assertIn(phrase, recipe)
+        self.assertNotIn("отдельно", recipe)
+        prologue = " ".join("\n".join(lib.section_lines(runtime, "Пролог скила")[1]).split())
+        self.assertIn("«Формы команд в изоляции» (`runtime.md`)", prologue)   # read on the worktree condition
+        self.assertNotIn("Формы команд в изоляции.**", prologue)              # not inside the prologue itself
+        for path in ("protocol/worktree.md", "skills/start/SKILL.md"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertNotIn('[ "$(git rev-parse', text)      # the in-worktree check itself was refusable
+                self.assertIn("git rev-parse --path-format=absolute --git-dir --git-common-dir", text)
+        implement = (ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("commit-msg-step{N}.txt", implement)
+        commit_call = "`git -C {дерево} add {файлы} && git -C {дерево} commit -F {файл}`"
+        self.assertIn(commit_call, implement)                           # one call, both halves on the tree
+        self.assertIn(commit_call, recipe)
+        self.assertIn("журнал лида пишет только скрипт `lead.py`", recipe.lower())   # never a file tool
+        worktree_md = (ROOT / "protocol" / "worktree.md").read_text(encoding="utf-8")
+        traps = " ".join("\n".join(lib.section_lines(worktree_md, "Изолированная сессия")[1]).split())
+        self.assertIn("журнал лида — только скриптом `lead.py`", traps)
+        lead_md = (ROOT / "protocol" / "lead.md").read_text(encoding="utf-8")
+        journal = " ".join("\n".join(lib.section_lines(lead_md, "Журнал")[1]).split())
+        self.assertIn("только скриптом `lead.py`, никогда файловыми инструментами", journal)
+        self.assertIn("под блокировкой файла", journal)
+        self.assertNotIn("отклоняет их для путей вне её дерева", journal)   # the old, wrong reason
+        artifacts = (ROOT / "protocol" / "artifacts.md").read_text(encoding="utf-8")
+        self.assertIn("`commit -F`, не heredoc", artifacts)
+        pr_review = (ROOT / "skills" / "pr-review" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("строку `ISOLATION`", pr_review)                   # its Explore agents are spawned by hand
+        self.assertEqual(re.findall(r"\$PR\b(?! `)", pr_review.replace("отклоняет `$PR`", "")), [])   # prose too
+        kanban = (ROOT / "adapters" / "tracker" / "kanban.md").read_text(encoding="utf-8")
+        self.assertNotIn("BOARD=$(", kanban)
+
+    def test_no_label_section_ends_with_a_colon(self):
+        """A bold-label section ends at the first blank line: a label whose text ends with `:`
+        prints as a list header without its list (step 7, finding 1)."""
+        bad = []
+        for path in iter_files("protocol"):
+            text = path.read_text(encoding="utf-8")
+            for sec, lines in ((s, text.splitlines()[s["start"] - 1:s["end"] - 1]) for s in lib.sections_of(text)):
+                body = [l for l in lines if l.strip()]
+                if sec["level"] >= 4 and body and body[-1].rstrip().endswith(":"):
+                    bad.append(f"{path.relative_to(ROOT)}:{sec['start']} «{sec['title']}»")
+        self.assertEqual(bad, [])
+
+    def test_shell_recipes_run_inside_a_worktree_use_no_variables_or_heredocs(self):
+        """kanban.md's `BOARD=$(…)`, pr-review's `PR=$(…)` and refine's `repos=$(…)` showed the
+        form the recipe forbids (step 7, finding 3). Blocks that run only in the main tree —
+        git.md's research-worktree and submodule teardown (`$wt`) — are allowed."""
+        fence = re.compile(r"```(?:bash|sh|zsh)\n(.*?)```", re.S)
+        refusable = re.compile(r"\$\(|<<|\$(?!\{CLAUDE_PLUGIN_ROOT\})[A-Za-z_{]")
+        bad = []
+        for path in iter_files("skills", "protocol", "adapters"):
+            text = path.read_text(encoding="utf-8")
+            for m in fence.finditer(text):
+                block = m.group(1)
+                if path.name == "git.md" and "$wt" in block:
+                    continue
+                for l in block.splitlines():
+                    code = l.split("#", 1)[0]          # a trailing comment may name the refused form
+                    if refusable.search(code):
+                        bad.append(f"{path.relative_to(ROOT)}: {l.strip()[:80]}")
+        self.assertEqual(bad, [], "переменные shell, `$(…)` или heredoc в рецепте:\n" + "\n".join(bad))
 
     def test_reply_paths_are_copied_not_rebuilt(self):
         """T-9: the architect edited spec.md in the worktree and named the main tree's path."""
@@ -465,7 +751,7 @@ class AgentRulesLint(unittest.TestCase):
         self.assertIn("`- SCRATCH {метка}: {путь} {размер}`", runtime)
         self.assertIn("`SCRATCH` не `clean` — в log.md строкой `- SCRATCH {метка}: {путь} {размер}`",
                       self.flat("skills/implement/SKILL.md"))
-        self.assertIn("`CHECKPOINT GATES`, `SCRATCH`; пропуск", self.flat("skills/implement/SKILL.md"))
+        self.assertIn("`CHECKPOINT GATES`, `SCRATCH`; код 1", self.flat("skills/implement/SKILL.md"))
         finalize = self.flat("skills/finalize/SKILL.md")
         self.assertIn("Временные файлы агентов вне дерева", finalize)
         self.assertIn("собрать до удаления `TASK_DIR`", finalize)

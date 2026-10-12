@@ -9,8 +9,11 @@ description: Creates a well-defined task in the project's tracker from a rough d
 edge cases и затронутые системы, обсуждает с разработчиком, формирует выверенную
 постановку. **Локальных артефактов, веток и `.tasks/{id}/` не создаёт.**
 
-Пролог, адаптеры, диалог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`,
-`${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`. Порт: tracker (возможность `create`
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Сначала: `runtime.md` «Пролог скила», «Спавн агентов»; `dialog.md` целиком.
+Порт: tracker (возможность `create`
 обязательна; без неё скил сообщает, что адаптер задачи создавать не умеет).
 
 ## Активация

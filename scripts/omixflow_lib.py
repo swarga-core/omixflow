@@ -318,6 +318,65 @@ def replace_managed_block(text: str, kind: str, body: str, before: Optional[str]
     return text[:starts[0].end()] + "\n" + content + text[end.start():]
 
 
+# ------------------------------------------------------------ protocol sections
+
+_HEADING_RE = re.compile(r"^(#{2,3}) (.+?)\s*$")
+_LABEL_RE = re.compile(r"^(?:- )?\*\*([^*\n]+?)\*\*")   # a paragraph or a list item opened by a bold label
+
+
+def sections_of(text: str) -> List[Dict[str, Any]]:
+    """Sections of a protocol file (runtime.md, «Чтение протокола»): `##` and `###` headings
+    and the bold labels that open a paragraph (`**Отказ записи.**`), fence-aware — a heading
+    inside a ``` block (a template) is text, not a boundary. Each: {level, title, start, end}
+    with 1-based line numbers, end exclusive. A `##` section runs to the next `##`, a `###` to
+    the next `##`/`###`, a label to the end of its paragraph."""
+    lines = text.splitlines()
+    found: List[Dict[str, Any]] = []
+    fence = False
+    for i, line in enumerate(lines):
+        if line.startswith("```"):
+            fence = not fence
+            continue
+        if fence:
+            continue
+        m = _HEADING_RE.match(line)
+        if m:
+            found.append({"level": len(m.group(1)), "title": m.group(2).strip(), "start": i + 1, "end": None})
+            continue
+        m = _LABEL_RE.match(line)
+        if m and (i == 0 or not lines[i - 1].strip() or line.startswith("- ")):
+            found.append({"level": 4, "title": m.group(1).strip().rstrip("."), "start": i + 1, "end": None})
+    for n, sec in enumerate(found):
+        end = len(lines) + 1
+        if sec["level"] == 4:
+            j = sec["start"]
+            while j < len(lines) and lines[j].strip() and not (lines[j].startswith("- ") and _LABEL_RE.match(lines[j])):
+                j += 1   # a labelled list item ends at the blank line or at the next labelled item
+            end = j + 1
+        else:
+            for later in found[n + 1:]:
+                if later["level"] <= sec["level"]:
+                    end = later["start"]
+                    break
+        sec["end"] = end
+    return found
+
+
+def sections_named(text: str, title: str) -> List[Tuple[Dict[str, Any], List[str]]]:
+    """Every section called TITLE (case-insensitive, trailing period ignored) with its lines:
+    headings are unique per file, a bold label may repeat."""
+    wanted = " ".join(title.split()).rstrip(".").lower()
+    lines = text.splitlines()
+    return [(sec, lines[sec["start"] - 1: sec["end"] - 1]) for sec in sections_of(text)
+            if sec["title"].rstrip(".").lower() == wanted]
+
+
+def section_lines(text: str, title: str) -> Optional[Tuple[Dict[str, Any], List[str]]]:
+    """The first section called TITLE and its lines; None when the file has no such section."""
+    matches = sections_named(text, title)
+    return matches[0] if matches else None
+
+
 # ------------------------------------------------------------ decision points
 
 DIALOG_PATH = PLUGIN_ROOT / "protocol" / "dialog.md"

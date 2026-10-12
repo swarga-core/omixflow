@@ -6,6 +6,9 @@ requires:
   tools: [mcp__serena__*]
   bin: [node]
 scripts: {}
+tests:                                   # test_conventions machine-readable (report.py check)
+  files: ["**/*.test.ts", "**/*.test.tsx", "**/*.a11y.test.tsx", "**/*.variants.test.tsx", "**/*.visual.test.tsx"]
+  declaration: '^\s*(it|test)\s*\('
 ---
 
 # Адаптер lang: TypeScript / JavaScript

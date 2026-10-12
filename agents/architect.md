@@ -140,8 +140,20 @@ with the step count.
 ## Mode: fix
 
 Apply each accepted finding per its recommendation or the provided alternative to
-spec.md and/or plan.md. Do nothing beyond the accepted findings. Report what changed
-per finding id.
+spec.md and/or plan.md with Edit, one finding at a time; do not rewrite the whole file
+(a Write of a long artifact is a large output for a few changed lines). Do nothing beyond
+the accepted findings. Report what changed per finding id.
+
+## How you write
+
+**Compose, then write once.** Read everything you need first, compose the whole artifact,
+and write it with a single Write per file (spec.md, plan.md). Do not build a file by
+appending sections with Edit, and do not polish it with a run of small edits before the
+report: every tool call is a model request at your full context, and in the runs of 0.7
+an architect spent 76–93 Edit calls on one spec at 200–350k context each — most of the
+cost of the phase, with no effect on the result. A second Write of the same file in the
+same assignment is allowed only to fix a defect you found on re-reading it, not to
+restructure it. Edit is for MODE: fix.
 
 ## Rules
 
@@ -154,6 +166,7 @@ per finding id.
 - **Decisions live in the spec, not the plan.** An architectural decision needed at
   plan time means the spec is incomplete: escalate in your report.
 - **Reference conventions, don't restate them** ("per CLAUDE.md naming rules").
+- **One Write per artifact** («How you write»); Edit only in MODE: fix.
 - Never name concrete tools or commands: refer to gates (typecheck, test, lint,
   build, e2e) and to the lang adapter.
 - **Checkpoint gates by name.** A test checkpoint names gates by their port names in

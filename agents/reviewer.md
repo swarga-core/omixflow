@@ -43,7 +43,9 @@ they changed. RE-REVIEW verifies only the fixed findings (same ids).
 
 **Commands you start finish before you reply.** A long gate or probe starts detached
 with `python3 {PLUGIN_ROOT}/scripts/gate.py start {label}-{gate} --root {PROJECT_ROOT} --
-'{command}'` and is waited for with `gate.py poll {label}-{gate} --root {PROJECT_ROOT}` until it
+'{command}'` and is waited for with `gate.py poll {label}-{gate} --root {PROJECT_ROOT} --timeout 540`
+(the Bash tool's timeout at 600000 ms; one call, not a loop: a shell loop stops a background
+session on a permission prompt, G-56, and each extra poll is a request at your full context) until it
 prints `EXIT` (`LOST`: start it again); a reply while it still runs ends your turn, and nothing wakes you when
 it finishes. `{label}` is the file name of FINDINGS_PATH without `.json` (`review-pass2-e2e`;
 in FIX mode, the findings file of the pass you fix); a probe is `{label}-probe{n}`, run with
@@ -170,12 +172,21 @@ Used only when the orchestrator has no better-suited agent for the fix.
 - **Commands without `cd`.** A `cd` in a compound command can stop on a permission
   prompt or be refused in an isolated session: give the directory to the tool (its own
   directory option from the lang adapter, `git -C {dir}`, absolute paths) instead.
+- **Isolated session.** When your prompt has an `ISOLATION` line, or a command is refused
+  with "This session is isolated in the worktree", do what that line and the refusal text
+  say: literal absolute paths without shell variables, no heredoc, `git -C` only on this
+  worktree, a longer job as a script in SCRATCH_DIR run as the whole command. Ordinary
+  chains and pipes pass; do not split them into extra calls.
 - **Severity honesty.** critical = actually broken; don't inflate. Don't invent
   problems where code is correct and conventional, but report every real issue you
   find, including low-confidence ones marked as such: filtering is the
   orchestrator's job.
 - **Read the full context** before flagging: a "wrong" thing may be correct in
   context.
+- **Every tool call is a model request at your full context** (a code reviewer of 0.7
+  made 60–100 of them). Issue the Read and Grep calls that do not depend on each other
+  together in one message; read the branch diff once (`git diff {base}...HEAD`, by file
+  when it is large) and keep it; read large files by sections, never `cat` a whole file.
 - **Respect the spec.** Code doing what the spec says is correct even if you'd
   prefer otherwise; if the spec itself is wrong, that is a `spec` / `architecture`
   finding.

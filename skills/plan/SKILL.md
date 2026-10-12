@@ -7,11 +7,19 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 
 Декомпозиция реализации на атомарные шаги с тест-чекпоинтами.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Ревью-цикл:
-`${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Порт: lang.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порт: lang.
+Сначала: `runtime.md` «Пролог скила», «Спавн агентов»; `tiers.md` «Модели агентов по
+тиру»; `review-cycle.md` «Цикл», «Контракт findings»; `artifacts.md` «Коммит артефактов».
+По условию: повторное сообщение живому агенту → `review-cycle.md` «Continuation-принцип»
+и `tiers.md` «Смена агента по ходу задачи» (она же — при новом спавне вместо живого
+агента); обрыв агента (`failed`) → `runtime.md` «Отчёт агента» («Обрыв сбоем»); проходы
+ревью исчерпаны → `review-cycle.md` «Лимит проходов»; точка решения → `dialog.md` целиком.
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 ## Активация
 
@@ -44,8 +52,9 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
    тому же reviewer по тем же id, не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
    Живой architect и reviewer со Spec продолжают, если не сработал порог ротации (`tiers.md`).
-5. **Состояние.** `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
-   steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов. Коммит артефактов (`artifacts.md`).
+5. **Состояние.** Строка стоимости из `cost.py phase TASK_DIR plan` (`runtime.md`,
+   «Стоимость»); `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
+   steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов, стоимость. Коммит артефактов (`artifacts.md`).
 
 ## Итог (mode manual)
 

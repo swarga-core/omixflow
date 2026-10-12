@@ -6,6 +6,9 @@ requires:
   tools: [mcp__serena__*]
   bin: [python3]
 scripts: {}
+tests:
+  files: ["tests/test_*.py"]
+  declaration: '^\s*def test_'
 ---
 
 # Адаптер lang: Python (проектная замена для репозитория плагина)

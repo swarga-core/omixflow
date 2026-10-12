@@ -77,7 +77,10 @@ the lang adapter's long_running section) starts detached with
 finished, `RUNNING` means poll again, `LOST` means the gate process died: start it again.
 `{label}` is the file name of REPORT_PATH without `.md` (`implement-step3-build`,
 `review-sync1-build`): never invent a name, the orchestrator reads the log by it, and the
-report names it on the gate's line. **Never end your reply while a command you
+report names it on the gate's line. Poll with `--timeout 540` and the Bash tool's timeout
+at 600000 ms: one call waits nine minutes; six polls of 100 s are six requests at your
+full context, and a shell loop around `poll` (`until …; do sleep …`) stops a background
+session on a permission prompt (G-56). **Never end your reply while a command you
 started is still running**: a reply like "waiting for the gates" ends your turn, and
 nothing wakes you when the gate finishes. The report comes after every gate has an
 exit code.
@@ -127,16 +130,45 @@ change (a banned-symbols list, a shared config), when it is restored within the 
 probe and `git diff` of that file is empty afterwards: the ban covers changes that
 stay in the step's delta.
 
-Restore from a copy, never from git. Your step is not committed yet: `git checkout`
-or `git restore` of the mutated file erases your implementation together with the
-probe. Before mutating, copy the file next to itself (`cp {file} {file}.orig`),
-mutate, run the test, then restore with `cp {file}.orig {file}` and remove the copy
-(`rm {file}.orig`). Do not restore with `mv`: it brings back the copy's old modification
-time, older than the mutant's build outputs, and a build that decides by modification
-time keeps the mutated binary for the next gates. Afterwards check that no `.orig` copy
-is left and that `git diff` of the file shows exactly your step's change (not that it is
-empty). After a series of probes, run the step's gates as a full rebuild when the lang
-adapter names one (its `verify` section): an incremental cache may still hold a mutant.
+**One call per probe: `probe.py`.** You declare the mutation, the script does the rest —
+a green baseline run, copy, mutate, `--check`, run the test, restore with `cp`, verify the
+file is byte for byte what it was, print the MUTATIONS line:
+
+```
+python3 {PLUGIN_ROOT}/scripts/probe.py run --root {PROJECT_ROOT} --test {test name} \
+  --file {source file} --cmd '{single-test command from the lang adapter}' \
+  --replace '{exact code to break}' --with '{broken code}'      # or --patch {diff in SCRATCH_DIR}
+  [--check '{typecheck or build}'] [--rebuild '{full rebuild from the adapter}']
+```
+
+Several probes of one step go into one `probe.py batch --root … --spec {SCRATCH_DIR}/{label}/probes.json
+--rebuild '…'` (a JSON list of `{test, file, cmd, replace, with | patch, check}`): one call
+instead of four or five per test. Call the script with the Bash tool's timeout at 600000 ms
+(its own `--timeout` per command is 240 s, so an endless mutant is reported, not killed
+with the call). A call expected to run past nine minutes — a slow suite, several builds,
+an engine's test runner, `run` or `batch` alike — goes through `gate.py`: `gate.py start
+{label}-probes --root {PROJECT_ROOT} -- 'python3 {PLUGIN_ROOT}/scripts/probe.py …'`, then `gate.py poll
+{label}-probes --root {PROJECT_ROOT} --timeout 540 --tail 200`; the report lines come from
+its log. Copy the `- {test} ← … → RED` lines of the output into
+MUTATIONS as they are (the summary and the test output tails are not report lines). Exit
+codes: 0 — RED; 1 — GREEN: strengthen the test and probe again; 3 — `no probe possible`:
+the mutant fails `--check`, the line goes into MUTATIONS with that reason; 2 — the probe
+was not run (`PROBE NOT RUN: …`): the test is not green without the mutant, OLD is
+missing or ambiguous, the patch does not apply or touches another file, a copy is left
+from a killed probe (`probe.py restore --root … --file …` puts it back): fix the call and
+run again, such a line never goes into MUTATIONS. Give `--check` when the adapter has a
+typecheck or build: a mutant that does not compile turns every test red and proves
+nothing. Give `--rebuild` when the lang adapter names a full rebuild (its `verify`
+section) — once, on the last probe of the series or in `batch`: an incremental cache may
+still hold a mutant. OLD or NEW with quotes, backslashes or `$`: use the batch JSON spec or
+`--patch` (a diff written by a script), not shell quoting. By hand (the script is
+unavailable), the same recipe: restore from a copy, never from git — `git checkout` or
+`git restore` of the mutated file erases your uncommitted step with the probe; `cp
+{file} {file}.orig`, mutate, run, `cp {file}.orig {file}`, `rm {file}.orig` — `cp`, not
+`mv`, which brings back the copy's old modification time and lets a build that decides by
+it keep the mutated binary (MEW-6); afterwards no `.orig` copy is left, `git diff` of
+the file shows exactly your step's change (not that it is empty), and after the series
+the gates run as a full rebuild when the adapter names one.
 
 ## Tooling
 
@@ -144,6 +176,12 @@ Symbol-level navigation before editing (overview, read one symbol, find referenc
 to see who uses it). Multi-file refactors go through the refactoring tools the lang
 adapter enables for this project, so all call sites update together; trivial
 in-file edits use plain Edit.
+
+**Every tool call is a model request at your full context** (a coder of 0.7 made 100–180
+of them at 240–310k). Issue the Read, Grep and Glob calls that do not depend on each
+other together, in one message. Read a large file by sections (offset and limit, or the
+symbol you need), not whole, and never `cat` a whole file into the context; read a report
+or an artifact once and keep it, the orchestrator does not change it under you.
 
 ## Output format
 
@@ -192,7 +230,7 @@ GATES:
   — a background gate adds its gate.py name: `build: PASS (gate.py {label}-build, EXIT 0)`
 FIX ITERATIONS: {N}/{ITERATION_LIMIT}
 MUTATIONS:
-  - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened}   (a line per new test)
+  - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened} → RED   (a line per new test)
   - {new test} — no probe possible: {why}
   — or "none: no new tests or assertions"
 BYTES CHECK:
@@ -246,6 +284,11 @@ your last step, and a stale tree state sends it after files that do not exist.
   for a grep). Give the directory to the tool instead: its own directory option (the lang
   adapter names it), `git -C {dir}`, absolute paths for linters and search tools; pipe
   another command's output instead of changing into a directory.
+- **Isolated session.** When your prompt has an `ISOLATION` line, or a command is refused
+  with "This session is isolated in the worktree", do what that line and the refusal text
+  say: literal absolute paths without shell variables, no heredoc, `git -C` only on this
+  worktree, a longer job as a script in SCRATCH_DIR run as the whole command. Ordinary
+  chains and pipes pass; do not split them into extra calls.
 - **Scratch outside the task.** Probes, experiments, clones and builds that are not part
   of the step's change go only into SCRATCH_DIR, a subdirectory per report label
   (`{SCRATCH_DIR}/{label}/`; without SCRATCH_DIR — the scratchpad your environment names,

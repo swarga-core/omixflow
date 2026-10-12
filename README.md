@@ -128,6 +128,9 @@ python3 scripts/lead.py show                      # журнал лида: decid
 python3 scripts/sync.py check .tasks/AL-1         # сдвиг базы и стратегия синхронизации (record)
 python3 scripts/sessions.py probe --root .         # запуск сессий задач лидом: probe/launch/status/watch/respawn
 python3 scripts/accept.py plan task/AL-1 --into main  # приёмка мержа лидом: plan/prepare/merge/commit/abort/cleanup
+python3 scripts/cost.py session --session {id}     # стоимость сессии по транскриптам: роли, контекст, перестройки кэша; phase — строка в log.md
+python3 scripts/probe.py run --root . --test t --file f --cmd 'cmd' --replace OLD --with NEW  # мутационная проба одним вызовом; batch — пробы шага
+python3 scripts/report.py check --role coder --report .tasks/AL-1/reports/implement-step1.md  # сверка отчёта агента с деревом и логами гейтов
 ```
 
 ## Статус
@@ -167,6 +170,10 @@ SendMessage, исполнитель фикса ревью по файлам пр
 подпункт, выделенный лидом, живёт в открытых вопросах сессии (`state.py ack --add`).
 `0.7.3`: после перезапуска сессии агенты продолжаются по id (`agent_ctx.py`); оборванный сбоем
 агент получает то же задание; область коммита из адаптера workspace (`commit_message`).
+`0.8.0`: расход токенов — `cost.py` (стоимость сессии и фазы, строка в log.md), диета протокола
+(скилы читают секции, `resolve.py section`), architect одним Write, `probe.py` (мутационная проба
+одним вызовом), `report.py check` (сверка отчёта агента скриптом вместо чтения), один долгий
+опрос гейтов, рецепты изоляции worktree-сессии (`ISOLATION` в спавне).
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

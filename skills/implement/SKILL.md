@@ -9,11 +9,22 @@ description: Implement phase of the OMIXFlow pipeline — drives the coder agent
 гоняет гейты; tester добавляет тесты, если coder их не покрыл; оркестратор
 коммитит и ведёт состояние.
 
-Пролог и спавн: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Тиры и ротация
-агентов: `${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Порты: lang, workspace.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порты: lang, workspace.
+Сначала: `runtime.md` «Пролог скила», «Спавн агентов», «Отчёт агента», «Гейты»;
+`tiers.md` «Модели агентов по тиру»; `artifacts.md` «Коммит артефактов», «log.md»;
+`worktree.md` «Ловушки».
+По условию: повторное задание живому агенту → `review-cycle.md` «Continuation-принцип»
+и `tiers.md` «Смена агента по ходу задачи» (она же — при новом спавне вместо живого
+агента); обрыв агента (`failed`) → `runtime.md` «Отчёт агента» («Обрыв сбоем»); любой
+вызов `resolve.py verify` (включая план `--paths` до первого шага) отдал непустой
+`checks` или `on_demand` → `runtime.md` «Проверки оркестратора»; точка решения →
+`dialog.md` целиком.
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 **Оркестратор не редактирует файлы проекта, не выполняет замены, не пишет код,
 даже «простой» и «механический».** Вся работа с файлами через coder: он несёт
@@ -72,7 +83,10 @@ workspace (`PORT.md`, «sync»; команды в адаптере). Конфл�
 Для каждого шага N от текущего до последнего:
 
 **2.1 Coder.** Отчёт шага: `REPORT_PATH: {TASK_DIR}/reports/implement-step{N}.md`.
-Если `agents.coder` жив в этой сессии и порог ротации не сработал: SendMessage ему
+Перед заданием — базовая линия дельты: `python3 {корень плагина}/scripts/report.py baseline
+--out {scratchpad оркестратора}/baseline-implement-step{N}.json --root {PROJECT_ROOT}`
+(что в дереве не закоммичено до задания; сверка в 2.2 считает агенту только изменённое
+после неё). Если `agents.coder` жив в этой сессии и порог ротации не сработал: SendMessage ему
 `STEP: N` и `REPORT_PATH` (контекст сохраняется, артефакты перечитывать не нужно).
 Иначе спавн по шаблону runtime.md: `name: coder-{id}` (часть: `coder-{id}-{part}`),
 `STEP: N`, `TASK_DIR`, `ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `PLUGIN_ROOT`,
@@ -84,13 +98,24 @@ workspace (`PORT.md`, «sync»; команды в адаптере). Конфл�
 SendMessage-резюм с требованием сверить `git status` и `git diff` (остатки мутационных
 проб), при повторном stall новый агент. `failed` — не stall (`runtime.md`, «Обрыв сбоем»).
 
-**2.2 Отчёт coder.** Читать файл `REPORT_PATH`, не ответ. Уведомление `failed` без файла —
-повтор того же задания (`runtime.md`, «Обрыв сбоем»). Ответ `done` без
-кода выхода какого-либо гейта или без файла — не отчёт (`runtime.md`, «Отчёт агента»): сразу
-сообщение coder'у «дождись гейтов и отчитайся». Ответ с первой строкой `REPORT_PATH refused
-by the harness` — отчёт: оркестратор проверяет, что он целый (есть `NOTES`), и пишет его
-в `REPORT_PATH` сам, со строкой в log.md (там же, «Отказ записи»). `STATUS: stopped`
-с `GATES: not run` — остановка с причиной, разбор по таблице «Ошибки». Сверка отчёта:
+**2.2 Отчёт coder.** Сначала вид ответа, потом сверка. Уведомление `failed` без файла —
+повтор того же задания (`runtime.md`, «Обрыв сбоем»). Ответ с первой строкой `REPORT_PATH
+refused by the harness` — отчёт: оркестратор проверяет, что он целый (есть `NOTES`), пишет
+его в `REPORT_PATH` сам целиком, с первой строкой, со строкой в log.md (там же, «Отказ
+записи»), дальше как обычный.
+Ответ `done` без файла — не отчёт (`runtime.md`, «Отчёт агента»): сообщение coder'у
+«дождись гейтов и отчитайся». Файл `REPORT_PATH` сверяет скрипт, оркестратор читает
+вердикт, а не отчёт: `python3 {корень плагина}/scripts/report.py check --role coder
+--report {REPORT_PATH} --root {PROJECT_ROOT} --baseline {файл из 2.1} [--also {гейты
+checkpoint шага, если есть}]`. Код 0 — `VERDICT: ok` (дальше 2.3) или `VERDICT: stopped`:
+`STATUS: stopped` с `GATES: not run` — остановка с причиной, разбор по таблице «Ошибки»;
+код 1 — вернуть coder'у текст из вывода сообщением как есть, без пересказа; код 2 — отчёт
+обрезан или его нет: «дождись гейтов и отчитайся»; код 3 — ошибка самого вызова (конфиг,
+`--also`, базовая линия), не агента — поправить и повторить. Строки вердикта после
+`VERDICT` — то, на что оркестратор реагирует вместо чтения отчёта: исходы гейтов (все
+PASS → 2.3, FAIL → ниже), `not declared` — строка в log.md, NOTES — в log.md, строка
+`НЕ СВЕРЕНО` — сверить этот раздел руками. Что сверяет скрипт (руками — только по
+`НЕ СВЕРЕНО` или если скрипт недоступен):
 - `TREE STATE` совпадает со свежим `git status --short` без путей каталога артефактов
   (отчёт, state.yaml и log.md пишутся после снимка); расхождение — вопрос coder'у до
   коммита.
@@ -123,12 +148,16 @@ by the harness` — отчёт: оркестратор проверяет, чт�
 coder тесты не написал, а шаг меняет поведение; шаг это UI-компонент и адаптер
 требует тестов доступности. Не нужен, когда шаг чисто типы или контракты и гейта
 typecheck достаточно, или coder уже покрыл шаг тестами с мутационной проверкой.
-`CODE_BUG` в отчёте tester возвращается coder'у как часть шага. Приём ответа `REPORT_PATH
-refused by the harness` — как в 2.2. Гейты `CHECKPOINT_GATES` tester прогоняет сам
-и называет в `CHECKPOINT GATES`. Отчёт tester'а сверяется
-как в 2.2: `TREE STATE`, `MUTATIONS` по каждому его новому тесту (пробы tester делает
-сам, временной правкой исходника), `BYTES CHECK`, `BACKGROUND GATES` с именами `gate.py`,
-`CHECKPOINT GATES`, `SCRATCH`; пропуск — задание возвращается tester'у.
+Перед спавном — базовая линия `report.py baseline --out {scratchpad}/baseline-implement-tests-step{N}.json`:
+в дереве уже лежит незакоммиченный шаг coder'а, tester'у считается только его дельта.
+`CODE_BUG` в отчёте tester (строка `CODE BUGS FOUND` вердикта) возвращается coder'у как
+часть шага. Вид ответа (`failed`, `REPORT_PATH refused by the harness`, без файла) — как в 2.2. Гейты
+`CHECKPOINT_GATES` tester прогоняет сам и называет в `CHECKPOINT GATES`. Отчёт tester'а
+сверяет тот же скрипт с `--role tester --baseline {файл}` и `--also {CHECKPOINT_GATES}`
+только если они есть (`none` не передавать): `TREE STATE`, `MUTATIONS` по каждому его
+новому тесту (пробы tester делает сам, `probe.py`), `BYTES CHECK`, `BACKGROUND GATES`
+с именами `gate.py`, `CHECKPOINT GATES`, `SCRATCH`; код 1 — текст вывода tester'у как есть,
+коды 0/2/3 — как в 2.2.
 
 **2.4 Проверки оркестратора.** `python3 {корень плагина}/scripts/resolve.py verify --at step`
 до коммита: каждая проверка из `checks` выполняется по своему подразделу адаптера lang,
@@ -145,7 +174,10 @@ Step {N}/{total} of {id}
 
 Область — по правилу адаптера workspace о сообщении коммита (`commit_message`,
 `adapters/workspace/PORT.md`; в адаптере без раздела — его правило в прозе); правила нет —
-без области.
+без области. Сообщение — файлом `{scratchpad}/commit-msg-step{N}.txt` (Write) и одним
+вызовом `git -C {дерево} add {файлы} && git -C {дерево} commit -F {файл}`: heredoc изолированная сессия
+отклоняет, а файл в `TASK_DIR` уходит в карточку (T-11; `runtime.md`, «Формы команд в
+изоляции»).
 
 Часть мультизадачи при `multitask.push: true`: `git push` ветки части после
 первого коммита.
@@ -166,7 +198,8 @@ Step {N}/{total} of {id}
 
 ### 3. Завершение
 
-Все шаги в `steps_done`: log.md `## Implement ✅`, затем `state.py finish TASK_DIR
+Все шаги в `steps_done`: log.md `## Implement ✅` со строкой стоимости из
+`cost.py phase TASK_DIR implement` (`runtime.md`, «Стоимость»), затем `state.py finish TASK_DIR
 implement`. Коммит артефактов (`artifacts.md`).
 
 ## Итог (mode manual)

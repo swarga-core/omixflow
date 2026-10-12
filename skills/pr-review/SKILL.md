@@ -9,15 +9,19 @@ description: Deep, dialog-driven code review of a pull request (or a local branc
 соответствия архитектуре проекта, сверка с project specs затронутых слайсов,
 диалог по findings с ревьюером-человеком, публикация структурного ревью.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Диалог:
-`${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`. Worktree и ловушки:
-`${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Порты: forge (для PR нужны
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Сначала: `runtime.md` «Пролог скила»; `worktree.md` «Ловушки».
+По условию: диалог с ревьюером → `dialog.md` целиком; review-worktree → `worktree.md`
+«Параметры», «Выход». Порты: forge (для PR нужны
 `pr_get`, `pr_files`, `pr_reviews`, `pr_threads`, `review_publish`, `reply`,
 `permalink`), lang, workspace, tracker (опционально, для комментария по ветке).
 
-Скрипт форджа: `PR=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py"
-adapter-script forge pr)`. Все обращения к хостингу идут через него; команды
-адаптера скил не знает.
+Скрипт форджа: его путь печатает `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py"
+adapter-script forge pr`; ниже `{PR}` — `python3 {этот путь}`, подставленный буквально
+(изолированная сессия отклоняет `$PR`: `runtime.md`, «Формы команд в изоляции»). Все
+обращения к хостингу идут через него; команды адаптера скил не знает.
 
 ## Активация
 
@@ -70,8 +74,8 @@ adapter-script forge pr)`. Все обращения к хостингу иду�
 ### 1. Discovery
 
 ```bash
-$PR view {pr}          # owner, repo, number, title, head_ref, head_sha, base_ref, author, body
-$PR files {pr} --names
+{PR} view {pr}          # owner, repo, number, title, head_ref, head_sha, base_ref, author, body
+{PR} files {pr} --names
 git log --oneline {base_ref}..{head_sha}
 ```
 
@@ -82,7 +86,7 @@ PR в состоянии MERGED или CLOSED: ревью ему обычно н
 предложить снести его review-worktree (`git worktree remove .claude/worktrees/pr-{n}`)
 и остановиться; продолжать только по явному подтверждению.
 
-**Re-review detect** (без `--fresh`): `$PR reviews-mine {pr}` даёт `rounds`
+**Re-review detect** (без `--fresh`): `{PR} reviews-mine {pr}` даёт `rounds`
 и `previous_sha`, считая только настоящие ревью (с вердиктом или непустым телом:
 хостинг пишет каждый ответ в тред отдельной пустой записью, они не раунды).
 `rounds == 0` → fresh. Иначе `ROUND = rounds + 1`; `previous_sha == HEAD_SHA` →
@@ -134,7 +138,8 @@ CLAUDE.md: тип репо (по адаптеру workspace: submodule'ы, мо�
   публичным экспортам. Вернуть по группам файлов.
 
 При `WORKING_TREE_MODE != aligned` промпт содержит правило чтения (абсолютные
-пути worktree или `git show`). После агентов лично подтвердить ключевые находки
+пути worktree или `git show`); при `worktree` — ещё строку `ISOLATION` из шаблона спавна
+(`runtime.md`, «Спавн агентов»): Explore-агенты не получают её сами. После агентов лично подтвердить ключевые находки
 чтением. Сохранить `arch-snapshot.md`: цитаты API, границы слайсов, состояние
 project specs (путь и короткий хеш), HEAD_SHA.
 
@@ -160,7 +165,7 @@ superseded, нетривиальные архитектурные решения
 | G. Spec drift | project specs затронутых слайсов не обновлены (шаг 3) |
 
 Каждая находка: **где** (файл:строка, permalink с pinned HEAD_SHA через
-`$PR permalink`), **что не так** (3–5 аспектов), **возможные направления** (2–4,
+`{PR} permalink`), **что не так** (3–5 аспектов), **возможные направления** (2–4,
 без инструкций).
 
 ### 5. Черновик
@@ -203,13 +208,13 @@ Multi-file: одна проблема в двух файлах → один inli
 со ссылками друг на друга; cross-cutting и G → в теле.
 
 ```bash
-$PR build-payload --dir .review/{NAME} --sha {HEAD_SHA} --event {REQUEST_CHANGES|COMMENT}
+{PR} build-payload --dir .review/{NAME} --sha {HEAD_SHA} --event {REQUEST_CHANGES|COMMENT}
 ```
 
 ### 8. Validate
 
 ```bash
-$PR validate --dir .review/{NAME} {pr}
+{PR} validate --dir .review/{NAME} {pr}
 ```
 
 Строка вне diff hunks не принимается хостингом. Для каждой проблемы: перенести
@@ -223,7 +228,7 @@ payload; повторить валидацию.
 AskUserQuestion: Отправить (Recommended) / Поправить / Отменить.
 
 ```bash
-$PR submit --dir .review/{NAME} {pr}
+{PR} submit --dir .review/{NAME} {pr}
 ```
 
 Ошибка валидации строк на стороне хостинга → шаг 8; ошибка авторизации →
@@ -257,7 +262,7 @@ PR и для веток без хостинга.
 
 ### R1. Инвентарь тредов
 
-`$PR threads {pr} --mine` → `history.md`: по каждому моему треду id, id последнего
+`{PR} threads {pr} --mine` → `history.md`: по каждому моему треду id, id последнего
 комментария (для ответа), resolved, outdated, путь и строка, первые двести
 символов, `Action: Pending check`. Resolved сразу `Skip`. Чужие треды отдельным
 списком со `Skip` по умолчанию. Секция `## Spec updates since previous review`
@@ -326,13 +331,13 @@ APPROVE с коротким телом-верификацией («провер�
 ### R9. Submit, строго последовательно
 
 ```bash
-$PR reply {pr} --file .review/{NAME}/replies.json   # по одному, стоп на первой ошибке
-$PR submit --dir .review/{NAME} {pr}                # если есть батч
+{PR} reply {pr} --file .review/{NAME}/replies.json   # по одному, стоп на первой ошибке
+{PR} submit --dir .review/{NAME} {pr}                # если есть батч
 ```
 
 Ответы нельзя класть в батч ревью: хостинг не принимает `in_reply_to` там.
 При частичном сбое ответов: не повторять автоматически, сначала проверить через
-`$PR threads`, не опубликован ли ответ, затем продолжить с упавшего. При ошибке
+`{PR} threads`, не опубликован ли ответ, затем продолжить с упавшего. При ошибке
 остановиться, не откатывать, сообщить, что опубликовано.
 
 ### R10. Итог

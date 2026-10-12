@@ -8,6 +8,12 @@
     resolve.py base                    [--project DIR]
     resolve.py repo NAME               [--project DIR] [--json]   # workspace.repos entry, ref → sha
     resolve.py repo --list             [--project DIR]            # names, comma-separated
+    resolve.py section FILE TITLE...                              # print the named sections of a protocol file
+        FILE is `runtime.md` (a bare name: the plugin's protocol), `protocol/runtime.md` or any path;
+        a TITLE is a `##`/`###` heading or a bold paragraph label in «…», matched whole
+        (case-insensitive) — the arguments are joined, so an unquoted «Отчёт агента» split by the
+        shell still works; a heading inside a ``` block is not a boundary. Unknown title: exit 2
+        with the file's titles.
     resolve.py route POINT             [--project DIR]            # lead route: JSON {point, kind, mode, timeout}
     resolve.py lead                    [--project DIR]            # lead settings: JSON {default, timeout, stall, actions, notify}
     resolve.py verify --at MOMENT      [--project DIR] [--task DIR | --base B] [--since REF] [--paths P...]
@@ -37,9 +43,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
@@ -83,6 +90,49 @@ def cmd_repo(ns: argparse.Namespace, root: Path) -> int:
     return 0 if sha else 1
 
 
+def section_titles(args: List[str]) -> List[str]:
+    """Titles from the arguments after FILE. The shell splits an unquoted «Отчёт агента» into
+    two arguments, so the arguments are joined and the titles are taken from the «…» (or "…")
+    pairs; without any quotes the whole rest is one title."""
+    joined = " ".join(args).strip()
+    pattern = re.compile(r"«([^»]+)»|\"([^\"]+)\"")
+    titles = [" ".join((a or b).split()) for a, b in pattern.findall(joined)]
+    if not titles:
+        return [" ".join(joined.split())] if joined else []
+    leftover = " ".join(pattern.sub(" ", joined).split())
+    if leftover:
+        raise lib.OmixflowError(f"текст вне «…» непонятен: {leftover!r}; каждое название — в «…»")
+    return titles
+
+
+def cmd_section(ns: argparse.Namespace) -> int:
+    if len(ns.args) < 2:
+        raise lib.OmixflowError("укажи файл и секцию: section runtime.md «Пролог скила»")
+    given = ns.args[0]
+    if "/" in given or Path(given).is_absolute():   # a path: as given
+        candidates = [Path(given), lib.PLUGIN_ROOT / given]
+    else:                                             # a bare name: the plugin's protocol first
+        candidates = [lib.PLUGIN_ROOT / "protocol" / given, lib.PLUGIN_ROOT / given, Path(given)]
+    path = next((p for p in candidates if p.is_file()), None)
+    if path is None:
+        raise lib.OmixflowError(f"файл не найден: {given}")
+    text = path.read_text(encoding="utf-8")
+    missing = []
+    for title in section_titles(ns.args[1:]):
+        matches = lib.sections_named(text, title)
+        if not matches:
+            missing.append(title)
+            continue
+        for sec, lines in matches:   # a label repeated in a file prints every occurrence
+            print(f"=== {path.name}:{sec['start']}-{sec['end'] - 1} {sec['title']}")
+            print("\n".join(lines).rstrip())
+            print()
+    if missing:
+        titles = ", ".join(f"«{s['title']}»" for s in lib.sections_of(text))
+        raise lib.OmixflowError(f"в {path.name} нет секций {missing}; есть: {titles}")
+    return 0
+
+
 def cmd_verify(ns: argparse.Namespace, root: Path) -> int:
     base, checked = ns.base, None
     if ns.task is not None:
@@ -101,7 +151,7 @@ def cmd_verify(ns: argparse.Namespace, root: Path) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("kind", choices=["adapter", "adapter-script", "agent", "script", "base", "repo", "route", "lead",
-                                     "verify"])
+                                     "verify", "section"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--fallback-project", type=Path, default=None)
@@ -114,6 +164,13 @@ def main(argv=None) -> int:
     ap.add_argument("--since", default=None)
     ap.add_argument("--also", nargs="+", action="extend", default=None)
     ns = ap.parse_args(argv)
+
+    if ns.kind == "section":  # needs no project: the plugin's own protocol
+        try:
+            return cmd_section(ns)
+        except lib.OmixflowError as e:
+            print(f"omixflow: {e}", file=sys.stderr)
+            return 2
 
     foreign_bare = False  # foreign repository without its own flow.yaml
     home: Optional[Path] = None

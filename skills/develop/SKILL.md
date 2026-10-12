@@ -9,12 +9,17 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 вызывает фазовые скилы по очереди и решает, что дальше. Для мультизадачи ведёт
 цикл по частям.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Фазы и инварианты:
-`${CLAUDE_PLUGIN_ROOT}/protocol/phases.md`. Тиры:
-`${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
-`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Диалог:
-`${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Сначала: `runtime.md` «Пролог скила»; `phases.md` целиком; `tiers.md` «Критерии»;
+`dialog.md` целиком.
+По условию: описание задачи содержит блок мультизадачи → `multitask.md` целиком;
+`--lead` или `lead` в состоянии → секции `lead.md` из пролога (п. 7) и ещё «Вето»;
+профиль со свойством `triage: false` или `mutates: false` (`state.py get … profile
+--json`) → `profiles.md` «Свойства», «Профиль research»; трекер с возможностью
+`artifacts` → `artifacts.md` «Хранение в задаче трекера»; резюм задачи с `phase: done` →
+`artifacts.md` «log.md» (секция итерации).
 
 ## Активация
 

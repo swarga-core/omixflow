@@ -8,12 +8,20 @@ description: Spec phase of the OMIXFlow pipeline — produces spec.md describing
 Task spec: дельта, а не полное состояние. Что меняется, какие контракты затронуты,
 какие решения приняты и что вне scope.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Ревью-цикл:
-`${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Тиры:
-`${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Порт: lang.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порт: lang.
+Сначала: `runtime.md` «Пролог скила»; `artifacts.md` «Коммит артефактов».
+По условию: тир M или L → `runtime.md` «Спавн агентов», `review-cycle.md` «Цикл»,
+«Контракт findings», `tiers.md` «Модели агентов по тиру»; повторное сообщение живому
+агенту → `review-cycle.md` «Continuation-принцип» и `tiers.md` «Смена агента по ходу
+задачи» (она же — при новом спавне вместо живого агента); обрыв агента (`failed`) →
+`runtime.md` «Отчёт агента» («Обрыв сбоем»); проходы ревью исчерпаны → `review-cycle.md`
+«Лимит проходов»; точка решения → `dialog.md` целиком.
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 ## Активация
 
@@ -66,7 +74,9 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    по ходу задачи»).
 5. Состояние: `state.py finish TASK_DIR spec`. log.md: `## Spec ✅`, findings, проходов.
 
-Во всех тирах коммит артефактов после фазы (`artifacts.md`). Фактические имена агентов (после
+Во всех тирах перед `finish` — строка стоимости из `cost.py phase TASK_DIR spec` в секцию
+`## Spec ✅` (`runtime.md`, «Стоимость»; в S и M фаза plan идёт в ту же строку), затем коммит
+артефактов после фазы (`artifacts.md`). Фактические имена агентов (после
 ротации — с суффиксом) записать в состояние: `state.py set TASK_DIR agents.architect={имя}
 agents.reviewer={имя}`.
 

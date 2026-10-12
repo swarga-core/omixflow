@@ -119,6 +119,12 @@ Commands without `cd`: a `cd` in a compound command can stop on a permission pro
 refused in an isolated session; give the directory to the tool (`git -C {dir}`, absolute
 paths) instead.
 
+Isolated session: when your prompt has an `ISOLATION` line, or a command is refused with
+"This session is isolated in the worktree", do what that line and the refusal text say:
+literal absolute paths without shell variables, no heredoc, `git -C` only on this worktree, a
+longer job as a script in SCRATCH_DIR run as the whole command. Ordinary chains and pipes
+pass; do not split them into extra calls.
+
 Experiments, clones and builds go only into SCRATCH_DIR (without it — the scratchpad your
 environment names, `{your name}/`, or `researcher/` when you have none): never bare `/tmp`,
 never the project tree. Remove them before the report. If a removal command is denied, do
@@ -126,7 +132,10 @@ not try another form of removal: leave them and name them in your ≤10-line rep
 `SCRATCH: {path} {size}` (MEW-17: a researcher's 101 MB stayed in `/tmp`).
 
 Activate the navigation tools on the absolute `PROJECT_ROOT` from your prompt, not on
-the current working directory: the session may sit in another repository. Use the symbol-level navigation tools the lang adapter lists (overview of a file's
+the current working directory: the session may sit in another repository. Every tool call
+is a model request at your full context: issue the Read and Grep calls that do not depend
+on each other together in one message, and read large files by sections, never `cat`
+a whole file. Use the symbol-level navigation tools the lang adapter lists (overview of a file's
 symbols, reading one symbol, finding references) instead of grepping and reading
 whole files. Read full files only when symbol-level reads are not enough. Plain text
 search is for non-code text (docs, config). For WEB_RESEARCH spawn `omixflow:web-fetcher`

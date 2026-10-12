@@ -8,12 +8,23 @@ description: Review phase of the OMIXFlow pipeline — runs the full verify gate
 Целостная проверка реализации задачи перед финализацией. Это внутренний гейт
 качества; ревью чужого PR с публикацией это `pr-review`.
 
-Пролог и спавн: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Ревью-цикл
-и контракт findings: `${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Порты:
-lang, workspace.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порты: lang, workspace.
+Сначала: `runtime.md` «Пролог скила», «Спавн агентов», «Отчёт агента», «Гейты»;
+`tiers.md` «Модели агентов по тиру»; `review-cycle.md` «Цикл», «Контракт findings»;
+`artifacts.md` «Коммит артефактов», «log.md»; `worktree.md` «Ловушки».
+По условию: повторное задание живому агенту → `review-cycle.md` «Continuation-принцип»
+и `tiers.md` «Смена агента по ходу задачи» (она же — при новом спавне вместо живого
+агента); обрыв агента (`failed`) → `runtime.md` «Отчёт агента» («Обрыв сбоем»); проходы
+ревью исчерпаны или красный гейт после approve → `review-cycle.md` «Лимит проходов»;
+любой вызов `resolve.py verify` отдал непустой `checks` или `on_demand` → `runtime.md`
+«Проверки оркестратора»; `sync.py check` даёт `moved: true` → порядок синхронизации из
+`skills/implement/SKILL.md`, «1a. Синхронизация с базой»; точка решения → `dialog.md` целиком.
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 ## Активация
 
@@ -30,7 +41,7 @@ lang, workspace.
 
 `sync.py check TASK_DIR`; `moved: true` → синхронизация по возможности `sync` порта
 workspace до гейтов и до ревью: ревью видит итоговое дерево, и разрешения конфликтов
-входят в его предмет. Порядок как в `implement`, «Синхронизация с базой».
+входят в его предмет. Порядок — `skills/implement/SKILL.md`, «1a. Синхронизация с базой».
 
 ### 1. Полный прогон гейтов и проверок оркестратора
 
@@ -86,8 +97,15 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 architecture → решение в точке `finding`. Один файл в проходе — один агент. Порядок
 coder и tester — `review-cycle.md`, шаг 3. Coder получает `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md`, второе
 задание прохода — `{TASK_DIR}/reports/review-spec-sync-pass{N}.md`; tester —
-`{TASK_DIR}/reports/review-tests-pass{N}.md`. Отчёт coder'а сверяется как в `implement`,
-2.2 (кроме гейтов checkpoint: у пакета фиксов шага плана нет), отчёт tester'а — как в 2.3. Перед
+`{TASK_DIR}/reports/review-tests-pass{N}.md`. Перед каждым заданием прохода — базовая
+линия `report.py baseline --out {scratchpad}/baseline-{метка отчёта}.json`: coder, tester
+и coder снова делят один незакоммиченный пакет, и каждому считается только его дельта.
+Вид ответа (`failed`, `refused`, без файла) — как в implement 2.2; затем отчёт сверяет
+скрипт: `python3 {корень плагина}/scripts/report.py check --role coder|tester --report
+{REPORT_PATH} --root {PROJECT_ROOT} --baseline {файл}` без `--also` (у пакета фиксов
+гейтов checkpoint нет); код 0 — вердикт с исходами гейтов и NOTES, код 1 — текст
+вывода исполнителю как есть, код 2 — «дождись гейтов и отчитайся» (`runtime.md`, «Отчёт
+агента»), код 3 — ошибка вызова, поправить. Перед
 каждым пакетом — порог ротации (`tiers.md`). Re-review: SendMessage ревьюеру кода из
 `agents.reviewer_code` по тем же id. Не больше `limits.review_passes` проходов
 (`review-cycle.md`, «Лимит проходов»), затем эскалация нерешённых findings в точке
@@ -111,6 +129,7 @@ fix[({область})]: address review findings for {id} (pass {N})
 workspace о сообщении коммита, как в implement 2.5. В MEW-25 шаблон без места под область
 дал коммит фиксов без зоны, которую требует адаптер mewria.
 
+Строка стоимости из `cost.py phase TASK_DIR review` (`runtime.md`, «Стоимость»), затем
 `state.py finish TASK_DIR review`; log.md:
 
 ```markdown
@@ -118,6 +137,7 @@ workspace о сообщении коммита, как в implement 2.5. В MEW-
 - Findings: {N} total ({C} critical, {W} warning, {S} suggestion)
 - Принято: {N}, отклонено: {N}, отложено: {N}
 - Проходов: {M}
+{строка `- Стоимость: …` из cost.py}
 ```
 
 Отклонённые и отложенные findings записываются с причиной строкой решения

@@ -9,10 +9,14 @@ description: Clarifies a tracker task before development — finds gaps, ambigui
 с картой зависимостей. Не создаёт локальных файлов, не трогает git. Запускается для
 любой задачи, в любой момент, многократно.
 
-Пролог и диалог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`,
-`${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`. Порт: tracker. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
-`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порт: tracker.
+Сначала: `runtime.md` «Пролог скила»; `dialog.md` целиком.
+По условию: `--multitask` → `multitask.md` «Идентификация», «Карта зависимостей»,
+«Жизненный цикл» (подсекция «Refine»), «Дисциплина записи блока» и `profiles.md`
+«Каталог».
 
 ## Активация
 
@@ -128,11 +132,11 @@ description: Clarifies a tracker task before development — finds gaps, ambigui
    читают результат друг друга, зависимы.
 3. **Валидация.** Сохранить текущее описание во временный файл в scratchpad и:
    ```bash
-   repos=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" repo --list)
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" repo --list      # печатает список репозиториев
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" seed --from {desc.md} \
      --parts "{slug} — {title}" ... --depends "{deps}" ... \
-     --profile {profile} [--repo "{repo|—}" ...] --repos "$repos" > {desc.new.md}
-   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" validate --from {desc.new.md} --repos "$repos"
+     --profile {profile} [--repo "{repo|—}" ...] --repos "{список}" > {desc.new.md}
+   python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" validate --from {desc.new.md} --repos "{список}"
    python3 "${CLAUDE_PLUGIN_ROOT}/scripts/multitask.py" waves --from {desc.new.md}
    ```
    Показать волны разработчику: это ответ на вопрос, что можно делать параллельно.

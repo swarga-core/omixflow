@@ -23,8 +23,8 @@ scripts:
 Все операции выполняет скрипт `board` (`resolve.py adapter-script tracker board`):
 
 ```bash
-BOARD=$(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter-script tracker board)
-python3 "$BOARD" get T-12
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" adapter-script tracker board   # печатает путь скрипта
+python3 {путь скрипта board} get T-12       # путь подставлен буквально: изолированная сессия отклоняет `$BOARD`
 ```
 
 В `.tasks/board` не заходить (`cd`): каталог сессии там останется, и следующий `git commit`

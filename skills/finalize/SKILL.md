@@ -7,14 +7,26 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 
 Фиксация результата. Код здесь не меняется.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Маршрутизация гочей:
-`${CLAUDE_PLUGIN_ROOT}/protocol/phases.md`. Worktree:
-`${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Мультизадача:
-`${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
-`${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Порты: tracker, forge, workspace.
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Порты: tracker, forge, workspace.
+Сначала: `runtime.md` «Пролог скила», «Гейты», «Стоимость»; `artifacts.md` «Коммит
+артефактов», «log.md»; `worktree.md` «Ловушки»; `dialog.md` целиком.
+По условию: сессия без лида → `phases.md` «Finalize: маршрутизация гочей»; под лидом →
+`lead.md` «Сдача лиду», «Гочи, бэклог и память» (сверх пролога, п. 7); `sync.py check`
+даёт `moved: true` → `runtime.md` «Спавн агентов», «Отчёт агента», `review-cycle.md`
+«Цикл», «Контракт findings», `tiers.md` «Модели агентов по тиру» и порядок синхронизации
+из `skills/implement/SKILL.md`, «1a. Синхронизация с базой»; сессия в worktree →
+`worktree.md` «Выход»; `--part` или `--multitask` → `multitask.md` «Жизненный цикл»
+(с подсекцией «Кросс-репо»), «Реконсиляция», «Дисциплина записи блока»; `finalize_artifact: research`
+→ `profiles.md` «Профиль research»; трекер с возможностью `artifacts` → `artifacts.md`
+«Хранение в задаче трекера»; непустой `checks` или `on_demand` у `resolve.py verify` →
+`runtime.md` «Проверки оркестратора»; красное перед сдачей → `review-cycle.md`
+«Лимит проходов»; обрыв агента (`failed`) → `runtime.md` «Отчёт агента» («Обрыв сбоем»).
 
 Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
-(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+(`runtime.md`, «Спавн агентов»).
 
 ## Активация
 
@@ -65,7 +77,13 @@ git log --oneline {base}...HEAD | wc -l
 - Project specs обновлены: {список или «нет»}
 - Findings ревью: {N} total, {N} resolved
 - Сдача: {PR url | squash {sha} в {base} | лиду}
+{строка `- Стоимость: …` из `cost.py phase TASK_DIR finalize`}
+- Стоимость задачи: {cost.total_eq} cost_eq, фазы по убыванию: {phase cost_eq, …}
 ```
+
+Строка стоимости и итог задачи пишутся в шаге 8, после вызова `cost.py phase TASK_DIR
+finalize` (`runtime.md`, «Стоимость»): до него `cost.total_eq` в state.yaml не включает
+Finalize. Секция открывается здесь, строка стоимости дописывается в шаге 8.
 
 ### 3. Гочи
 
@@ -153,8 +171,9 @@ PR или сдача лиду → in_review (Recommended); интеграция 
 `TASK_DIR` и выхода из worktree: их называет итог Finalize — задачи, research, части,
 мультизадачи — и поле `scratch` в `done` лиду.
 
-`state.py finish TASK_DIR finalize` (фаза становится `done`). Коммит артефактов
-(`artifacts.md`) до выхода из worktree. Трекер с возможностью `artifacts`: `finish` публикует
+Строка стоимости из `cost.py phase TASK_DIR finalize` и итог `cost.total_eq` с фазами по
+убыванию — в `## Finalize ✅` (`runtime.md`, «Стоимость»), затем `state.py finish TASK_DIR
+finalize` (фаза становится `done`). Коммит артефактов (`artifacts.md`) до выхода из worktree. Трекер с возможностью `artifacts`: `finish` публикует
 итог, тоже до выхода из worktree; статус задачи `done` → ещё раз `publish {id} --from
 TASK_DIR` и при коде 0 удалить `TASK_DIR` (`finish` при сбое публикации только
 предупреждает); при `in_review` рабочая копия остаётся для доработки.
@@ -169,6 +188,7 @@ TASK_DIR` и при коде 0 удалить `TASK_DIR` (`finish` при сбо
 Задача {id} финализирована: log.md обновлён, трекер {да/нет}, сдача {PR url |
 squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставлен/снесён/н/д}.
 Временные файлы агентов вне дерева: {из строк `SCRATCH` в log.md | нет}.
+Стоимость: {cost.total_eq} cost_eq, дороже всего {фаза}: {cost_eq}.
 ```
 
 ## Задача с `finalize_artifact: research`
@@ -183,8 +203,9 @@ squash {sha} в {base} | лиду}, ветка {branch}, worktree {оставл�
    Трекер с возможностью `artifacts`: шаги 3–4 не выполняются, итог исследования
    живёт в задаче трекера.
 5. Трекер: комментарий с итогами исследования в точке `tracker.comment`, как в шаге 5.
-6. Статус и worktree как в шагах 6–7; `state.py finish TASK_DIR finalize`; итог как
-   в шаге 8, с остатком `SCRATCH`.
+6. Статус и worktree как в шагах 6–7; `cost.py phase TASK_DIR finalize`, затем
+   `state.py finish TASK_DIR finalize`; итог как в шаге 8, с остатком `SCRATCH`
+   и стоимостью.
 
 ## Часть мультизадачи (`--part`)
 
@@ -205,9 +226,10 @@ review части завершены по её состоянию.
    `update_description` с дисциплиной записи). Сводка и вопрос в точке
    `part-integrate`: Интегрировать (Recommended) / Оставить in-review / Пропустить
    часть (skipped).
-3. Интеграция по адаптеру workspace (`integrate`): `state.py finish {PART_DIR} finalize`
-   (состояние части уходит в squash завершённым; остаток `SCRATCH` части — в итог,
-   шаг 8); закоммитить всё в worktree части, включая log.md и state.yaml;
+3. Интеграция по адаптеру workspace (`integrate`): `cost.py phase {PART_DIR} finalize`,
+   затем `state.py finish {PART_DIR} finalize`
+   (состояние части уходит в squash завершённым; остаток `SCRATCH` и стоимость части —
+   в итог, шаг 8); закоммитить всё в worktree части, включая log.md и state.yaml;
    `ExitWorktree keep`; убедиться, что дерево на ветке мультизадачи, иначе временный
    worktree; rebase ветки части на ветку мультизадачи; squash; гейты и проверки
    `resolve.py verify --at accept` по застейдженному squash до коммита (как приёмка лида);
@@ -252,7 +274,10 @@ researcher'ы работают. Предусловие: research.md части �
 Предусловие: `multitask.py ready` на свежем описании даёт `all_terminal: true`.
 
 1. log.md мультизадачи: частей N (done, skipped), суммарно коммитов, тестов,
-   файлов по log.md частей. При `finalize_artifact: research` вместо коммитов
+   файлов по log.md частей; стоимость — при `part_runner: sequential` сумма
+   `cost.total_eq` из state.yaml частей плюс строка `cost.py phase TASK_DIR finalize`
+   мультизадачи, при `scheduler` только `cost.phases` мультизадачи (`runtime.md`,
+   «Стоимость»). При `finalize_artifact: research` вместо коммитов
    и тестов число findings и отложенных вопросов сводного research.md (синтез уже
    выполнен планировщиком).
 2. `comment` в точке `tracker.comment`: «Мультизадача завершена: {done}/{N} частей

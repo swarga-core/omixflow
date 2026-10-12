@@ -322,6 +322,23 @@ class Doctor:
                          + " (adapters/lang/PORT.md, «Гейты»)")
         self.check_areas(areas)
         self.check_orchestrator_checks(areas)
+        self.check_lang_tests()
+
+    def check_lang_tests(self) -> None:
+        """`report.py check` reads the test file globs from the lang adapter frontmatter
+        (`tests: {files, declaration}`, adapters/lang/PORT.md «test_conventions»); without them
+        MUTATIONS are not checked by the script and the orchestrator checks them by hand."""
+        assert self.cfg is not None
+        for name in lib.adapters_for(self.cfg, "lang"):
+            try:
+                chain = lib.resolve_adapter("lang", name, self.root)
+            except lib.OmixflowError:
+                continue  # reported by check_ports
+            tests = [a.meta.get("tests") for a in chain if isinstance(a.meta.get("tests"), dict)]
+            if not any(t.get("files") for t in tests):
+                self.add("lang", f"tests {name}", WARN,
+                         f"адаптер lang/{name} без фронтматтера tests.files: report.py check не сверяет MUTATIONS; "
+                         "добавить tests: {files: [glob…], declaration: regex} в адаптер или его проектное расширение")
 
     def check_when(self, sec: str, name: str, when: List[str], areas: Dict[str, Any]) -> None:
         unknown = [w for w in when if w not in areas]

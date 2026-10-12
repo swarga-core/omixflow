@@ -8,9 +8,12 @@ description: Lead session of OMIXFlow — coordinates the developer's task sessi
 Сессия-лид по `${CLAUDE_PLUGIN_ROOT}/protocol/lead.md`. Правила доверия, формат
 сообщений, маршрут вопроса и журнал живут там; здесь порядок действий лида.
 
-Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Точки решения:
-`${CLAUDE_PLUGIN_ROOT}/protocol/dialog.md`. Worktree лида:
-`${CLAUDE_PLUGIN_ROOT}/protocol/worktree.md`. Порт: workspace. Журнал:
+Протокол в `${CLAUDE_PLUGIN_ROOT}/protocol/`; секцию печатает `python3
+"${CLAUDE_PLUGIN_ROOT}/scripts/resolve.py" section {файл}.md «Секция»…` (подробности —
+`runtime.md`, «Чтение протокола», по требованию).
+Сначала: `runtime.md` «Пролог скила», «Гейты», «Проверки оркестратора» (приёмка гоняет
+гейты); `lead.md` целиком (лид — его единственный полный читатель, сессиям задач нужны
+отдельные секции); `dialog.md` целиком; `worktree.md` «Worktree лида». Порт: workspace. Журнал:
 `${CLAUDE_PLUGIN_ROOT}/scripts/lead.py` (далее `lead.py --journal {JOURNAL} …`,
 путь всегда явный).
 
