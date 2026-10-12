@@ -12,6 +12,9 @@ Task spec: дельта, а не полное состояние. Что мен�
 `${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Тиры:
 `${CLAUDE_PLUGIN_ROOT}/protocol/tiers.md`. Порт: lang.
 
+Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
+(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+
 ## Активация
 
 `/omixflow:spec {id}` или `{id}/{part}`.

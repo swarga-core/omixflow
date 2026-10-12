@@ -1,7 +1,7 @@
 ---
 port: workspace
 required: [resolve_base, branch, setup, integrate]
-optional: [worktree, submodules, protected, sync]
+optional: [worktree, submodules, protected, sync, commit_message]
 config: [workspace.base, workspace.branch, workspace.worktree, workspace.setup, workspace.submodules, workspace.integration, workspace.protected, workspace.repos, workspace.sync, workspace.delivery, multitask.push]
 ---
 
@@ -22,6 +22,7 @@ config: [workspace.base, workspace.branch, workspace.worktree, workspace.setup, 
 | submodules | нет | инициализировать submodule'ы, соблюдать их правила | setup, coder, review |
 | protected | нет | список веток, куда коммитить напрямую запрещено | start, finalize |
 | sync | нет | подтянуть ушедшую вперёд базу в ветку задачи или части: rebase или merge, разрешение конфликтов, гейты на слитом дереве | implement, review, finalize |
+| commit_message | нет | область (scope) в сообщении коммита шага и фиксов ревью и как её выбрать по изменённым файлам (`fix(sim): …`); без неё шаблоны скилов — без области | implement, review |
 
 ## resolve_base
 
@@ -77,6 +78,20 @@ Rebase многих кодовых шагов останавливается п�
    в `state.yaml`) и секция `### Синхронизация с {base} @ {sha} ✅` в log.md
    с перечнем конфликтов.
 
+## commit_message
+
+Необязательная возможность: область (scope) в сообщении коммита и правило её выбора по
+изменённым файлам (зона проекта: `fix(sim): …`, `feat(client): …`; задача в нескольких
+зонах — область главной). Адаптер объявляет её в `capabilities` и описывает разделом
+`## commit_message`. Скилы пишут шаблоны как `{type}[({область})]: …` — шаг implement,
+фиксы прохода ревью, починка гейта до и после ревью, починка после синхронизации, коммит
+настройки doctor — и берут область по правилу адаптера о сообщении коммита: раздел
+`commit_message`, а в адаптере без раздела — его правило о сообщении в прозе, если оно
+есть; правила нет — без области.
+Область не берут коммит слияния синхронизации (его сообщение — по `sync`), squash в базу
+и в ветку мультизадачи (`feat({id}): …`), коммиты research-артефактов (`docs({id}): …`)
+и приёмка лида.
+
 ## Конфиг
 
 ```yaml
@@ -105,5 +120,6 @@ multitask:
 ## Авторинг адаптера
 
 Git-специфика (worktree, submodule, squash) описывается в адаптере `git`; ядро
-знает только имена возможностей. Ловушки worktree и cwd задокументированы
-в `protocol/worktree.md`, адаптер на них ссылается.
+знает только имена возможностей. Необязательная возможность объявляется в `capabilities`
+адаптера и описывается его разделом с её именем (`## commit_message`). Ловушки worktree
+и cwd задокументированы в `protocol/worktree.md`, адаптер на них ссылается.

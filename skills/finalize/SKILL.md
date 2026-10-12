@@ -13,6 +13,9 @@ description: Finalize phase of the OMIXFlow pipeline — records the outcome in 
 `${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`. Профили:
 `${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Порты: tracker, forge, workspace.
 
+Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
+(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+
 ## Активация
 
 - `/omixflow:finalize {id}`; без аргумента id берётся из имени текущей ветки

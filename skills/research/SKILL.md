@@ -14,6 +14,9 @@ Source Files Map, текущее состояние, паттерны, findings,
 `${CLAUDE_PLUGIN_ROOT}/protocol/profiles.md`. Мультизадача:
 `${CLAUDE_PLUGIN_ROOT}/protocol/multitask.md`.
 
+Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
+(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+
 ## Активация
 
 - `/omixflow:research {id}` или `{id}/{part}`.

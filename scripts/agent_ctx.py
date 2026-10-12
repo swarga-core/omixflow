@@ -14,9 +14,18 @@ API-error records the harness writes with zero usage are skipped.
 --session defaults to $CLAUDE_CODE_SESSION_ID, --projects to $CLAUDE_CONFIG_DIR/projects
 or ~/.claude/projects. Several transcripts with NAME: the latest one counts.
 
-Prints one JSON line. Known: `{"name", "context", "at", "transcript"}`, exit 0.
-Unknown (no session id, no transcript, no reply yet, unreadable transcript):
-`{"name", "context": null, "reason"}`, exit 3; the caller falls back as tiers.md says.
+The agent's id is the transcript's file name without `agent-` (`agent-aa1c990a52da5a28a.jsonl`
+→ `aa1c990a52da5a28a`): after the session restarts (`claude respawn`), SendMessage no longer
+finds the agents spawned before it by name, only by this id (protocol/runtime.md, «Спавн
+агентов»).
+
+Prints one JSON line. Known: `{"name", "id", "others", "context", "at", "transcript"}`,
+exit 0; `others` counts older transcripts with the same NAME (a tester respawned per step,
+a reviewer spawned again). Unknown (no session id, no transcript, no reply yet, unreadable
+transcript): `{"name", "context": null, "reason"}`, exit 3, with `id` and `others` once the
+transcript is found (an agent that failed on its first request still has an id); the
+caller falls back as tiers.md says. The id is verified for plain subagents (T-7); a
+teammate of agent-team mode is not restored after a restart (protocol/runtime.md).
 Usage error: exit 2.
 """
 from __future__ import annotations
@@ -101,10 +110,13 @@ def measure(name: str, session: Optional[str], projects: Path) -> Dict[str, Any]
     if not logs:
         return {"name": name, "context": None,
                 "reason": f"транскрипт агента не найден: {projects}/*/{session}/subagents"}
+    stem = logs[0].name[: -len(".jsonl")]
+    found = {"name": name, "id": stem[len("agent-"):] if stem.startswith("agent-") else stem,
+             "others": len(logs) - 1}
     usage = last_usage(logs[0])
     if usage is None:
-        return {"name": name, "context": None, "reason": f"в транскрипте нет ответов: {logs[0]}"}
-    return {"name": name, "context": usage["context"], "at": usage["at"], "transcript": str(logs[0])}
+        return {**found, "context": None, "reason": f"в транскрипте нет ответов: {logs[0]}"}
+    return {**found, "context": usage["context"], "at": usage["at"], "transcript": str(logs[0])}
 
 
 def main(argv: Optional[List[str]] = None) -> int:

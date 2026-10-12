@@ -484,6 +484,71 @@ class AgentRulesLint(unittest.TestCase):
         self.assertIn("заводит только лид, свои метки сессия без дефиса", lead_md)
         self.assertIn("выделить подпункт `{метка}-{суффикс}` в `ack` до `decision`", self.flat("skills/lead/SKILL.md"))
 
+    def test_agents_are_resumed_by_id_after_a_session_restart(self):
+        """T-7, MEW-25: after `respawn` the session's earlier agents were unreachable by name;
+        by id T-7 kept the reviewer's context, MEW-25 respawned them and lost it."""
+        runtime = self.flat("protocol/runtime.md")
+        self.assertIn("по `id` из `python3 {корень плагина}/scripts/agent_ctx.py {имя}`", runtime)
+        self.assertIn("Нет id или и по id не дошло — новый спавн", runtime)
+        self.assertIn("После `/resume` с новым id сессии прежних агентов нет", runtime)
+        for skill in ("implement", "spec", "plan", "review", "research", "finalize"):
+            with self.subTest(skill=skill):
+                self.assertIn("после перезапуска сессии — по id", self.flat(f"skills/{skill}/SKILL.md"))
+        for path in iter_files("skills"):  # every skill that continues agents points to the rule
+            text = " ".join(path.read_text(encoding="utf-8").split())
+            if re.search(r"SendMessage[^.]{0,80}(живому|agents\.|`(architect|reviewer|researcher|coder)-\{id\})"
+                         r"|из `agents\.[a-z_]+`", text):
+                with self.subTest(skill=path.parent.name):
+                    self.assertIn("после перезапуска сессии — по id", text)
+        self.assertIn("после перезапуска сессии — по id", self.flat("protocol/review-cycle.md"))
+        for rel in ("protocol/lead.md", "skills/lead/SKILL.md"):
+            with self.subTest(rel=rel):
+                self.assertIn("прежних агентов — по id (`agent_ctx.py`)", self.flat(rel))
+
+    def test_a_failed_agent_gets_the_same_assignment_again(self):
+        """T-7: the reviewer broke off on ENOTFOUND before writing FINDINGS_PATH."""
+        runtime = self.flat("protocol/runtime.md")
+        self.assertIn("**Обрыв сбоем.** Уведомление `failed` (сбой API, сеть) без файла отчёта", runtime)
+        self.assertIn("Второй `failed` на то же задание — СТОП", runtime)
+        self.assertIn("задание, оборванное остановкой сессии", runtime)
+        implement = self.flat("skills/implement/SKILL.md")
+        self.assertIn("Уведомление `failed` без файла — повтор того же задания", implement)
+        self.assertIn("`failed` — не stall", implement)
+        self.assertIn("**Повтор после `failed`**", self.flat("protocol/review-cycle.md"))
+
+    def test_commit_templates_leave_room_for_the_adapter_scope(self):
+        """MEW-25: the literal review-fix template gave a commit without the zone scope mewria requires."""
+        self.assertIn("{feat|fix|refactor|test|docs}[({область})]: {описание шага}", self.flat("skills/implement/SKILL.md"))
+        review = self.flat("skills/review/SKILL.md")
+        self.assertIn("fix[({область})]: address review findings for {id} (pass {N})", review)
+        self.assertIn("fix[({область})]: repair red gate for {id} (gate fix {K})", review)
+        port = self.flat("adapters/workspace/PORT.md")
+        self.assertIn("| commit_message | нет |", port)
+        self.assertIn("## commit_message", (ROOT / "adapters" / "workspace" / "PORT.md").read_text(encoding="utf-8"))
+        self.assertIn("в адаптере без раздела — его правило о сообщении в прозе", port)
+        # every commit template in the skills either leaves room for the scope or uses the task id
+        templates = []
+        for path in iter_files("skills"):
+            text = path.read_text(encoding="utf-8")
+            templates += [(path.parent.name, m.group(0)) for m in re.finditer(
+                r"(?m)(?:^|`|\")(?:\{feat\|fix[^}]*\}|feat|fix|docs|test|refactor|chore)(\S*?): (?=\S)", text)]
+        self.assertGreaterEqual(len(templates), 6)
+        bad = [t for t in templates if not ("[({область})]" in t[1] or "({id})" in t[1])]
+        self.assertEqual(bad, [])
+        self.assertIn("repair sync breakage for {id} (sync {K})", self.flat("skills/implement/SKILL.md"))
+
+    def test_capability_tables_match_the_port_frontmatter(self):
+        """0.7.3 review: `commit_message` was in the workspace table but not in `optional:`,
+        so doctor would warn about an adapter that declares it."""
+        for path in sorted((ROOT / "adapters").glob("*/PORT.md")):
+            meta, body = lib.parse_frontmatter(path)
+            declared = set(meta.get("required") or []) | set(meta.get("optional") or [])
+            section = body[body.index("## Возможности"):] if "## Возможности" in body else body
+            rows = set(re.findall(r"^\| ([a-z_]+) \| (?:да|нет) \|", section, re.M))
+            with self.subTest(port=path.parent.name):
+                self.assertTrue(rows)
+                self.assertEqual(sorted(rows ^ declared), [])
+
 
 class LeadLaunchLint(unittest.TestCase):
     """The lead launches task sessions by the developer's word, in the background or in a

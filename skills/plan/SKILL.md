@@ -10,6 +10,9 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 Пролог: `${CLAUDE_PLUGIN_ROOT}/protocol/runtime.md`. Ревью-цикл:
 `${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Порт: lang.
 
+Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
+(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+
 ## Активация
 
 `/omixflow:plan {id}` или `{id}/{part}`.

@@ -1,6 +1,7 @@
 """Tests for agent_ctx.py: an agent's context size read from its harness transcript."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -22,6 +23,11 @@ def run(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
                           capture_output=True, text=True, env=full)
 
 
+def agent_id(name: str, suffix: str = "abc") -> str:
+    """The shape of a plain subagent's id (T-7: `aa1c990a52da5a28a`), from the transcript's file name."""
+    return "a" + hashlib.sha1(f"{name}-{suffix}".encode()).hexdigest()[:16]
+
+
 def reply(ts: str, inp: int, read: int, create: int) -> dict:
     return {"type": "assistant", "timestamp": ts,
             "message": {"usage": {"input_tokens": inp, "cache_read_input_tokens": read,
@@ -40,8 +46,8 @@ class AgentCtxTests(unittest.TestCase):
               suffix: str = "abc", raw_tail: str = "") -> Path:
         d = self.projects / slug / session / "subagents"
         d.mkdir(parents=True, exist_ok=True)
-        stem = f"agent-a{name}-{suffix}"
-        (d / f"{stem}.meta.json").write_text(json.dumps({"name": name, "taskKind": "in_process_teammate"}))
+        stem = f"agent-{agent_id(name, suffix)}"
+        (d / f"{stem}.meta.json").write_text(json.dumps({"name": name}))
         log = d / f"{stem}.jsonl"
         log.write_text("".join(json.dumps(r) + "\n" for r in records) + raw_tail)
         return log
@@ -59,6 +65,8 @@ class AgentCtxTests(unittest.TestCase):
         ])
         code, out = self.measure("coder-MEW-2")
         self.assertEqual(code, 0)
+        self.assertEqual(out["id"], agent_id("coder-MEW-2"))  # the file name without `agent-`: SendMessage's id
+        self.assertEqual(out["others"], 0)
         self.assertEqual(out["context"], 437_308)
         self.assertEqual(out["at"], "2026-10-09T18:06:52Z")
         self.assertEqual(out["transcript"], str(log))
@@ -116,13 +124,22 @@ class AgentCtxTests(unittest.TestCase):
         old = self.agent("reviewer-X", [reply("t", 1, 500_000, 0)], suffix="old")
         os.utime(old, (time.time() - 100, time.time() - 100))
         self.agent("reviewer-X", [reply("t", 1, 40_000, 0)], suffix="new", slug="-wt")
-        self.assertEqual(self.measure("reviewer-X")[1]["context"], 40_001)
+        out = self.measure("reviewer-X")[1]
+        self.assertEqual((out["context"], out["id"], out["others"]), (40_001, agent_id("reviewer-X", "new"), 1))
 
     def test_agent_without_a_reply_yet_is_unknown(self):
         self.agent("tester-X", [{"type": "user", "message": {"content": "go"}}])
         code, out = self.measure("tester-X")
         self.assertEqual(code, 3)
         self.assertIn("нет ответов", out["reason"])
+        self.assertEqual(out["id"], agent_id("tester-X"))  # failed on its first request: still resumable
+
+    def test_a_transcript_not_named_agent_keeps_its_stem_as_id(self):
+        d = self.projects / "-proj" / SESSION / "subagents"
+        d.mkdir(parents=True)
+        (d / "odd-name.meta.json").write_text(json.dumps({"name": "coder-Y"}))
+        (d / "odd-name.jsonl").write_text(json.dumps(reply("t", 1, 1, 1)) + "\n")
+        self.assertEqual(self.measure("coder-Y")[1]["id"], "odd-name")
 
     def test_session_and_projects_come_from_the_environment(self):
         config = Path(self.tmp.name) / "config"

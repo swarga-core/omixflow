@@ -12,6 +12,9 @@ description: Review phase of the OMIXFlow pipeline — runs the full verify gate
 и контракт findings: `${CLAUDE_PLUGIN_ROOT}/protocol/review-cycle.md`. Порты:
 lang, workspace.
 
+Агенту, которого скил продолжает SendMessage'ем, после перезапуска сессии — по id
+(`runtime.md`, «Спавн агентов»); обрыв сбоем — «Обрыв сбоем» там же.
+
 ## Активация
 
 `/omixflow:review {id}` или `{id}/{part}`.
@@ -38,8 +41,9 @@ workspace до гейтов и до ревью: ревью видит итого
 (`on_demand`), назначенная на Review, — на итоговом дереве после фиксов. Красный гейт
 или проверка до ревью: вернуть coder'у
 как шаг «починить гейт» (`REPORT_PATH: {TASK_DIR}/reports/review-gate-fix{K}.md`; перед его
-коммитом — `--at step`, затем полный прогон заново), не идти в ревью с красным. Красный гейт после approve — по `review-cycle.md`, «Лимит
-проходов»; исполнитель тот же, дефект только в тестах — tester'у
+коммитом — `--at step`, затем полный прогон заново; сообщение — как у починки гейта после
+approve, шаг 5), не идти в ревью с красным. Красный гейт после approve — по
+`review-cycle.md`, «Лимит проходов»; исполнитель тот же, дефект только в тестах — tester'у
 (`REPORT_PATH: {TASK_DIR}/reports/review-tests-gate-fix{K}.md`).
 
 ### 2. Reviewer
@@ -99,11 +103,13 @@ coder и tester — `review-cycle.md`, шаг 3. Coder получает `REPORT_
 по правилу «Коммит артефактов» (`artifacts.md`):
 
 ```
-fix: address review findings for {id} (pass {N})
+fix[({область})]: address review findings for {id} (pass {N})
 ```
 
 Починка красного гейта после approve, закрытая без нового прохода, — свой коммит
-`fix: repair red gate for {id} (gate fix {K})`.
+`fix[({область})]: repair red gate for {id} (gate fix {K})`. Область — по правилу адаптера
+workspace о сообщении коммита, как в implement 2.5. В MEW-25 шаблон без места под область
+дал коммит фиксов без зоны, которую требует адаптер mewria.
 
 `state.py finish TASK_DIR review`; log.md:
 
