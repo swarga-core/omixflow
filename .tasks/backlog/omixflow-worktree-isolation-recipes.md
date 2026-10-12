@@ -48,6 +48,12 @@ links: [omixflow-worktree-mcp-root]
   Сессия обошла так: журнал и артефакты — Edit/Write, пути литерально, по одной команде.
   Рядом, уже в правилах mewria (G-50 MEW-17): `git -C {основное дерево}` из изолированной
   сессии отклоняется («redirects git to the shared checkout»).
+- Swarga AI Studio T-11 (2026-10-12, дополнение swais-lead): изолированная сессия отклоняет
+  `git add … && git commit -q -F - <<'EOF'` («too complex to verify»). Сообщение коммита
+  сессия клала файлом в `TASK_DIR` (`.tasks/T-11/commit-msg.txt`), а `TASK_DIR`
+  публикуется в карточку трекера — файл приходилось удалять перед публикацией. Нужное место —
+  scratchpad оркестратора: `git -C {дерево} commit -F {scratchpad}/commit-msg.txt` одной
+  командой, `git add` отдельно.
 - Харнесс в отказе сам говорит, как надо: «Split it into plain, separate commands and run
   them from {worktree}» / «Run the plain command from {worktree}».
 - Расхождение AL-1161 (отказ `bash script.sh`) снято: в T-1 `bash {scratchpad}/f6_check.sh`
@@ -59,6 +65,8 @@ links: [omixflow-worktree-mcp-root]
   coder-T-1-2, reviewer-T-1); coder нашёл замену — `mv` каталога в scratchpad.
 
 **Предложение.**
+- Файл сообщения коммита (многострочного) оркестратор кладёт в свой scratchpad, не
+  в `TASK_DIR` (T-11): `implement` 2.5, review и `artifacts.md` — одной строкой.
 - Оркестратор в изолированной сессии дописывает log.md и артефакты инструментами Edit
   и Write, а не heredoc'ом в shell (MEW-15); скрипты OMIXFlow (`state.py`, `lead.py`)
   пишут свои файлы сами.
