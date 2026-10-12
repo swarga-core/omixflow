@@ -5,3 +5,6 @@ __pycache__/
 
 # Local drafts of plugin issues from live runs; never committed
 /issues-*.md
+
+# Worktrees of release and task sessions (EnterWorktree); never committed
+/.claude/worktrees/
