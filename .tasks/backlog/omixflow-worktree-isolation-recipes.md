@@ -4,8 +4,8 @@ title: Фильтр изоляции worktree-сессии — конкретн�
 status: draft
 type: docs
 created: 2026-10-06
-updated: 2026-10-11
-origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06); Swarga AI Studio T-1 и T-6 (G-8 лида swais-lead, 2026-10-10/11)
+updated: 2026-10-12
+origin: прогоны AL-1151, AL-1154, AL-1161, AL-1162 (черновики issues-al-*, разобраны 2026-10-06); Swarga AI Studio T-1 и T-6 (G-8 лида swais-lead, 2026-10-10/11); mewria MEW-15 (G-53 лида mewria-lead, 2026-10-12)
 target: omixflow
 external:
 links: [omixflow-worktree-mcp-root]
@@ -41,6 +41,13 @@ links: [omixflow-worktree-mcp-root]
   `P=…; sed -n … $P/…`, `time pnpm --dir $P`, `find "$R/…"`, `python3 -c` с путём из
   переменной («runs python with a program computed at runtime»). Помогали литеральные
   абсолютные пути.
+- mewria MEW-15 (2026-10-12, G-53 mewria-lead со слов сессии; сверено по транскрипту сессии):
+  три отказа в изолированной сессии задачи — `W=…; cat >> $W/.tasks/MEW-15/log.md <<'EOF'`
+  («names git in a form too complex to verify»: переменная в пути и heredoc) и
+  `R=…/reports/implement-step3.md; sed -n '1,40p' $R; awk …` («computed at runtime»).
+  Сессия обошла так: журнал и артефакты — Edit/Write, пути литерально, по одной команде.
+  Рядом, уже в правилах mewria (G-50 MEW-17): `git -C {основное дерево}` из изолированной
+  сессии отклоняется («redirects git to the shared checkout»).
 - Харнесс в отказе сам говорит, как надо: «Split it into plain, separate commands and run
   them from {worktree}» / «Run the plain command from {worktree}».
 - Расхождение AL-1161 (отказ `bash script.sh`) снято: в T-1 `bash {scratchpad}/f6_check.sh`
@@ -52,6 +59,9 @@ links: [omixflow-worktree-mcp-root]
   coder-T-1-2, reviewer-T-1); coder нашёл замену — `mv` каталога в scratchpad.
 
 **Предложение.**
+- Оркестратор в изолированной сессии дописывает log.md и артефакты инструментами Edit
+  и Write, а не heredoc'ом в shell (MEW-15); скрипты OMIXFlow (`state.py`, `lead.py`)
+  пишут свои файлы сами.
 - Список в «Ловушках» `worktree.md` с формами выше: git — по одной простой команде
   с абсолютными путями (`git -C {worktree}`, `add` и `commit` отдельно), без `$VAR`, без
   `PATH=…:$PATH` в команде; фоновые процессы, вычисляемые аргументы и длинные цепочки — скрипт
