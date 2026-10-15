@@ -4,7 +4,7 @@ title: Architect и ревью плана — входы, исполнимост
 status: draft
 type: feature
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-15
 origin: прогоны AL-1138, AL-1160, AL-1164, AL-1167 (черновики issues-al-*, разобраны 2026-10-06)
 target: omixflow
 external:
@@ -41,6 +41,20 @@ links: []
    Review проверяет, что пометок не осталось.
 - ASPECTS ревью плана (`skills/plan`, `agents/reviewer.md`): «каждый чекпоинт исполним
   агентом», «внешний ресурс отдельным шагом», «спека каждого коммита описывает его код».
+
+**Сделано в 0.9.0** (сессия omixflow-revision, сверено по CHANGELOG и файлам плагина 2026-10-15):
+- п. 1 и 3 — механикой `scripts/plan.py check`: шаг не трогает read-only submodule (в Files
+  или в чекпоинте), чекпоинт без ручной проверки, гейты чекпоинтов объявлены; адаптер workspace
+  architect'у не передаётся — read-only пути знает скрипт;
+- п. 4 — аспект ревью плана (`skills/plan/SKILL.md:55`, reviewer «Plan review»);
+- п. 5 — поле шага `Transitional notes` (`agents/architect.md:151`, только при `specs.mode:
+  descriptions`), reviewer плана требует его у шага-замены (`agents/reviewer.md:160`).
+
+Открыто:
+- п. 2 — `PARALLEL_BRANCHES` никто не собирает: reviewer читает поле «when given»
+  (`agents/reviewer.md:158`), скилы plan и develop `git diff --stat` веток в работе не передают;
+- п. 5, вторая половина — coder снимающего шага список пометок не получает, Review не проверяет,
+  что пометок не осталось.
 
 **Критерии приёмки.** Шаблон плана и правила architect'а дополнены; аспекты ревью плана
 проверяют пункты 1, 3–5.
