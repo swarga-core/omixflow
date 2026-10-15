@@ -156,6 +156,7 @@ Agent tool:
       lang: {пути цепочки lang, через запятую}
       workspace: {пути цепочки workspace}          # coder, reviewer
     RULES: {пути проектных правил агента или "none"}
+    SPECS: {descriptions | adr {specs.adr_dir} | none}   # architect, coder, reviewer: `cfg.py get specs.mode` и `specs.adr_dir`; что сопровождает код при смене контракта (phases.md, SDD-инвариант)
     PARENT: the orchestrator of this session. Report only to it, once per turn: with
       SendMessage when you have that tool, then end your turn with the single line `sent`,
       never a second summary; without SendMessage, or when the send fails, your final
@@ -338,8 +339,8 @@ refused by the harness: {сообщение харнесса}`. Такой от�
 
 ## Гейты
 
-Скилы и агенты называют гейты по именам порта lang: typecheck, test, lint, build,
-e2e. Команду и критерий даёт адаптер и конфиг `verify.*`. Долгие гейты (`background: true`
+Скилы и агенты называют гейты по именам порта lang: typecheck, test, lint, structure,
+build, e2e, visual. Команду и критерий даёт адаптер и конфиг `verify.*`. Долгие гейты (`background: true`
 в `verify.*` или раздел `long_running` адаптера lang) запускаются отсоединённо и ждутся
 одним долгим опросом (`--timeout 540` при таймауте Bash 600000 мс; шесть опросов по 100 с —
 шесть запросов с полным контекстом, цикл shell вокруг `poll` ставил фоновую сессию на запрос

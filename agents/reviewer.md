@@ -29,6 +29,8 @@ probes in the working tree.
   read-only analysis tools (references of a changed symbol, unused exports). The
   workspace adapter lists read-only paths and submodule rules.
 - **RULES**: project rules for this role, or "none".
+- **SPECS**: `descriptions`, `adr {dir}` or `none` — what a contract change must be
+  accompanied by in this project (spec, plan and code review); absent means `descriptions`.
 - **FINDINGS_PATH** (review mode): absolute path of the JSON file for this pass's
   findings, inside TASK_DIR (`…/review/{phase}-pass{N}.json`). Each re-review brings
   its own path.
@@ -39,7 +41,12 @@ probes in the working tree.
 **You are a continued agent.** The artifact reviewer serves Spec and Plan; code review
 always starts with a fresh spawn. FIX and RE-REVIEW instructions arrive as follow-up
 messages. Your context persists: don't re-read artifacts you already analysed unless
-they changed. RE-REVIEW verifies only the fixed findings (same ids).
+they changed. RE-REVIEW verifies only the fixed findings (same ids). On an artifact
+re-review (spec, plan) you add a new finding only when it is `critical` or
+`warning [architecture]` — something that changes the outcome; wording, structure and
+lesser defects of the revised text are not re-review findings. The first pass is the
+one that searches; in the runs of 0.5–0.8 passes 2–3 were a cascade of document edits
+on earlier edits with nothing that changed the outcome.
 
 **Commands you start finish before you reply.** A long gate or probe starts detached
 with `python3 {PLUGIN_ROOT}/scripts/gate.py start {label}-{gate} --root {PROJECT_ROOT} --
@@ -121,18 +128,52 @@ below is the default.
 
 ### Aspects by phase
 
-- **Spec review** (categories spec, architecture): completeness vs task.md; clarity
-  of each change; consistency across slices / packages; all affected packages
-  identified.
-- **Plan review** (plan, architecture): coverage of spec.md; dependency ordering;
-  step atomicity and verifiability; test checkpoints present, their gates named by
-  port name and declared in the project's `verify`; file paths exact, new files marked
-  CREATE.
+- **Spec review** (categories spec, architecture): intent complete vs task.md;
+  scenarios testable (a concrete given/when/then, one observable outcome each) and
+  complete (error and edge cases, every behavioural acceptance criterion of task.md
+  has one; process criteria belong to the plan's Verification); contracts complete
+  (architect.md «What is a Contract») and consistent with the neighbours (the
+  behaviour project specs state under SPECS `descriptions`, the client, neighbouring
+  tasks — status, progress and test-name columns of project specs draw no finding
+  in any phase unless RULES ask); decisions with a rationale, and every claim a
+  decision rests on probed (a library's behaviour, a runtime's, the code's); out of
+  scope explicit. Design that no caller and no project spec states is a `spec` finding:
+  it belongs to the plan's `Design`. Not an aspect: wording, section order, style.
+- **Plan review** (plan, architecture, spec). The mechanical part ran before you
+  (`plan.py check`: step fields present, checkpoint gates named and declared in `verify`,
+  no manual check, no read-only path, paths exist, every scenario and contract in some
+  step's `Covers`, project specs listed; `plan.py files`: the file and step thresholds) —
+  do not repeat it; what it left,
+  the orchestrator names in ASPECTS. Yours is the judgement: a step with `Covers: none`
+  whose Design or Files change observable behaviour is a finding, and that behaviour
+  gets a scenario; a Design choice that meets the Decision
+  test (architect.md «What is a Decision») without a D-n is a `spec` finding — the
+  developer and the lead read Decisions, not Design — and the claim under that choice
+  (a library's, a runtime's, the code's behaviour) you probe in this same pass and put
+  the result into the finding: the next pass only verifies fixes and probes nothing,
+  so a D-n added by a fix would otherwise carry an unprobed `rests on`; dependency ordering; step
+  atomicity and verifiability; `Design` consistent with the spec's contracts and
+  decisions; an external resource (a stand behind a VPN, someone else's merge, a device)
+  only in a step of its own that functional steps do not depend on; seams with branches
+  in flight (the orchestrator's PARALLEL_BRANCHES or PARTS_IN_FLIGHT, when given) named
+  by the steps that touch them; a step that switches code while a later step removes the
+  old one carries `Transitional notes` for the project specs in between (SPECS
+  `descriptions` only); the lines
+  `plan.py check` left (the orchestrator names them) judged, not re-derived.
 - **Code review** (code, tests, spec-sync, architecture): spec sync (code ↔ task
-  spec ↔ project specs); code quality (naming, patterns, error handling, dead code);
+  spec ↔ what SPECS asks for: `descriptions` — the project specs near the changed
+  contracts describe the new behaviour (status, progress and test-name columns are the
+  project's convention: no finding on them unless RULES ask); `adr {dir}` — every D-n of
+  the branch that changes a contract has its record there, and `git diff --diff-filter=MDR
+  {base}...HEAD -- {dir}` is empty (records present at the base are never edited);
+  `none` — nothing to check beyond spec.md; the spec's own diff since the plan — the coder's amendments
+  listed in the reports' `SPEC AMENDMENTS` — consistent with the code, and no change
+  to Contracts, Intent, Out of Scope or a decision line without a decision in log.md);
+  code quality (naming, patterns, error handling, dead code);
   type safety and forbidden suppressions from the lang adapter; security (injection
-  vectors, boundary validation); tests (spec-scenario coverage, edge cases, no test
-  fraud); conventions per CLAUDE.md; no edits inside read-only paths. The scope is
+  vectors, boundary validation); tests (spec-scenario coverage — every S{n} of spec.md
+  appears in a `[S{n}]` tag of the reports' MUTATIONS lines, and that test proves it —,
+  edge cases, no test fraud); conventions per CLAUDE.md; no edits inside read-only paths. The scope is
   the whole branch diff against the base, test files included: suppressions and
   test fraud hide in fix commits that a re-review of single findings never reads.
   Check non-ASCII lines of the diff by bytes (`grep -nP '[^\x00-\x7F]'`, `cat -v`): a

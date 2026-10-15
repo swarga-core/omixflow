@@ -337,7 +337,8 @@ class Doctor:
             tests = [a.meta.get("tests") for a in chain if isinstance(a.meta.get("tests"), dict)]
             if not any(t.get("files") for t in tests):
                 self.add("lang", f"tests {name}", WARN,
-                         f"адаптер lang/{name} без фронтматтера tests.files: report.py check не сверяет MUTATIONS; "
+                         f"адаптер lang/{name} без фронтматтера tests.files: report.py check не сверяет MUTATIONS, "
+                         f"plan.py files не отличает тесты; "
                          "добавить tests: {files: [glob…], declaration: regex} в адаптер или его проектное расширение")
 
     def check_when(self, sec: str, name: str, when: List[str], areas: Dict[str, Any]) -> None:
@@ -474,10 +475,41 @@ class Doctor:
             self.check_ports()
             self.check_workspace()
             self.check_verify()
+            self.check_tiers()
+            self.check_specs()
             self.check_artifacts()
             self.check_agents()
             self.check_lead()
         return 1 if any(c.status == FAIL for c in self.checks) else 0
+
+    def check_specs(self) -> None:
+        """`specs.mode` (protocol/phases.md, SDD invariant) and, for adr, its directory."""
+        assert self.cfg is not None
+        mode = str(lib.config_value(self.cfg, "specs.mode") or "descriptions")
+        if mode == "adr":
+            adr_dir = str(lib.config_value(self.cfg, "specs.adr_dir") or "docs/decisions")
+            exists = (self.root / adr_dir).is_dir()
+            self.add("specs", "mode", OK if exists else WARN,
+                     f"adr: записи решений в {adr_dir}" + ("" if exists else " — каталога нет, coder создаст его первой записью"))
+        else:
+            self.add("specs", "mode", OK, {"descriptions": "проектные спецификации рядом с кодом правит coder",
+                                           "none": "ничего сверх spec.md задачи: инварианты держат гейты"}[mode])
+        structure = (lib.config_get(self.cfg, "verify.structure") or {})
+        if mode != "descriptions" and not structure:
+            self.add("specs", "structure", WARN, f"specs.mode {mode} без гейта `structure`: структурные инварианты "
+                     "никто не проверяет (verify.structure: dependency-cruiser, import-linter, ArchUnit)")
+
+    def check_tiers(self) -> None:
+        """Thresholds and the project's tier ceiling (protocol/tiers.md)."""
+        assert self.cfg is not None
+        s = lib.config_value(self.cfg, "tiers.s_max_files")
+        m = lib.config_value(self.cfg, "tiers.m_max_files")
+        ceiling = str(lib.config_value(self.cfg, "tiers.max") or "L")
+        if s is not None and m is not None and int(s) >= int(m):
+            self.add("tiers", "thresholds", FAIL, f"s_max_files {s} не меньше m_max_files {m}")
+        else:
+            self.add("tiers", "thresholds", OK, f"S до {s} файлов, M до {m}; выше порога после плана — scope-change")
+        self.add("tiers", "max", OK, f"потолок тира {ceiling}" + ("" if ceiling == "L" else ": триаж выше ставит потолок, --tier выше — отказ"))
 
 
 # ------------------------------------------------------------------- --init

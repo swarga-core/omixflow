@@ -102,7 +102,7 @@ remote и наличию CLI хостинга, языки по файлам-ма
 
 Секции `areas` и `checks` отчёта: число файлов в каждой области (WARN — glob не нашёл ни
 одного файла), `when` гейтов и проверок с неизвестными областями (FAIL), `when` у test
-(FAIL) и у typecheck, lint (WARN), проверки без подраздела в `## orchestrator_checks`
+(FAIL) и у typecheck, lint, structure (WARN), проверки без подраздела в `## orchestrator_checks`
 адаптера lang (WARN). Исправление — правка `flow.yaml` или адаптера, по порту lang
 («Гейты», «Проверки оркестратора»).
 

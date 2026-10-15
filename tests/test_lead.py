@@ -196,6 +196,10 @@ class JournalTests(unittest.TestCase):
                 "--choice", "e", "--basis", "разработчик в сессии", "--by", "AL-3")
         self.ok("replace", "D-5", "--with", "D-6")
         self.ok("rule", "--text", "вырожденный ввод → пустая строка", "--decision", "D-1")
+        # an exception from limits.* or the tier file threshold is the developer's, yet never a precedent
+        self.ok("decide", "--task", "AL-4", "--q", "1", "--item", "P1", "--point", "statement",
+                "--choice", "в) продолжить как есть: 29 нетестовых файлов при пороге 15",
+                "--basis", "developer E-4 «в»", "--exception")
         found = json.loads(self.ok("precedents", "--point", "statement"))
         self.assertEqual([d["id"] for d in found["decisions"]], ["D-1", "D-3", "D-6"])
         self.assertEqual([r["id"] for r in found["rules"]], ["R-1"])

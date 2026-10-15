@@ -97,16 +97,20 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 **Триаж.** Профиль с `triage: false` не триажится: шаг пропускается, тира нет.
 Иначе оценить тир по критериям tiers.md (порог файлов из `tiers.*`).
-Сомнение → больший. `--tier` форсирует и помечается `forced`; вскрывшийся масштаб
-для форсированного тира не повышается молча: показать и спросить в точке
-`scope-change`. Тир
-подтверждается после Refine и может только расти.
+Сомнение → больший. `--tier` форсирует и помечается `forced`; тир, названный в
+постановке или в `brief` лида, — тоже `forced`, с источником в log.md (`tiers.md`,
+«Тир из постановки или брифа»); вскрывшийся масштаб для форсированного тира не
+повышается молча: показать и спросить в точке `scope-change`. Тир выше потолка
+`tiers.max` — потолок (триаж, строка в log.md), отказ (`--tier`) или вопрос
+`scope-change` (постановка против потолка проекта). Тир
+подтверждается после Refine и может только расти; после плана его порог файлов
+проверяет `plan.py files` (`tiers.md`, «Порог файлов после плана»).
 
 **Фазы.**
 
 1. `refine {id} [--lead=NAME]`: только для адаптеров с описанием в трекере; для `none`
    пропускается (уточнение фиксируется в task.md на Start).
-2. `start {id} --profile={profile} [--tier={tier}] --mode=pipeline [--worktree]
+2. `start {id} --profile={profile} [--tier={tier} [--forced --tier-source={flag|statement|brief}]] --mode=pipeline [--worktree]
    [--lead=NAME --base={интеграционная ветка из brief}]`.
 3. Фазы профиля после start через `state.py next`, пока фаза не станет `done`.
 
@@ -163,8 +167,9 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 ### M3. Часть (`part_runner: sequential`)
 
-- fresh: триаж части по её постановке из multitask.md → `start {id} --part {part}
-  --tier={tier} --mode=pipeline [--lead=NAME]`.
+- fresh: триаж части по её постановке из multitask.md, как у задачи (потолок
+  `tiers.max`, тир из постановки части — форсированный) → `start {id} --part {part}
+  --tier={tier} [--forced --tier-source=statement] --mode=pipeline [--lead=NAME]`.
 - resume: войти в worktree части по `path` (пересоздать из ветки, если исчез),
   `PART_DIR = {artifacts.dir}/{id}/{part}`, `state.py next PART_DIR`.
 

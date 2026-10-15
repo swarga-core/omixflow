@@ -26,6 +26,7 @@ tests:                                   # test_conventions machine-readable (re
 | build | `pnpm build` | exit-code | долгий |
 | e2e | по проекту | rerun-compare-set | не входит в `test`; обязателен, когда правка тронула словарь, разметку, стили или моки API |
 | visual | по проекту | exit-code | снимки в браузере; не входит в `test`; обновление baseline только осознанно и только на хосте, где baseline воспроизводим |
+| structure | `pnpm exec depcruise --config .dependency-cruiser.cjs packages` | exit-code | направление зависимостей слоёв и запрещённые импорты (dependency-cruiser); в наборе шага; правило живёт в конфиге инструмента, не в прозе спецификаций. Ловушки: без путей `depcruise` печатает справку и выходит с 0 — пути в команде обязательны; правило с `severity: warn` тоже даёт 0 — инварианты только `error` |
 
 Ловушки:
 

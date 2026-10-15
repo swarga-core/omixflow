@@ -2,7 +2,7 @@
 port: lang
 required: [verify, test_conventions, suppressions, navigation, deps_setup]
 optional: [workspace_layout, long_running, orchestrator_checks]
-config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e, verify.visual, areas, checks]
+config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.e2e, verify.visual, verify.structure, areas, checks]
 ---
 
 # Порт lang
@@ -29,8 +29,12 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 ## Гейты
 
 Фиксированный словарь имён: `typecheck`, `test`, `lint`, `build`, `e2e`, `visual`
-(визуальная регрессия в браузере, снимки). Проект задаёт команды в `verify.*`, адаптер
-задаёт дефолты и критерии. Гейт `test` обязателен, остальные по наличию в проекте.
+(визуальная регрессия в браузере, снимки), `structure` (структурные инварианты кода:
+направление зависимостей слоёв, запрещённые импорты, границы пакетов — dependency-cruiser,
+import-linter, ArchUnit; правило, которое он проверяет, не нужно держать в прозе
+проектных спецификаций, и в наборе шага он идёт всегда, как lint). Проект задаёт команды
+в `verify.*`, адаптер задаёт дефолты и критерии. Гейт `test` обязателен, остальные по
+наличию в проекте.
 Критерии чтения результата:
 
 | Критерий | Значение |
@@ -49,12 +53,12 @@ config: [lang, verify.typecheck, verify.test, verify.lint, verify.build, verify.
 
 | Набор | Когда | Гейты |
 |---|---|---|
-| шага | каждый шаг implement, пакет фиксов ревью, починка гейта или поломки после синхронизации; изменения — незакоммиченные | typecheck, test, lint (какие заданы) всегда, плюс гейты с `when`, чью область задели изменения, и гейты «Test checkpoint» шага плана (`--also`) |
+| шага | каждый шаг implement, пакет фиксов ревью, починка гейта или поломки после синхронизации; изменения — незакоммиченные | typecheck, test, lint, structure (какие заданы) всегда, плюс гейты с `when`, чью область задели изменения, и гейты «Test checkpoint» шага плана (`--also`) |
 | полный | Review, шаг 1; разрешение конфликтов синхронизации (как Review); перед сдачей; приёмка лида; изменения — вся ветка от общей с базой истории, с незакоммиченным слиянием синхронизации (у приёмки — слияние в интеграционную ветку) | гейты без `when`, плюс гейты с `when`, чью область задели изменения |
 
-`when` у typecheck, test и lint в наборе шага не действует, а в полном делает гейт
+`when` у typecheck, test, lint и structure в наборе шага не действует, а в полном делает гейт
 условным: у `test` это ошибка конфига (задача только в другой зоне осталась бы без
-тестов), у typecheck и lint — предупреждение doctor. Какие гейты идут сейчас, считает
+тестов), у typecheck, lint и structure — предупреждение doctor. Какие гейты идут сейчас, считает
 `scripts/resolve.py verify --at {step|review|delivery|accept}`; ни агенты, ни оркестратор
 не выводят набор из прозы. К набору шага добавляются гейты, которые «Test checkpoint» шага
 плана называет по имени словаря: coder берёт их `resolve.py verify --at step --also {gate}`

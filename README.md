@@ -131,6 +131,10 @@ python3 scripts/accept.py plan task/AL-1 --into main  # приёмка мерж�
 python3 scripts/cost.py session --session {id}     # стоимость сессии по транскриптам: роли, контекст, перестройки кэша; phase — строка в log.md
 python3 scripts/probe.py run --root . --test t --file f --cmd 'cmd' --replace OLD --with NEW  # мутационная проба одним вызовом; batch — пробы шага
 python3 scripts/report.py check --role coder --report .tasks/AL-1/reports/implement-step1.md  # сверка отчёта агента с деревом и логами гейтов
+python3 scripts/plan.py files --task .tasks/AL-1                 # файлы и шаги плана против порогов тира; код 1 — точка scope-change
+python3 scripts/plan.py check --task .tasks/AL-1                 # механическая часть ревью плана: строки для architect'а в MODE: fix
+python3 scripts/stats.py task .tasks/AL-1 .tasks/AL-2            # переделки, решения, проходы ревью и стоимость задач по log.md — для сравнения пар
+python3 scripts/lead.py decide … --exception                     # исключение из limits.* или порога файлов: записано, прецедентом не станет
 ```
 
 ## Статус
@@ -174,6 +178,12 @@ SendMessage, исполнитель фикса ревью по файлам пр
 (скилы читают секции, `resolve.py section`), architect одним Write, `probe.py` (мутационная проба
 одним вызовом), `report.py check` (сверка отчёта агента скриптом вместо чтения), один долгий
 опрос гейтов, рецепты изоляции worktree-сессии (`ISOLATION` в спавне).
+`0.9.0`: форма спеки и размер задачи — спека как намерение, сценарии приёмки, контракты и
+решения с основанием (дизайн и `Covers` в плане); порог файлов и шагов после плана
+(`plan.py files`, `tiers.max`, тир из постановки или брифа); механическая часть ревью плана
+(`plan.py check`); один содержательный проход ревью артефактов; research.md как вход спеки;
+coder правит спеку по ходу (`SPEC AMENDMENTS`, снимок spec.md в baseline); `specs.mode`
+(descriptions | adr | none) и гейт `structure`; `stats.py` для сравнения задач.
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

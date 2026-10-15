@@ -204,6 +204,20 @@ def publish(d: Path, state: Dict[str, Any]) -> None:
               "следующая публикация досылает всё", file=sys.stderr)
 
 
+def check_tier_ceiling(d: Path, tier: str) -> None:
+    """`tiers.max` of the project config caps every tier set here (protocol/tiers.md,
+    «Потолок тира проекта»): init --tier, set tier=, the research raise of S, a part's
+    tier. Without a readable config there is no ceiling."""
+    try:
+        cfg = lib.load_config(lib.find_project_root(d))
+        ceiling = str(lib.config_value(cfg, "tiers.max") or "L")
+    except lib.OmixflowError:
+        return
+    if TIERS.index(tier) > TIERS.index(ceiling):
+        raise lib.OmixflowError(f"тир {tier} выше потолка проекта tiers.max: {ceiling} — триаж ставит потолок "
+                                f"(строка в log.md), форсированный тир выше потолка — вопрос scope-change")
+
+
 def cmd_init(ns: argparse.Namespace) -> int:
     d = Path(ns.dir).resolve()
     card: Dict[str, Any] = {}
@@ -237,6 +251,8 @@ def cmd_init(ns: argparse.Namespace) -> int:
         if ns.tier or ns.forced:
             raise lib.OmixflowError(f"профиль {profile} не триажится: --tier и --forced не допускаются")
         tier = None
+    if tier:
+        check_tier_ceiling(d, tier)
     state: Dict[str, Any] = {
         "schema": 1,
         "id": ns.id,
@@ -245,6 +261,7 @@ def cmd_init(ns: argparse.Namespace) -> int:
         "mode": ns.mode,
         "tier": tier,
         "tier_forced": bool(ns.forced),
+        "tier_source": (ns.tier_source or ("flag" if ns.forced else None)) if tier else None,
         "phase": PROFILES[profile]["phases"][0],
         "completed": [],
         "step": None,
@@ -303,6 +320,8 @@ def cmd_set(ns: argparse.Namespace) -> int:
                 raise lib.OmixflowError(f"completed содержит фазы вне профиля {value}: {outside}")
         if key == "tier" and value not in TIERS:
             raise lib.OmixflowError(f"tier должен быть одним из {TIERS}")
+        if key == "tier":
+            check_tier_ceiling(d, value)
         if key == "mode" and value not in MODES:
             raise lib.OmixflowError(f"mode должен быть одним из {MODES}")
         set_dotted(state, key, value)
@@ -474,6 +493,8 @@ def main(argv=None) -> int:
     p.add_argument("--profile", default=None)
     p.add_argument("--tier", default=None)
     p.add_argument("--forced", action="store_true")
+    p.add_argument("--tier-source", default=None, choices=["flag", "statement", "brief"],
+                   help="what forced the tier (stored as tier_source; protocol/tiers.md «Тир из постановки или брифа»)")
     p.add_argument("--branch", default=None)
     p.add_argument("--base", default=None)
     p.add_argument("--multitask-id", default=None)

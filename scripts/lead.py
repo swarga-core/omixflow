@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The lead journal (protocol/lead.md, «Журнал»): an append-only JSON Lines event log.
 
-    lead.py [--journal PATH] decide --task T --q N --item I --point P --choice C --basis B [--by S]
+    lead.py [--journal PATH] decide --task T --q N --item I --point P --choice C --basis B [--by S] [--exception]
     lead.py [--journal PATH] escalate --task T --q N --item I --point P --summary S
     lead.py [--journal PATH] resolve E-n --answer TEXT [--decision D-n]
     lead.py [--journal PATH] replace D-n --with D-m
@@ -175,8 +175,11 @@ def write(ns: argparse.Namespace, build) -> int:
 def cmd_decide(ns: argparse.Namespace) -> int:
     def build(events, records):
         rid = next_id(events, "decision")
-        return ({"type": "decision", "id": rid, "task": ns.task, "q": ns.q, "item": ns.item,
-                 "point": ns.point, "choice": ns.choice, "basis": ns.basis, "by": ns.by}, rid)
+        rec = {"type": "decision", "id": rid, "task": ns.task, "q": ns.q, "item": ns.item,
+               "point": ns.point, "choice": ns.choice, "basis": ns.basis, "by": ns.by}
+        if ns.exception:
+            rec["exception"] = True     # an exception from limits.* or the tier file threshold: never a precedent
+        return (rec, rid)
     return write(ns, build)
 
 
@@ -369,7 +372,8 @@ def developer_made(decision: Dict[str, Any]) -> bool:
 def cmd_precedents(ns: argparse.Namespace) -> int:
     records = fold(read_events(ns.journal))
     decisions = [d for d in records["decision"].values()
-                 if d["point"] == ns.point and d["replaced_by"] is None and developer_made(d)]
+                 if d["point"] == ns.point and d["replaced_by"] is None and developer_made(d)
+                 and not d.get("exception")]     # protocol/lead.md: an exception is not a precedent
     print(json.dumps({"decisions": decisions, "rules": list(records["rule"].values())},
                      ensure_ascii=False, indent=2))
     return 0
@@ -454,6 +458,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         p.add_argument(flag, required=True)
     p.add_argument("--q", type=int, required=True)
     p.add_argument("--by", default="lead")
+    p.add_argument("--exception", action="store_true",
+                   help="an exception from limits.* or the tier file threshold: recorded, never returned by precedents")
     p.set_defaults(fn=cmd_decide)
 
     p = sub.add_parser("escalate")

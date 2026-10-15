@@ -28,8 +28,12 @@ Setup разработки: ветка или worktree, артефакты, ст
   slug для `local`).
 - `--worktree`: изолировать задачу в worktree (при `workspace.worktree: optional`).
 - `--profile=NAME`: профиль одиночной задачи (`full` по умолчанию).
-- `--tier=S|M|L`: тир; без флага и без `develop` пишется M. Профиль с
-  `triage: false` тира не получает: `--tier` вместе с ним ошибка.
+- `--tier=S|M|L [--forced --tier-source=flag|statement|brief]`: тир; без флага и без
+  `develop` пишется M (не выше `tiers.max`). `--forced` с источником — тир из флага,
+  постановки или брифа лида (`tiers.md`, «Тир из постановки или брифа»); в log.md
+  строка «тир {tier} — {флаг|постановка|бриф лида}». Профиль с `triage: false` тира не
+  получает: `--tier` вместе с ним ошибка. Тир выше `tiers.max` — `state.py` откажет
+  (`tiers.md`, «Потолок тира проекта»).
 - `--mode=pipeline`: ставит `develop`, скил не печатает «следующий шаг».
 - `{id} --part {part}`: старт части мультизадачи (обычно вызывает `develop`).
 - `--lead=NAME`: сессия под лидом; состояние получает `--lead NAME --asked {K}`,
@@ -84,7 +88,7 @@ scope, tier с обоснованием в одну строку). Затем:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" init "{TASK_DIR}" --id {id} --kind task \
-  --profile {profile} [--tier {tier} [--forced]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session} \
+  --profile {profile} [--tier {tier} [--forced --tier-source {flag|statement|brief}]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session} \
   [--lead {NAME} --asked {K}]
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" refine
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
@@ -94,7 +98,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
 `--tier` не передаётся при `triage: false`. `cost.py phase TASK_DIR start` ставит курсор
 стоимости: следующие фазы считаются от задачи (`runtime.md`, «Стоимость»); его строка —
 в `## Start ✅`. `log.md`: секция `## Start ✅` с веткой,
-базой, профилем, статусом трекера, стоимостью. Коммит артефактов (`artifacts.md`).
+базой, профилем, тиром и его источником при `--forced` («тир S — бриф лида»), статусом
+трекера, стоимостью. Коммит артефактов (`artifacts.md`).
 
 ### 4. Трекер
 
@@ -168,7 +173,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
    в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}
    [--lead {NAME} --asked {K}]`
    (профиль наследуется из состояния мультизадачи, `--tier` только при
-   `triage: true`); затем `state.py finish` refine и start; при `part_runner: sequential`
+   `triage: true`, с `--forced --tier-source statement`, когда тир назван в постановке
+   части); затем `state.py finish` refine и start; при `part_runner: sequential`
    ещё `cost.py phase {TASK_DIR} start` (`runtime.md`, «Стоимость»; части планировщика
    стоимость не считают); `log.md`. Коммит; при
    `part_isolation: shared` только пути каталога части.

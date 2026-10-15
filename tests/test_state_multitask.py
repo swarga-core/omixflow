@@ -21,6 +21,33 @@ def run(script: str, *args: str, stdin: str = "") -> subprocess.CompletedProcess
 
 
 class StateTests(unittest.TestCase):
+    def test_tier_ceiling_and_source(self):
+        """protocol/tiers.md «Потолок тира проекта»: init --tier and set tier= above tiers.max
+        fail; the forced tier keeps its source."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude" / "omixflow").mkdir(parents=True)
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt}\ntiers: {max: M}\n")
+            d = str(root / ".tasks" / "AL-1")
+            proc = run("state.py", "init", d, "--id", "AL-1", "--kind", "task", "--tier", "L", "--session", "s1")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("выше потолка проекта tiers.max: M", proc.stderr)
+            proc = run("state.py", "init", d, "--id", "AL-1", "--kind", "task", "--tier", "S", "--forced",
+                       "--tier-source", "brief", "--session", "s1")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            state = json.loads(run("state.py", "get", d).stdout)
+            self.assertEqual((state["tier"], state["tier_forced"], state["tier_source"]), ("S", True, "brief"))
+            self.assertEqual(run("state.py", "set", d, "tier=M").returncode, 0)
+            proc = run("state.py", "set", d, "tier=L")
+            self.assertEqual(proc.returncode, 2)
+            self.assertIn("tiers.max", proc.stderr)
+            # --forced without a source is the flag
+            d2 = str(root / ".tasks" / "AL-2")
+            run("state.py", "init", d2, "--id", "AL-2", "--kind", "task", "--tier", "M", "--forced", "--session", "s1")
+            self.assertEqual(json.loads(run("state.py", "get", d2).stdout)["tier_source"], "flag")
+
     def test_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = str(Path(tmp) / ".tasks" / "AL-1")

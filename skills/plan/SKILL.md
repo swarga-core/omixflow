@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered atomic steps with files and test checkpoints) via the architect agent and reviews it with the reviewer agent. Runs standalone only for L-tier tasks; in S and M the plan was produced with the spec. Use after /omixflow:spec or when the user says "составь план", "plan".
+description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered atomic steps with design, covered scenarios and contracts, files and test checkpoints) via the architect agent, checks it against the tier's file and step thresholds and reviews it with the reviewer agent. Runs standalone only for L-tier tasks; in S and M the plan was produced with the spec. Use after /omixflow:spec or when the user says "составь план", "plan".
 ---
 
 # OMIXFlow plan
@@ -37,22 +37,40 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 1. **Architect.** Если агент из `agents.architect` (`state.yaml`, имя может быть с суффиксом
    ротации) жив в этой сессии (`session` совпадает), SendMessage ему `MODE: plan`; иначе
    спавн с `name: architect-{id}`, `MODE: plan`, `TASK_DIR`, `ADAPTERS.lang`,
-   `RULES`. Формат: Overview, Steps (файлы CREATE/MODIFY, тест-чекпоинт), Project
-   Specs to Update, Verification. Порядок: types → domain → application → infra →
-   UI → integration → tests.
+   `RULES`, `SPECS` (из `specs.mode`). Формат: Overview, Steps (Covers — сценарии, контракты и D-n шага; Design;
+   файлы CREATE/MODIFY; тест-чекпоинт), Project Specs to Update, Verification. Порядок:
+   types → domain → application → infra → UI → integration → tests. Сразу после —
+   порог: `python3 {корень плагина}/scripts/plan.py files --task TASK_DIR`; код 1 — шаг 5
+   до ревью (план, который будут резать, целиком не ревьюится). Затем механическая проверка:
+   `python3 {корень плагина}/scripts/plan.py check --task TASK_DIR` (поля шагов, гейты
+   чекпоинтов названы и объявлены, нет ручных проверок и read-only путей, пути в дереве,
+   покрытие сценариев и контрактов, Project Specs to Update); код 1 — строки вывода
+   architect'у в `MODE: fix` как есть и повтор (до двух кругов; ответ architect'а «not a
+   defect: …» и остаток — reviewer'у строкой в ASPECTS; в log.md «plan.py check: кругов
+   {N}, остаток {M}»), только потом ревью.
 2. **Reviewer.** Аналогично: SendMessage живому агенту из `agents.reviewer` или спавн
-   с `name: reviewer-{id}`. `MODE: review`, ASPECTS: coverage (план реализует всё
-   из spec), ordering
-   (порядок зависимостей), granularity (шаг атомарен и верифицируем), test
-   checkpoints (у каждого шага), files (пути точны, новые помечены CREATE).
-   `ARTIFACT_PATHS: spec.md, plan.md`. Категории plan, architecture.
+   с `name: reviewer-{id}`. `MODE: review`, `SPECS`, ASPECTS плана из `agents/reviewer.md`,
+   «Aspects by phase» — только суждение: шаг с `Covers: none` без поведения, выбор уровня
+   решения без D-n — finding категории `spec` с пробой утверждения, порядок, гранулярность,
+   Design против спеки, внешний ресурс отдельным шагом, швы с живыми ветками, переходные
+   пометки, остаток `plan.py check`; механику скрипта (покрытие, чекпоинты, пути) не повторять.
+   `ARTIFACT_PATHS: spec.md, plan.md`. Категории plan, architecture, spec.
    `FINDINGS_PATH: {TASK_DIR}/review/plan-pass{N}.json`.
-3. **Findings.** `suggestion` auto-accept; `warning [plan]` с понятным фиксом
-   auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
+3. **Findings.** `suggestion` auto-accept; `warning [plan]` и `warning [spec]` с понятным
+   фиксом auto-accept (фикс `spec` — architect правит spec.md: недостающее решение или
+   сценарий); `warning [architecture]` и `critical` эскалация в точке `finding`.
 4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
-   тому же reviewer по тем же id, не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
+   тому же reviewer по тем же id (только сверка фиксов по id; новые findings лишь
+   `critical` и `warning [architecture]`, прочие оркестратор отклоняет строкой в log.md),
+   не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
    Живой architect и reviewer со Spec продолжают, если не сработал порог ротации (`tiers.md`).
-5. **Состояние.** Строка стоимости из `cost.py phase TASK_DIR plan` (`runtime.md`,
+5. **Порог файлов и шагов, проверка после фиксов.** `python3 {корень плагина}/scripts/plan.py
+   files --task TASK_DIR` после фиксов (и до ревью, шаг 1); код 1 — у L это больше восьми
+   шагов («Калибровка»), у S и M ещё и нетестовые файлы сверх порога — точка `scope-change`
+   с вариантами из `tiers.md`, «Порог файлов после плана»; решение строкой в log.md; код 2 —
+   план без распознанных строк файлов: поправить план. Затем снова `plan.py check`: фикс
+   мог добавить сценарий или файл; код 1 — architect'у, как в шаге 1.
+6. **Состояние.** Строка стоимости из `cost.py phase TASK_DIR plan` (`runtime.md`,
    «Стоимость»); `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
    steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов, стоимость. Коммит артефактов (`artifacts.md`).
 
@@ -73,7 +91,8 @@ Plan завершён: {TASK_DIR}/plan.md, шагов: {N}, findings: {N}, пр�
 | средняя фича | 4–6 |
 | большая фича | 6–8 |
 
-Больше восьми шагов: задачу стоит декомпозировать, возможно в мультизадачу.
+Больше восьми шагов: задачу стоит декомпозировать, возможно в мультизадачу — точка
+`scope-change`, варианты как у порога файлов (`tiers.md`, «Порог файлов после плана»).
 
 ## Правила
 

@@ -14,7 +14,7 @@
 │   ├── state.yaml       машинное состояние
 │   ├── log.md           журнал для человека
 │   ├── research.md      Source Files Map, findings, design questions, Handoff (см. ниже)
-│   ├── spec.md          дельта: Summary, Changes, Dependencies, Decisions, Out of Scope; в S ещё Research и Steps
+│   ├── spec.md          намерение и контракт: Summary, Intent, Scenarios (S1…), Contracts, Dependencies, Decisions, Out of Scope; в S — Research, Scenarios, Decisions, Steps
 │   ├── plan.md          шаги с файлами и тест-чекпоинтами (M, L)
 │   ├── review/          findings reviewer'а по проходам: {phase}-pass{N}.json
 │   └── reports/         отчёты coder'а и tester'а по заданиям: {phase}-{метка}.md (`runtime.md`, «Отчёт агента»)
@@ -154,8 +154,10 @@ updated: 2026-09-23T16:00:00Z
 
 ## research.md
 
-- Секции: Task Summary, Source Files Map, Current State, Existing Patterns, Findings,
-  Design Questions; при `HANDOFF` ещё `## Handoff` (`### Facts`, `### Decisions`,
+- Секции: Task Summary, Source Files Map, Findings (факты `R{n}` с доказательством
+  `file:line`, включая паттерны и факты из веба; пересказа кода нет — research.md читают
+  architect и ревьюер спеки, coder только карту), Design Questions; при `HANDOFF` ещё
+  `## Handoff` (`### Facts`, `### Decisions`,
   `### Affected Files and Contracts`, `### Open Questions for Dependents`).
 - Кросс-репо: сразу после заголовка `Repository`, `Ref`, `Sha`; пути Source Files Map
   чужого репозитория с префиксом `{repo}:`.

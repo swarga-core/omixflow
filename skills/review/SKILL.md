@@ -64,9 +64,19 @@ approve, шаг 5), не идти в ревью с красным. Красны�
 (`review-cycle.md`, шаг 4). Имя — в `agents.reviewer_code` (`state.py set`); живой агент
 оттуда в той же сессии (повторный запуск review) получает SendMessage, если порог
 ротации не сработал. `MODE: review`,
-`ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `PLUGIN_ROOT`, ASPECTS:
+`ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `SPECS` (из `specs.mode`), `PLUGIN_ROOT`, ASPECTS:
 
-- spec sync: код соответствует spec.md, project specs обновлены;
+- spec sync: код соответствует spec.md; то, что просит `specs.mode`, на месте
+  (`descriptions` — проектные спецификации обновлены, `adr` — запись решения на каждую
+  смену контракта, `none` — ничего сверх spec.md); правки спеки по ходу
+  (`SPEC AMENDMENTS` отчётов; дифф spec.md от коммита артефактов фазы Plan до HEAD:
+  `git diff {коммит «## Plan ✅»}..HEAD -- {TASK_DIR}/spec.md`; при `artifacts.tracked:
+  false` — снимок шага 1 из log.md («снимок spec.md шага 1: {blob}»): `git -C {PROJECT_ROOT}
+  cat-file -p {blob} > {scratchpad}/spec-before.md`, затем `git diff --no-index
+  {scratchpad}/spec-before.md {TASK_DIR}/spec.md`; снимок держит ref
+  `refs/omixflow/snapshots/{id}/{blob}`, `git gc` его не трогает) согласованы с кодом и не
+  трогают Contracts, Intent, Out of Scope и
+  выбор решений без решения в log.md;
 - code quality: именование, паттерны, обработка ошибок, мёртвый код;
 - type safety и запрещённые подавления из адаптера во всём диффе ветки, тесты тоже;
 - tests: покрытие сценариев spec, edge cases, отсутствие test fraud, мутационная
@@ -90,16 +100,19 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 
 Исполнитель — по файлам правки каждого finding (`review-cycle.md`, шаг 3), не по
 категории: правка задевает исходники → coder целиком (SendMessage живому агенту из
-`agents.coder`, имя может быть с суффиксом ротации, или спавн с `name: coder-{id}`),
+`agents.coder`, имя может быть с суффиксом ротации, или спавн с `name: coder-{id}` и
+`SPECS` из `specs.mode`),
 правка только в тестах и тестовой поддержке любой категории → tester (спавн с
 `name: tester-{id}`; файл, который в этом проходе правит coder, — coder'у), spec и plan → architect
 (SendMessage живому агенту из `agents.architect` или спавн с `name: architect-{id}`),
 architecture → решение в точке `finding`. Один файл в проходе — один агент. Порядок
 coder и tester — `review-cycle.md`, шаг 3. Coder получает `REPORT_PATH: {TASK_DIR}/reports/review-fix-pass{N}.md`, второе
-задание прохода — `{TASK_DIR}/reports/review-spec-sync-pass{N}.md`; tester —
+задание прохода (только `specs.mode: descriptions` с правилом проекта о строках тестов) —
+`{TASK_DIR}/reports/review-spec-sync-pass{N}.md`; tester —
 `{TASK_DIR}/reports/review-tests-pass{N}.md`. Перед каждым заданием прохода — базовая
-линия `report.py baseline --out {scratchpad}/baseline-{метка отчёта}.json`: coder, tester
-и coder снова делят один незакоммиченный пакет, и каждому считается только его дельта.
+линия `report.py baseline --out {scratchpad}/baseline-{метка отчёта}.json --task {TASK_DIR}`:
+coder, tester и coder снова делят один незакоммиченный пакет, и каждому считается только
+его дельта, а правки spec.md — только с этого снимка.
 Вид ответа (`failed`, `refused`, без файла) — как в implement 2.2; затем отчёт сверяет
 скрипт: `python3 {корень плагина}/scripts/report.py check --role coder|tester --report
 {REPORT_PATH} --root {PROJECT_ROOT} --baseline {файл}` без `--also` (у пакета фиксов

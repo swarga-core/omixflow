@@ -26,12 +26,17 @@ MUTATION_LINES = ("  - a.test.ts: adds ← M1 a.ts: `a + b` → `a - b` → RED\
                   "  - a.test.ts: subtracts ← M2 a.ts: `a - b` → `a + b` → RED\n")
 MUTATIONS_BLOCK = ("MUTATIONS:\n  Probes by a script in SCRATCH_DIR; checksums matched afterwards, no .orig left.\n"
                    + MUTATION_LINES)
+SPEC = ("# Spec: T-1\n\n## Summary\n\nadd and sub\n\n## Intent\n\n- callers can add\n\n## Scenarios\n\n"
+        "- S1 — adds. Given two numbers, when add, then the sum.\n\n## Contracts\n\n- `add` (a) — new\n\n"
+        "## Decisions\n\n- D1: plain functions — simple; rests on: nothing\n\n## Out of Scope\n\n- mul\n")
 REPORT = """STEP: 1 — add
 FILES CREATED:
   - src/a.test.ts (2 tests)
 FILES MODIFIED:
   - src/a.ts (add, sub)
 PROJECT SPECS UPDATED:
+  - none
+SPEC AMENDMENTS:
   - none
 GATES (`resolve.py verify --at step`: typecheck, test; build named by the checkpoint):
   - typecheck: PASS (`pnpm typecheck`)
@@ -77,6 +82,7 @@ class ReportCheckTests(unittest.TestCase):
         (self.root / "src" / "a.ts").write_text("export const add = (a, b) => a + b\n")
         (self.root / ".tasks" / "T-1" / "reports").mkdir(parents=True)
         (self.root / ".tasks" / "T-1" / "state.yaml").write_text("id: T-1\n")
+        (self.root / ".tasks" / "T-1" / "spec.md").write_text(SPEC)
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "base")
         # the step: a source change, a new test file with two tests, an artifact the orchestrator wrote
@@ -340,6 +346,237 @@ class ReportCheckTests(unittest.TestCase):
         self.report.unlink()
         code, out = self.check("--also", "build")
         self.assertEqual(code, 2, out)
+
+    def test_spec_amendments_are_checked_against_the_snapshot_and_a_decision_or_contract_change_is_a_stop(self):
+        """0.9 step 6: the coder amends the spec and says so; a change to a contract, a
+        decision's choice (however it wraps or is labelled), the intent or the scope is a
+        stop. The base is the baseline's snapshot of spec.md (untracked artifacts, earlier
+        uncommitted edits), else HEAD."""
+        spec = self.root / ".tasks" / "T-1" / "spec.md"
+        self.write()
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("SPEC AMENDMENTS: none, spec.md не менялся (против HEAD)", out)
+        # an amendment of a scenario, unreported
+        spec.write_text(SPEC.replace("then the sum.", "then the sum; NaN inputs give NaN (S1a)."))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("SPEC AMENDMENTS: none, а spec.md изменён в секциях «Scenarios»", out)
+        amended = "SPEC AMENDMENTS:\n  - spec.md «Scenarios»: S1 names NaN inputs — vitest showed add(NaN, 1)"
+        self.write(**{"SPEC AMENDMENTS:\n  - none": amended})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("SPEC AMENDMENTS: - spec.md «Scenarios»", out)
+        self.assertIn("правки названы", out)
+        # an earlier uncommitted edit (the orchestrator's, before the assignment) is not the coder's: the snapshot is the base
+        base = self.root / ".git" / "baseline-step.json"
+        code, out, _ = run("baseline", "--out", str(base), "--root", str(self.root), "--task", str(spec.parent))
+        self.assertEqual(code, 0, out)
+        self.assertIn("spec.md snapshot", out)
+        self.write()
+        code, out = self.check("--also", "build", "--baseline", str(base))
+        self.assertEqual(code, 0, out)
+        self.assertIn("не менялся (против снимка baseline)", out)
+        code, out = self.check("--also", "build")                       # against HEAD the same edit is a problem
+        self.assertEqual(code, 1, out)
+        # a claim without a change
+        spec.write_text(SPEC)
+        self.write(**{"SPEC AMENDMENTS:\n  - none": amended})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("называет правки, а spec.md против HEAD не изменён", out)
+        # decisions: the `rests on` fact may change on its own line, the choice may not — however it wraps or is labelled
+        wrapped = SPEC.replace("- D1: plain functions — simple; rests on: nothing",
+                               "- D1 (A1, D-283): plain\n  functions — simple;\n  rests on: nothing")
+        spec.write_text(wrapped)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "wrapped decision")
+        spec.write_text(wrapped.replace("rests on: nothing", "rests on: vitest 2 runs ESM"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D1 rests on vitest ESM"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        spec.write_text(wrapped.replace("plain\n  functions", "plain\n  classes"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D1 classes"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("правка в «Decisions D1» — это смена объёма, решения или контракта", out)
+        spec.write_text(wrapped.replace("rests on: nothing", "rests on: nothing\n- D2: cache results — faster"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D2 added"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("«Decisions D2»", out)
+        # bold labels and `###` decisions (mewria MEW-8/10/15) are decisions too; unrecognised items are a stop
+        bold = wrapped.replace("- D1 (A1, D-283): plain\n  functions — simple;\n  rests on: nothing",
+                               "- **D1 — plain functions.** simple;\n  rests on: nothing\n\n### D2: no cache\n\nnever;\nrests on: perf")
+        spec.write_text(bold)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "bold decisions")
+        spec.write_text(bold.replace("rests on: perf", "rests on: perf probe 2026"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D2 rests on probe"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        spec.write_text(bold.replace("**D1 — plain functions.**", "**D1 — classes.**"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D1 classes"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("«Decisions D1»", out)
+        unlabelled = bold.replace("- **D1 — plain functions.** simple;\n  rests on: nothing\n\n### D2: no cache\n\nnever;\nrests on: perf",
+                                  "plain functions, no cache")
+        spec.write_text(unlabelled)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "unlabelled")
+        spec.write_text(unlabelled.replace("plain functions, no cache", "classes, no cache"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: classes"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("пункты решений не распознаны", out)
+        spec.write_text(wrapped)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "back")
+        for section, old, new in (("Contracts", "- `add` (a) — new", "- `add` (a) — new, async"),
+                                  ("Out of Scope", "- mul", "- mul\n- div"),
+                                  ("Intent", "- callers can add", "- callers can add and sub")):
+            spec.write_text(wrapped.replace(old, new))
+            self.write(**{"SPEC AMENDMENTS:\n  - none": f"SPEC AMENDMENTS:\n  - spec.md «{section}»: changed"})
+            code, out = self.check("--also", "build")
+            self.assertEqual(code, 1, out)
+            self.assertIn(f"правка в «{section}» — это смена объёма, решения или контракта", out)
+        # a blank line or trailing whitespace in a protected section is no change at all
+        spec.write_text(wrapped.replace("## Contracts\n\n- `add` (a) — new", "## Contracts\n\n\n- `add` (a) — new   "))
+        self.write()
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("spec.md не менялся", out)
+        # a heading inside a code fence opens no section: an example in Scenarios is a Scenarios amendment
+        spec.write_text(wrapped.replace("then the sum.", "then the sum.\n\n  ```\n  ## Intent\n  ```"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Scenarios»: example block"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("изменён в «Scenarios», правки названы", out)
+        spec.write_text(wrapped)
+        # artifacts kept outside git (mewria, SwAIS): without a snapshot the section is unchecked, with one it is checked
+        self.git("rm", "-q", "--cached", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "untrack")
+        spec.write_text(wrapped)
+        self.write()
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("НЕ СВЕРЕНО: SPEC AMENDMENTS не сверены: нет снимка spec.md", out)
+        code, out, _ = run("baseline", "--out", str(base), "--root", str(self.root), "--task", str(spec.parent))
+        self.assertEqual(code, 0, out)
+        blob = json.loads(base.read_text())["spec"]["blob"]
+        self.assertIn(f"refs/omixflow/snapshots/T-1/{blob}", self.git("for-each-ref", "--format=%(refname)"))   # gc-proof
+        spec.write_text(wrapped.replace("- `add` (a) — new", "- `add` (a) — new, async"))
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Contracts»: add is async"})
+        code, out = self.check("--also", "build", "--baseline", str(base))
+        self.assertEqual(code, 1, out)
+        self.assertIn("правка в «Contracts»", out)
+        self.assertNotIn("НЕ СВЕРЕНО", out)
+
+    def test_a_project_root_nested_in_a_larger_repository_is_diffed_with_a_relative_head_path(self):
+        outer = Path(self.tmp.name) / "outer"
+        proj = outer / "proj"
+        (proj / ".claude" / "omixflow").mkdir(parents=True)
+        subprocess.run(["git", "-C", str(outer), "init", "-q", "-b", "main"], check=True)
+        subprocess.run(["git", "-C", str(outer), "config", "user.email", "t@t"], check=True)
+        subprocess.run(["git", "-C", str(outer), "config", "user.name", "t"], check=True)
+        (proj / ".claude" / "omixflow" / "flow.yaml").write_text(CFG)
+        (proj / ".tasks" / "T-1" / "reports").mkdir(parents=True)
+        (proj / ".tasks" / "T-1" / "spec.md").write_text(SPEC)
+        (proj / "src").mkdir()
+        (proj / "src" / "a.ts").write_text("export const add = (a, b) => a + b\n")
+        subprocess.run(["git", "-C", str(outer), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(outer), "commit", "-qm", "base"], check=True)
+        (proj / "src" / "a.ts").write_text("export const add = (a, b) => a + b\nexport const sub = (a, b) => a - b\n")
+        (proj / "src" / "a.test.ts").write_text(TEST_FILE)
+        (proj / ".tasks" / "T-1" / "spec.md").write_text(SPEC.replace("then the sum.", "then the sum; NaN gives NaN."))
+        report = proj / ".tasks" / "T-1" / "reports" / "implement-step1.md"
+        report.write_text(REPORT.format(tree="   M src/a.ts\n  ?? src/a.test.ts", mutations=MUTATION_LINES)
+                          .replace("SPEC AMENDMENTS:\n  - none", "SPEC AMENDMENTS:\n  - spec.md «Scenarios»: NaN"))
+        (outer / ".git" / "omixflow-gates").mkdir()
+        (outer / ".git" / "omixflow-gates" / "implement-step1-build.exit").write_text("0\n")
+        code, out, err = run("check", "--role", "coder", "--report", str(report), "--root", str(proj), "--also", "build")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("правки названы", out)
+
+    def test_project_specs_updated_follows_specs_mode(self):
+        """0.9 step 7: under `adr` the listed paths are records in adr_dir, new on this step;
+        under `none` the section is none; `descriptions` is the reviewer's judgement."""
+        cfg_path = self.root / ".claude" / "omixflow" / "flow.yaml"
+        (self.root / "docs" / "decisions").mkdir(parents=True)
+        cfg_path.write_text(CFG + "specs: {mode: adr}\n")
+        self.git("add", ".claude/omixflow/flow.yaml")
+        self.git("commit", "-qm", "adr mode")
+        self.write()
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("none — шаг без записи решения (specs.mode adr)", out)
+        record = self.root / "docs" / "decisions" / "T-1-add.md"
+        record.write_text("date: 2026-10-13\ntask: T-1\ndecision: D1\n\nadd is a plain function.\n")
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `docs/decisions/T-1-add.md` (D1)",
+                      "  (снято перед записью отчёта)": "  ?? docs/decisions/T-1-add.md"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("записи решений в docs/decisions/ на месте", out)
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `packages/schemas/spec.md` (add)",
+                      "  (снято перед записью отчёта)": "  ?? docs/decisions/T-1-add.md"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("вне docs/decisions/", out)
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `docs/decisions/T-1-nope.md`",
+                      "  (снято перед записью отчёта)": "  ?? docs/decisions/T-1-add.md"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("записи `docs/decisions/T-1-nope.md` нет в дереве", out)
+        # mewria's report form: a bare path followed by backticked code, a trailing colon, an absolute path
+        for line in ("- docs/decisions/T-1-add.md — D1: `add` is plain", "- docs/decisions/T-1-add.md:",
+                     f"- {self.root}/docs/decisions/T-1-add.md (D1)"):
+            self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  " + line,
+                          "  (снято перед записью отчёта)": "  ?? docs/decisions/T-1-add.md"})
+            code, out = self.check("--also", "build")
+            self.assertEqual(code, 0, out)
+        # a record added on the branch may be refined until the merge
+        (self.root / ".tasks" / "T-1" / "state.yaml").write_text("id: T-1\nbase: main\n")
+        self.git("checkout", "-q", "-b", "task/T-1")
+        self.git("add", "docs/decisions/T-1-add.md")
+        self.git("commit", "-qm", "record on the branch")
+        committed = record.read_text()
+        record.write_text(committed + "\nrefined\n")
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `docs/decisions/T-1-add.md` (D1 refined)",
+                      "  (снято перед записью отчёта)": "   M docs/decisions/T-1-add.md\n   M .tasks/T-1/state.yaml"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("записи решений в docs/decisions/ на месте", out)
+        # one that existed at the base may not
+        record.write_text(committed)
+        (self.root / ".tasks" / "T-1" / "state.yaml").write_text("id: T-1\n")
+        self.git("checkout", "-q", "main")              # the record is the branch's: main has neither it nor its dir
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(committed)
+        self.git("add", "docs/decisions/T-1-add.md")
+        self.git("commit", "-qm", "record at the base")
+        self.git("checkout", "-q", "-b", "task/T-2")
+        (self.root / ".tasks" / "T-1" / "state.yaml").write_text("id: T-1\nbase: main\n")
+        record.write_text(committed + "\nrefined\n")
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `docs/decisions/T-1-add.md` (D1 refined)",
+                      "  (снято перед записью отчёта)": "   M docs/decisions/T-1-add.md\n   M .tasks/T-1/state.yaml"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("была в базе ветки и правлена", out)
+        record.write_text(committed)
+        (self.root / ".tasks" / "T-1" / "state.yaml").write_text("id: T-1\n")
+        # none: nothing beyond spec.md
+        cfg_path.write_text(CFG + "specs: {mode: none}\n")
+        self.git("add", ".claude/omixflow/flow.yaml")
+        self.git("commit", "-qm", "none mode")
+        self.write(**{"PROJECT SPECS UPDATED:\n  - none": "PROJECT SPECS UPDATED:\n  - `packages/schemas/spec.md` (add)"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("при specs.mode none секция — `none`", out)
+        self.write()
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("PROJECT SPECS UPDATED: none (specs.mode none)", out)
 
     def test_scratch_becomes_a_log_line_and_json_carries_everything(self):
         self.write(**{"SCRATCH: clean": "SCRATCH: /tmp/x/probes 12 MB — left outside the tree, could not remove"})

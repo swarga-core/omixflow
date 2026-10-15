@@ -131,6 +131,259 @@ class SkillLint(unittest.TestCase):
     SEND_RE = re.compile(r"SendMessage[^\n]*?\b(to:\s*)?[\"'`]?([a-z]+)-\{", re.I)
     SPAWN_RE = re.compile(r"name:\s*[\"'`]?([a-z]+)-\{", re.I)
 
+    def test_spec_is_intent_scenarios_contracts_and_decisions_and_design_lives_in_the_plan(self):
+        """0.9 step 2: specs of 0.5–0.8 averaged 34k characters of per-file design; the
+        reviewer's catches were in scenarios, boundary contracts and the claims behind
+        decisions. The plan carries the design and says which scenarios each step covers."""
+        _, architect = lib.parse_frontmatter(ROOT / "agents" / "architect.md")
+        flat_arch = " ".join(architect.split())
+        for marker in ("## Intent", "## Scenarios", "## Contracts", "## Decisions", "## Out of Scope",
+                       "**Covers:**", "**Design:**", "rests on:"):
+            self.assertIn(marker, architect, marker)
+        self.assertNotIn("#### Modified contracts", architect)      # the per-slice design format is gone
+        # the tests an architect can apply: what is a Contract, what is a Decision (finding 3, 4 of the step review)
+        self.assertIn("**What is a Contract.** Any statement a caller outside the files that implement it relies on", flat_arch)
+        self.assertIn("another package of the same task included", flat_arch)
+        self.assertIn("**What is a Decision.** A choice with a rejected alternative the developer could prefer", flat_arch)
+        self.assertIn("also when it is about internals", flat_arch)
+        self.assertIn("**Decisions live in the spec, not the plan.**", flat_arch)
+        self.assertIn("Every scenario and every contract is covered by a step", flat_arch)
+        self.assertIn("a step with `Covers: none` changes no observable behaviour", flat_arch)
+        self.assertIn("ids that are append-only within the task", flat_arch)
+        self.assertIn("process criteria (gates, test style, review) go to the plan's Verification", flat_arch)
+        self.assertEqual(flat_arch.count("Marshal.SizeOf"), 1)        # the evidence once, not three times
+        _, reviewer = lib.parse_frontmatter(ROOT / "agents" / "reviewer.md")
+        flat = " ".join(reviewer.split())
+        self.assertIn("every claim a decision rests on probed", flat)
+        self.assertIn("Design that no caller and no project spec states is a `spec` finding", flat)
+        self.assertIn("Not an aspect: wording, section order, style", flat)
+        self.assertIn("every behavioural acceptance criterion of task.md has one", flat)
+        self.assertIn("every scenario and contract in some step's `Covers`", flat)
+        self.assertIn("project specs listed; `plan.py files`: the file and step thresholds) — do not repeat it", flat)
+        self.assertIn("a step with `Covers: none` whose Design or Files change observable behaviour is a finding", flat)
+        self.assertIn("a Design choice that meets the Decision test (architect.md «What is a Decision») without a D-n is a `spec` finding", flat)
+        self.assertIn("**Plan review** (plan, architecture, spec)", flat)
+        for agent in ("coder", "tester"):            # a test proves a scenario: the MUTATIONS line names it
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertIn("- {new test} [S{n}] ← {probe}", body)
+        _, tester = lib.parse_frontmatter(ROOT / "agents" / "tester.md")
+        self.assertIn("`## Scenarios` (S1, S2, …) are the tests to write", " ".join(tester.split()))
+        _, coder = lib.parse_frontmatter(ROOT / "agents" / "coder.md")
+        self.assertIn("covered scenarios and contracts, design, files, test checkpoint", " ".join(coder.split()))
+        spec = (ROOT / "skills" / "spec" / "SKILL.md").read_text(encoding="utf-8")
+        flat_spec = " ".join(spec.split())
+        self.assertIn("Intent, Scenarios (S1…), Contracts, Dependencies, Decisions", flat_spec)
+        self.assertIn("ASPECTS спеки из `agents/reviewer.md`, «Aspects by phase»", flat_spec)   # L points, not restates
+        self.assertIn("`## Scenarios` (1–3 сценария S1…", flat_spec)                   # S tier too
+        self.assertIn("`## Out of Scope` (одной строкой", flat_spec)
+        self.assertIn("ярлыки буквально", flat_spec)                                  # the S skeleton check reads
+        for label in ("**Covers:** S1", "**Files:**", "**Test checkpoint:**"):
+            self.assertIn(label, flat_spec)
+        self.assertNotIn("Changes по слайсам", spec)
+        self.assertNotIn("## Delta", spec)
+        plan_skill = " ".join((ROOT / "skills" / "plan" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("Covers — сценарии, контракты и D-n шага; Design", plan_skill)       # L plan phase, finding 1
+        for skill in ("spec", "plan"):                                 # the mechanical check runs before the reviewer
+            text = " ".join((ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").split())
+            with self.subTest(skill=skill):
+                self.assertGreaterEqual(text.count("scripts/plan.py check --task TASK_DIR"), 2 if skill == "spec" else 1)
+        self.assertIn("The mechanical part ran before you (`plan.py check`", flat)
+        self.assertIn("do not repeat it", flat)
+        self.assertNotIn("file paths exact, new files marked CREATE", flat)        # mechanical, the script's
+        for judgement in ("an external resource", "seams with branches in flight", "`Transitional notes`"):
+            self.assertIn(judgement, flat)                                      # the backlog's plan defects have an owner
+        _, architect_body = lib.parse_frontmatter(ROOT / "agents" / "architect.md")
+        self.assertIn("Lines of `plan.py check` come without ids", " ".join(architect_body.split()))
+        for skill in ("spec", "plan"):
+            text = " ".join((ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").split())
+            with self.subTest(skill=skill):
+                self.assertIn("Затем снова `plan.py check`", text)                   # after fixes too
+        self.assertIn("Категории plan, architecture, spec", plan_skill)
+        self.assertIn("выбор уровня решения без D-n — finding категории `spec`", plan_skill)
+        for path in ("agents/architect.md", "skills/spec/SKILL.md", "skills/plan/SKILL.md"):
+            m = re.search(r"^description:\s*(.*)$", (ROOT / path).read_text(encoding="utf-8"), re.M)
+            desc = m.group(1) if m else ""                 # a colon in the description breaks the YAML parser
+            with self.subTest(path=path):
+                self.assertNotIn("the delta (what changes and why)", desc)
+                self.assertNotIn("the task delta", desc)
+        self.assertIn("`Design` consistent with the spec's contracts and decisions", flat)
+        self.assertIn("the claim under that choice", flat)            # probed in the same pass (one-pass rule)
+        self.assertIn("appears in a `[S{n}]` tag of the reports' MUTATIONS lines", flat)
+        for path in iter_files("protocol", "skills", "agents"):       # the old form nowhere, not only in named files
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(ROOT).as_posix()):
+                for old in ("Research, Delta, Steps", "Changes по слайсам", "#### Modified contracts", "## Delta"):
+                    self.assertNotIn(old, text)
+        artifacts = (ROOT / "protocol" / "artifacts.md").read_text(encoding="utf-8")
+        self.assertIn("Summary, Intent, Scenarios (S1…), Contracts, Dependencies, Decisions, Out of Scope", artifacts)
+        phases = (ROOT / "protocol" / "phases.md").read_text(encoding="utf-8")
+        self.assertIn("сценарии приёмки, контракты на границе, решения с основанием", phases)
+
+    def test_artifact_review_searches_once_and_research_is_the_input_of_the_spec(self):
+        """0.9 steps 3 and 5: passes 2–3 of spec reviews were a cascade of document edits
+        (mewria: 20 of 31 outcome-changing findings in pass 1); research.md was cited once
+        in 37 coder reports and averaged 31k chars of narrative."""
+        cycle = (ROOT / "protocol" / "review-cycle.md").read_text(encoding="utf-8")
+        limit = " ".join("\n".join(lib.section_lines(cycle, "Лимит проходов")[1]).split())
+        self.assertIn("Ревью артефактов (Spec, Plan): один содержательный проход", limit)
+        self.assertIn("новые findings в них — только `critical` и `warning [architecture]`", limit)
+        self.assertIn("ревью кода это правило не касается", limit)
+        _, reviewer = lib.parse_frontmatter(ROOT / "agents" / "reviewer.md")
+        self.assertIn("On an artifact re-review (spec, plan) you add a new finding only when it is `critical` or `warning [architecture]`",
+                      " ".join(reviewer.split()))
+        for skill in ("spec", "plan"):
+            text = " ".join((ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").split())
+            with self.subTest(skill=skill):
+                self.assertIn("только сверка фиксов", text)
+        _, researcher = lib.parse_frontmatter(ROOT / "agents" / "researcher.md")
+        flat = " ".join(researcher.split())
+        self.assertIn("research.md is the input of the spec, not a document of its own", flat)
+        for gone in ("## Current State", "## Existing Patterns", "## External Research"):
+            self.assertNotIn(gone, researcher)
+        self.assertIn("R1: {one fact the spec rests on", researcher)
+        artifacts = (ROOT / "protocol" / "artifacts.md").read_text(encoding="utf-8")
+        self.assertIn("Findings (факты `R{n}` с доказательством", artifacts)
+        self.assertNotIn("Current State", artifacts)
+        self.assertNotIn("## External Research", (ROOT / "skills" / "research" / "SKILL.md").read_text(encoding="utf-8"))
+
+    def test_the_sdd_invariant_takes_the_form_the_project_chooses(self):
+        """0.9 step 7: project specs passed through in SwAIS and were 41 % bookkeeping in
+        mewria; `specs.mode` picks descriptions, decision records or nothing, and the
+        `structure` gate holds the invariants mechanically."""
+        phases = " ".join((ROOT / "protocol" / "phases.md").read_text(encoding="utf-8").split())
+        self.assertIn("по `specs.mode` конфига", phases)
+        self.assertIn("**одна на решение D-n, которое меняет контракт**", phases)          # the unit of a record
+        self.assertIn("Колонки статусов, прогресса и имён тестов, пометки «→ {id}» — конвенция проекта", phases)
+        self.assertIn("`git diff --diff-filter=MDR {base}...HEAD -- {adr_dir}` пуст", phases)
+        self.assertIn("`none` — ничего сверх spec.md задачи", phases)
+        self.assertIn("без строки — `descriptions`", phases)
+        cycle = " ".join((ROOT / "protocol" / "review-cycle.md").read_text(encoding="utf-8").split())
+        self.assertIn("только при `specs.mode: descriptions` и правиле проекта о таких строках", cycle)
+        review = " ".join((ROOT / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("второе задание прохода (только `specs.mode: descriptions`", review)
+        pr = " ".join((ROOT / "skills" / "pr-review" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("По `specs.mode` конфига (`cfg.py get specs.mode`", pr)
+        self.assertIn("`none`: группа G не проверяется", pr)
+        for agent in ("architect", "coder", "reviewer"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertIn("absent means `descriptions`", " ".join(body.split()))
+        glossary = (ROOT / "protocol" / "glossary.md").read_text(encoding="utf-8")
+        self.assertIn("| запись решения | decision record (ADR) |", glossary)
+        self.assertIn("structure, build, e2e, visual |", glossary)
+        self.assertIn("verify.structure", (ROOT / "adapters" / "lang" / "PORT.md").read_text(encoding="utf-8").split("---")[1])
+        runtime = (ROOT / "protocol" / "runtime.md").read_text(encoding="utf-8")
+        self.assertIn("    SPECS: {descriptions | adr {specs.adr_dir} | none}", runtime)
+        for agent in ("architect", "coder", "reviewer"):
+            _, body = lib.parse_frontmatter(ROOT / "agents" / f"{agent}.md")
+            with self.subTest(agent=agent):
+                self.assertIn("- **SPECS**:", body)
+        _, coder = lib.parse_frontmatter(ROOT / "agents" / "coder.md")
+        flat = " ".join(coder.split())
+        self.assertIn("`adr {dir}` — one decision record per D-n the step implements that changes a contract", flat)
+        self.assertIn("a record that existed at the base of the branch is never edited", flat)
+        _, reviewer = lib.parse_frontmatter(ROOT / "agents" / "reviewer.md")
+        self.assertIn("every D-n of the branch that changes a contract has its record there", " ".join(reviewer.split()))
+        for skill in ("spec", "plan", "implement", "review"):          # every spawn passes SPECS
+            text = (ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
+            with self.subTest(skill=skill):
+                self.assertIn("`SPECS`", text)
+        self.assertIn("structure", lib.GATES)
+        self.assertIn("structure", lib.STEP_GATES)
+        self.assertIn("`structure` (структурные инварианты кода", (ROOT / "adapters" / "lang" / "PORT.md").read_text(encoding="utf-8"))
+        self.assertIn("| structure |", (ROOT / "adapters" / "lang" / "ts.md").read_text(encoding="utf-8"))
+        template = (ROOT / "templates" / "flow.yaml").read_text(encoding="utf-8")
+        self.assertIn("specs:\n  mode: descriptions\n  adr_dir: docs/decisions", template)
+        self.assertIn("# structure:", template)
+        self.assertIn("def check_specs", (ROOT / "scripts" / "doctor.py").read_text(encoding="utf-8"))
+
+    def test_coder_amends_the_spec_and_stops_on_scope_decisions_and_contracts(self):
+        """0.9 step 6: coders reported 13 departures from the spec's letter and stopped twice;
+        amendments go into the spec with a report line, three kinds are a stop."""
+        _, coder = lib.parse_frontmatter(ROOT / "agents" / "coder.md")
+        flat = " ".join(coder.split())
+        self.assertIn("**The spec learns from the implementation.**", flat)
+        self.assertIn("SPEC AMENDMENTS:", coder)
+        for kind in ("the **scope**", "the **choice of a decision**", "a **contract** in `## Contracts`"):
+            self.assertIn(kind, flat)
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import report as rp  # noqa: E402
+        self.assertIn("SPEC AMENDMENTS", rp.SECTIONS["coder"])
+        self.assertEqual(rp.STOP_SECTIONS, ("Contracts", "Out of Scope", "Intent"))
+        self.assertTrue(callable(rp.decision_choices))              # a decision's choice, however it wraps
+        implement = " ".join((ROOT / "skills" / "implement" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("`SPEC AMENDMENTS` — в log.md", implement)
+        self.assertIn("coder остановился на спеке: смена объёма (Intent, Out of Scope), выбора решения D-n или контракта", implement)
+        self.assertIn("coder сообщает конфликт spec и plan (план противоречит спеке", implement)   # still a stop reason
+        for skill in ("implement", "review"):                       # every baseline snapshots the spec
+            text = " ".join((ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").split())
+            with self.subTest(skill=skill):
+                self.assertEqual(len(re.findall(r"report\.py baseline --out[^`]*?--task \{TASK_DIR\}", text)),
+                                 text.count("report.py baseline --out"))
+        review = " ".join((ROOT / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("правки спеки по ходу (`SPEC AMENDMENTS` отчётов", review)
+        self.assertIn("от коммита артефактов фазы Plan до HEAD", review)
+        cycle = " ".join("\n".join(lib.section_lines((ROOT / "protocol" / "review-cycle.md").read_text(encoding="utf-8"), "Лимит проходов")[1]).split())
+        self.assertIn("оркестратор, получив их, отклоняет строкой в log.md", cycle)   # the rule binds the orchestrator too
+        self.assertIn("Первый проход нового объёма", cycle)
+        _, reviewer = lib.parse_frontmatter(ROOT / "agents" / "reviewer.md")
+        self.assertIn("the spec's own diff since the plan", " ".join(reviewer.split()))
+
+    def test_tier_rules_reach_every_place_the_tier_is_set_or_the_plan_is_final(self):
+        """SwAIS T-1, T-6, T-7, T-11: M-tier plans touched 28–63 files against m_max_files 15
+        and nothing in the flow said so (0.9 step 1); G-22: a tier from the brief was treated
+        as forced by judgement; tiers.max: a project could not cap its tier."""
+        tiers = (ROOT / "protocol" / "tiers.md").read_text(encoding="utf-8")
+        titles = {s["title"] for s in lib.sections_of(tiers)}
+        for title in ("Тир из постановки или брифа", "Потолок тира проекта", "Порог файлов после плана"):
+            self.assertIn(title, titles)
+        section = lib.section_lines(tiers, "Порог файлов после плана")
+        self.assertEqual(section[0]["level"], 2)                        # its own heading: printed whole, read on demand
+        threshold = " ".join("\n".join(section[1]).split())
+        self.assertIn("scripts/plan.py files --task TASK_DIR", threshold)
+        self.assertIn("Молчаливого «остаётся M» нет", threshold)
+        self.assertIn("режет вертикально", threshold)                   # a slice by scenarios, not a prefix of steps
+        self.assertIn("без прецедента", threshold)                      # lead.md: limit exceptions are not precedents
+        self.assertNotIn("становится прецедентом", threshold)
+        self.assertIn("до ревью", threshold)
+        criteria = " ".join("\n".join(lib.section_lines(tiers, "Критерии")[1]).split())
+        self.assertIn("нетестовых файлов", criteria)
+        self.assertNotIn("Research, Delta, Steps", criteria)
+        self.assertIn("Не выше потолка `tiers.max`; форсированный тир не повышается молча", criteria)
+        for skill in ("spec", "plan"):          # every place a plan becomes final runs the threshold, with the full path
+            text = " ".join((ROOT / "skills" / skill / "SKILL.md").read_text(encoding="utf-8").split())
+            with self.subTest(skill=skill):
+                self.assertGreaterEqual(text.count("scripts/plan.py files --task"), 3 if skill == "spec" else 2)
+                self.assertNotIn("Порог файлов: `plan.py files", text)
+                self.assertIn("«Порог файлов после плана»", text)
+        develop = (ROOT / "skills" / "develop" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("«Тир из постановки или брифа»", develop)
+        self.assertIn("tiers.max", develop)
+        self.assertIn("--forced --tier-source={flag|statement|brief}", develop)
+        self.assertIn("как у задачи (потолок", develop)                 # a part's triage is capped too
+        start = (ROOT / "skills" / "start" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("tiers.max", start)
+        self.assertIn("--forced --tier-source {flag|statement|brief}", start)
+        self.assertIn("тиром и его источником при `--forced`", start)
+        research = " ".join((ROOT / "skills" / "research" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("выше потолка `tiers.max` скрипт откажет", research)
+        state_py = (ROOT / "scripts" / "state.py").read_text(encoding="utf-8")
+        self.assertIn("def check_tier_ceiling", state_py)
+        lead_md = " ".join((ROOT / "protocol" / "lead.md").read_text(encoding="utf-8").split())
+        self.assertIn("и из порога файлов тира («продолжить как есть»", lead_md)      # option c) is no precedent
+        self.assertIn("`lead.py decide … --exception`", lead_md)
+        self.assertIn("или из порога файлов тира — с `--exception`", lead_md)          # the session's own journal write too
+        self.assertIn("запись идёт с `lead.py decide … --exception`", threshold)
+        self.assertIn("--exception", (ROOT / "scripts" / "lead.py").read_text(encoding="utf-8"))
+        lead_skill = " ".join((ROOT / "skills" / "lead" / "SKILL.md").read_text(encoding="utf-8").split())
+        self.assertIn("и из порога файлов тира", lead_skill)
+        self.assertIn("`lead.py decide … --exception`", lead_skill)
+        for path in ("protocol/lead.md", "skills/lead/SKILL.md"):
+            self.assertIn("«Тир из постановки или брифа»", (ROOT / path).read_text(encoding="utf-8"), path)
+        self.assertIn("план больше порога файлов тира", (ROOT / "protocol" / "dialog.md").read_text(encoding="utf-8"))
+        self.assertIn("max: L", (ROOT / "templates" / "flow.yaml").read_text(encoding="utf-8"))
+
     def test_sendmessage_targets_have_named_spawns(self):
         skills = ROOT / "skills"
         if not skills.exists():

@@ -95,7 +95,8 @@
         "lint": { "$ref": "#/definitions/gate" },
         "build": { "$ref": "#/definitions/gate" },
         "e2e": { "$ref": "#/definitions/gate" },
-        "visual": { "$ref": "#/definitions/gate" }
+        "visual": { "$ref": "#/definitions/gate" },
+        "structure": { "$ref": "#/definitions/gate" }
       }
     },
     "areas": {
@@ -144,7 +145,16 @@
       "additionalProperties": false,
       "properties": {
         "s_max_files": { "type": "integer", "minimum": 1, "default": 5 },
-        "m_max_files": { "type": "integer", "minimum": 1, "default": 15 }
+        "m_max_files": { "type": "integer", "minimum": 1, "default": 15 },
+        "max": { "type": "string", "enum": ["S", "M", "L"], "default": "L" }
+      }
+    },
+    "specs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["descriptions", "adr", "none"], "default": "descriptions" },
+        "adr_dir": { "type": "string", "default": "docs/decisions" }
       }
     },
     "models": {

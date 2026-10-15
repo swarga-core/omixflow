@@ -26,9 +26,9 @@ OVERRIDE_REL = Path(".claude") / "omixflow"
 CONFIG_REL = OVERRIDE_REL / "flow.yaml"
 SCHEMA_PATH = PLUGIN_ROOT / "schema" / "flow.schema.json"
 TEMPLATE_PATH = PLUGIN_ROOT / "templates" / "flow.yaml"
-GATES = ("typecheck", "test", "lint", "build", "e2e", "visual")
+GATES = ("typecheck", "test", "lint", "build", "e2e", "visual", "structure")
 # The step set (adapters/lang/PORT.md, «Гейты»): these run on every step whatever `when` says.
-STEP_GATES = ("typecheck", "test", "lint")
+STEP_GATES = ("typecheck", "test", "lint", "structure")
 # Moments at which `resolve.py verify` plans gates and orchestrator checks.
 MOMENTS = ("step", "review", "delivery", "accept")
 ROLES = ("researcher", "architect", "coder", "tester", "reviewer", "web-fetcher")

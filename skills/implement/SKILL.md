@@ -84,12 +84,16 @@ workspace (`PORT.md`, «sync»; команды в адаптере). Конфл�
 
 **2.1 Coder.** Отчёт шага: `REPORT_PATH: {TASK_DIR}/reports/implement-step{N}.md`.
 Перед заданием — базовая линия дельты: `python3 {корень плагина}/scripts/report.py baseline
---out {scratchpad оркестратора}/baseline-implement-step{N}.json --root {PROJECT_ROOT}`
-(что в дереве не закоммичено до задания; сверка в 2.2 считает агенту только изменённое
+--out {scratchpad оркестратора}/baseline-implement-step{N}.json --root {PROJECT_ROOT} --task
+{TASK_DIR}` (что в дереве не закоммичено до задания и снимок spec.md для сверки `SPEC
+AMENDMENTS` — единственная база при `artifacts.tracked: false`; blob снимка из вывода —
+строкой в log.md «снимок spec.md шага {N}: {blob}», по нему ревью кода в другой сессии
+восстанавливает спеку до шага; сверка в 2.2 считает агенту только изменённое
 после неё). Если `agents.coder` жив в этой сессии и порог ротации не сработал: SendMessage ему
 `STEP: N` и `REPORT_PATH` (контекст сохраняется, артефакты перечитывать не нужно).
 Иначе спавн по шаблону runtime.md: `name: coder-{id}` (часть: `coder-{id}-{part}`),
-`STEP: N`, `TASK_DIR`, `ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `PLUGIN_ROOT`,
+`STEP: N`, `TASK_DIR`, `ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `SPECS` (из
+`specs.mode` и `specs.adr_dir` конфига), `PLUGIN_ROOT`,
 `REPORT_PATH`, `ITERATION_LIMIT`. Записать `state.py set TASK_DIR agents.coder=… session=…`.
 
 **Ротация** по `tiers.md`, «Смена агента по ходу задачи»: порог проверяется перед
@@ -114,8 +118,14 @@ checkpoint шага, если есть}]`. Код 0 — `VERDICT: ok` (даль�
 `--also`, базовая линия), не агента — поправить и повторить. Строки вердикта после
 `VERDICT` — то, на что оркестратор реагирует вместо чтения отчёта: исходы гейтов (все
 PASS → 2.3, FAIL → ниже), `not declared` — строка в log.md, NOTES — в log.md, строка
+`SPEC AMENDMENTS` — в log.md «спека поправлена coder'ом на шаге {N}: …» (ревью кода читает
+дифф spec.md; под лидом — `notice`), строка
 `НЕ СВЕРЕНО` — сверить этот раздел руками. Что сверяет скрипт (руками — только по
 `НЕ СВЕРЕНО` или если скрипт недоступен):
+- `SPEC AMENDMENTS` против диффа spec.md от снимка базовой линии (2.1): правка названа;
+  правка в Contracts, Intent, Out of Scope или смена выбора решения D-n (его пункт без
+  части `rests on`) — не правка, а остановка: coder возвращает spec.md и останавливается,
+  дальше таблица «Ошибки» (`agents/coder.md`, «The spec learns»).
 - `TREE STATE` совпадает со свежим `git status --short` без путей каталога артефактов
   (отчёт, state.yaml и log.md пишутся после снимка); расхождение — вопрос coder'у до
   коммита.
@@ -148,8 +158,8 @@ PASS → 2.3, FAIL → ниже), `not declared` — строка в log.md, NOT
 coder тесты не написал, а шаг меняет поведение; шаг это UI-компонент и адаптер
 требует тестов доступности. Не нужен, когда шаг чисто типы или контракты и гейта
 typecheck достаточно, или coder уже покрыл шаг тестами с мутационной проверкой.
-Перед спавном — базовая линия `report.py baseline --out {scratchpad}/baseline-implement-tests-step{N}.json`:
-в дереве уже лежит незакоммиченный шаг coder'а, tester'у считается только его дельта.
+Перед спавном — базовая линия `report.py baseline --out {scratchpad}/baseline-implement-tests-step{N}.json
+--task {TASK_DIR}`: в дереве уже лежит незакоммиченный шаг coder'а, tester'у считается только его дельта.
 `CODE_BUG` в отчёте tester (строка `CODE BUGS FOUND` вердикта) возвращается coder'у как
 часть шага. Вид ответа (`failed`, `REPORT_PATH refused by the harness`, без файла) — как в 2.2. Гейты
 `CHECKPOINT_GATES` tester прогоняет сам и называет в `CHECKPOINT GATES`. Отчёт tester'а
@@ -215,14 +225,15 @@ Implement завершён: шагов {N}/{total}, коммитов {N}, тес
 |---|---|
 | coder не уложился в лимит | СТОП, эскалация с описанием в точке `deadlock` |
 | tester не уложился в лимит | СТОП, вероятно дефект кода, эскалация в точке `deadlock` |
-| coder сообщает конфликт spec и plan | СТОП, решение в точке `scope-change`, при необходимости вернуться в spec |
+| coder остановился на спеке: смена объёма (Intent, Out of Scope), выбора решения D-n или контракта (`## Contracts`) | СТОП, решение в точке `scope-change` (под лидом — вопрос лиду: решение D-n утверждал он или разработчик, контракт — швы соседей), при необходимости вернуться в spec; остальные правки спеки coder делает сам и называет в `SPEC AMENDMENTS` |
+| coder сообщает конфликт spec и plan (план противоречит спеке, шаг не выполним по обоим) | СТОП; план против спеки — architect `MODE: fix` по плану; спека неверна — точка `scope-change` и возврат в spec |
 | гейт падает из-за окружения (зависимости, submodule) | выполнить `workspace.setup` по адаптеру, повторить; не считать дефектом кода |
 
 ## Правила
 
 - Шаги строго последовательно, без параллели.
 - Коммит после каждого шага; артефакты задачи — по правилу «Коммит артефактов» (`artifacts.md`).
-- SDD-инвариант: project specs обновляются coder'ом вместе с кодом.
+- SDD-инвариант: то, что просит `specs.mode` (project specs, записи решений или ничего), coder обновляет вместе с кодом.
 - Никаких подавлений из запрещённого списка адаптера.
 - Лимиты вместо бесконечных циклов.
 - В worktree агентам только абсолютные пути внутри него.

@@ -23,6 +23,14 @@ What `check` verifies, each against evidence the agent cannot write:
   directory is left out on both sides), and both the collapsed form (`?? dir/`) and the
   expanded one (`--untracked-files=all`) are accepted; a `*.orig` or `*.rej` leftover is a
   problem;
+- SPEC AMENDMENTS (coder): the task's spec.md diffed against the baseline's snapshot of it
+  (`baseline --task TASK_DIR`; the only base when artifacts are kept outside git or when
+  uncommitted edits preceded the assignment), else against HEAD when tracked; a change
+  with `none`, a claim without a change, a change inside Contracts, Intent or Out of
+  Scope, and a changed, added or removed decision choice (a `- Dn …:` item without its
+  `rests on:` part, however it wraps) are problems — the last two are a stop for the
+  orchestrator's scope-change point, not the coder's amendment; without a snapshot and
+  untracked, the verdict says the section was not checked;
 - MUTATIONS: new test declarations (lang adapter `tests.declaration`, else --declaration)
   in the agent's changed test files (`tests.files` globs across the lang adapters, else
   --test-glob; a binary file is not a test) are counted as added minus removed; that many
@@ -70,8 +78,8 @@ import probe  # noqa: E402
 OK, RETURN, BROKEN, USAGE = 0, 1, 2, 3
 REFUSED = "REPORT_PATH refused by the harness"
 SECTIONS = {
-    "coder": ["STEP", "FILES", "PROJECT SPECS UPDATED", "GATES", "FIX ITERATIONS", "MUTATIONS", "BYTES CHECK",
-              "SUPPRESSIONS CHECK", "SCRATCH", "TREE STATE", "SUMMARY", "NOTES"],
+    "coder": ["STEP", "FILES", "PROJECT SPECS UPDATED", "SPEC AMENDMENTS", "GATES", "FIX ITERATIONS", "MUTATIONS",
+              "BYTES CHECK", "SUPPRESSIONS CHECK", "SCRATCH", "TREE STATE", "SUMMARY", "NOTES"],
     "tester": ["TESTS WRITTEN", "RUN RESULT", "BACKGROUND GATES", "CHECKPOINT GATES", "ITERATIONS", "MUTATIONS",
                "BYTES CHECK", "SUPPRESSIONS CHECK", "SCRATCH", "TREE STATE", "SUMMARY"],
 }
@@ -247,13 +255,14 @@ def lang_tests(root: Path) -> List[Tuple[List[str], Optional[str]]]:
         for name in lib.adapters_for(cfg, "lang"):
             globs: List[str] = []
             declaration: Optional[str] = None
-            for adapter in lib.resolve_adapter("lang", name, root):
+            for adapter in lib.resolve_adapter("lang", name, root):   # a project extension adds to the base
                 tests = adapter.meta.get("tests") or {}
                 if isinstance(tests, dict):
-                    if tests.get("files"):
-                        globs = [str(g) for g in tests["files"]]
+                    for g in tests.get("files") or []:
+                        if str(g) not in globs:
+                            globs.append(str(g))
                     if tests.get("declaration"):
-                        declaration = str(tests["declaration"])
+                        declaration = str(tests["declaration"])        # the leaf's regex wins
             if globs:
                 out.append((globs, declaration))
     except lib.OmixflowError:
@@ -290,11 +299,210 @@ def gate_criteria(root: Path) -> Dict[str, str]:
     return {name: str(gate.get("criterion", "exit-code")) for name, gate in verify.items() if isinstance(gate, dict)}
 
 
+STOP_SECTIONS = ("Contracts", "Out of Scope", "Intent")   # a coder's change here is a stop, not an amendment
+DECISION_ITEM_RE = re.compile(r"^\s*(?:-\s+|###\s+)(?:\*\*)?(D\d+)\b")   # `- D1:`, `- D1 (A1, D-283):`, `- **D1 — …**`, `### D1`
+RESTS_ON_RE = re.compile(r"rests\s+on:", re.I)
+
+
+def spec_before(root: Path, spec: Path, baseline_spec: Optional[Dict[str, Any]]) -> Optional[str]:
+    """The spec's text before the assignment: the baseline's blob when the baseline recorded
+    it (`report.py baseline --task`; the only base when artifacts are kept outside git or
+    when earlier uncommitted edits exist), else HEAD's copy of a tracked file; None when
+    there is nothing to compare against."""
+    if baseline_spec and baseline_spec.get("blob"):
+        text = lib.git_raw(root, "cat-file", "-p", str(baseline_spec["blob"]))
+        if text is not None:
+            return text
+    try:
+        rel = spec.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+    if lib.git(root, "ls-files", "--error-unmatch", "--", rel) is None:
+        return None
+    return lib.git_raw(root, "show", f"HEAD:./{rel}")       # `./`: a root nested in a larger repository
+
+
+def spec_diff_sections(before_text: str, current_text: str) -> Dict[str, List[str]]:
+    """Changed lines grouped by the `##` section they fall in (trailing whitespace ignored,
+    section names as written in the first line of the heading); empty when unchanged."""
+    def prepared(text: str) -> List[str]:
+        """Lines with trailing whitespace dropped and blank lines removed; a heading inside
+        a code fence is neutralised so it opens no section."""
+        out: List[str] = []
+        fenced = False
+        for l in text.splitlines():
+            l = l.rstrip()
+            if l.lstrip().startswith("```"):
+                fenced = not fenced
+            if not l.strip():
+                continue
+            out.append((" " + l) if fenced and l.startswith("#") else l)
+        return out
+
+    before, current = prepared(before_text), prepared(current_text)
+
+    def section_of(lines: List[str], idx: int) -> str:
+        for i in range(idx, -1, -1):
+            if lines[i].startswith("## "):
+                return lines[i][3:].strip()
+        return "(преамбула)"
+
+    out: Dict[str, List[str]] = {}
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, before, current, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        for i in range(i1, i2):
+            out.setdefault(section_of(before, i), []).append("-" + before[i])
+        for j in range(j1, j2):
+            out.setdefault(section_of(current, j), []).append("+" + current[j])
+    return out
+
+
+def decision_choices(text: str) -> Dict[str, str]:
+    """Decision id → the text of its choice: the whole bullet (continuation lines included)
+    without its `rests on:` part, whitespace-normalised. A coder may correct the facts a
+    decision rests on; the choice, however it wraps, is the developer's."""
+    found = lib.section_lines(text, "Decisions")
+    if not found:
+        return {}
+    items: Dict[str, List[str]] = {}
+    current: Optional[str] = None
+    for line in found[1][1:]:
+        m = DECISION_ITEM_RE.match(line)
+        if m:
+            current = m.group(1)
+            items[current] = [line]
+        elif current and line.strip() and not line.startswith("## "):
+            items[current].append(line)
+        elif current and line.startswith("## "):
+            break
+    out: Dict[str, str] = {}
+    for key, lines in items.items():
+        joined = " ".join(" ".join(lines).split())
+        out[key] = RESTS_ON_RE.split(joined, maxsplit=1)[0].strip()
+    return out
+
+
+def check_spec_amendments(root: Path, report_path: Path, sections: Dict[str, List[str]], problems: List[str],
+                          verified: List[str], facts: List[str], unchecked: List[str],
+                          baseline_spec: Optional[Dict[str, Any]] = None) -> None:
+    """The coder amends the spec and says so; a change to a contract, a decision's choice, the
+    intent or the scope is a stop, not an amendment (agents/coder.md, «The spec learns»)."""
+    claimed = section_text(sections, "SPEC AMENDMENTS")
+    claimed_none = not claimed or is_none(claimed)
+    spec = report_path.parent.parent / "spec.md"
+    if not spec.exists():
+        unchecked.append(f"SPEC AMENDMENTS не сверены: нет {spec}")
+        return
+    before = spec_before(root, spec, baseline_spec)
+    if before is None:
+        unchecked.append("SPEC AMENDMENTS не сверены: нет снимка spec.md — `report.py baseline --task TASK_DIR` "
+                         "перед заданием (артефакты вне git сверяются только по снимку)")
+        return
+    try:
+        current = spec.read_text(encoding="utf-8")
+    except OSError:
+        return
+    changed = spec_diff_sections(before, current)
+    base_name = "снимка baseline" if baseline_spec and baseline_spec.get("blob") else "HEAD"
+    if not changed and claimed_none:
+        verified.append(f"SPEC AMENDMENTS: none, spec.md не менялся (против {base_name})")
+        return
+    if changed and claimed_none:
+        problems.append("SPEC AMENDMENTS: none, а spec.md изменён в секциях "
+                        + ", ".join(f"«{s}»" for s in changed) + " — назвать каждую правку и чему научила реализация")
+    elif not changed:
+        problems.append(f"SPEC AMENDMENTS называет правки, а spec.md против {base_name} не изменён")
+    stop = [s for s in changed if s.lower() in {x.lower() for x in STOP_SECTIONS}]
+    before_d, after_d = decision_choices(before), decision_choices(current)
+    changed_choices = sorted(k for k in set(before_d) | set(after_d) if before_d.get(k) != after_d.get(k))
+    if changed_choices:
+        stop.append("Decisions " + ", ".join(changed_choices))
+    elif "Decisions" in changed and not before_d and not after_d:
+        stop.append("Decisions — пункты решений не распознаны (`- D1:`, `- **D1 — …**`, `### D1`), "
+                    "правка в секции считается сменой решения")
+    if stop:
+        problems.append("SPEC AMENDMENTS: правка в " + ", ".join(f"«{s}»" for s in stop)
+                        + " — это смена объёма, решения или контракта: не правка coder'а, а остановка "
+                          "(STATUS: stopped) и точка scope-change; вернуть spec.md и остановиться")
+    if changed and not claimed_none:
+        facts.append("SPEC AMENDMENTS: " + " ".join(claimed.split())[:400])
+        if not stop:
+            verified.append("SPEC AMENDMENTS: spec.md изменён в " + ", ".join(f"«{s}»" for s in changed) + ", правки названы")
+
+
+def check_project_specs(root: Path, report_path: Path, sections: Dict[str, List[str]], problems: List[str],
+                        verified: List[str], unchecked: List[str]) -> None:
+    """PROJECT SPECS UPDATED against `specs.mode` (protocol/phases.md, SDD invariant): under
+    `adr` every path listed lies in `specs.adr_dir` and exists, and a record that existed at
+    the base of the branch (state.yaml `base`) is not among the branch's edits — records
+    added on the branch may be refined until the merge; under `none` the section is `none`;
+    `descriptions` is the reviewer's judgement, not the script's."""
+    try:
+        cfg = lib.load_config(root)
+        mode = str(lib.config_value(cfg, "specs.mode") or "descriptions")
+        adr_dir = str(lib.config_value(cfg, "specs.adr_dir") or "docs/decisions").strip("/")
+    except lib.OmixflowError:
+        unchecked.append("PROJECT SPECS UPDATED не сверены: конфиг не прочитан")
+        return
+    body = section_text(sections, "PROJECT SPECS UPDATED")
+    listed: List[str] = []
+    for l in sections.get("PROJECT SPECS UPDATED", []):
+        if is_none(l.strip()):
+            continue
+        # the path: the first token with a slash and a file name — quoted or bare, mewria's `- path — D1: `add``
+        m = re.search(r"(?<![\w@/])(/?(?:[\w.\-]+/)+[\w.\-]+\.\w+)", l)
+        if m:
+            path = m.group(1)
+            if path.startswith("/"):
+                try:
+                    path = Path(path).resolve().relative_to(root.resolve()).as_posix()
+                except ValueError:
+                    pass
+            listed.append(path.rstrip(":"))
+    if mode == "none":
+        if body and not is_none(body):
+            problems.append("PROJECT SPECS UPDATED: при specs.mode none секция — `none`; ничего сверх spec.md задачи")
+        else:
+            verified.append("PROJECT SPECS UPDATED: none (specs.mode none)")
+        return
+    if mode != "adr":
+        return
+    if not listed:
+        verified.append("PROJECT SPECS UPDATED: none — шаг без записи решения (specs.mode adr)")
+        return
+    base_sha: Optional[str] = None
+    try:
+        lib.require_yaml()
+        state = lib.yaml.safe_load((report_path.parent.parent / "state.yaml").read_text(encoding="utf-8")) or {}
+        if isinstance(state, dict) and state.get("base"):
+            base_sha = lib.base_commit(root, str(state["base"]))
+    except (OSError, ValueError, lib.OmixflowError):
+        base_sha = None
+    for rel in listed:
+        if not rel.startswith(adr_dir + "/"):
+            problems.append(f"PROJECT SPECS UPDATED: `{rel}` вне {adr_dir}/ — при specs.mode adr шаг пишет записи решений, не описания")
+            continue
+        if not (root / rel).exists():
+            problems.append(f"PROJECT SPECS UPDATED: записи `{rel}` нет в дереве")
+            continue
+        if base_sha is None:
+            unchecked.append(f"PROJECT SPECS UPDATED: `{rel}` — была ли запись в базе ветки, не сверено (нет base в state.yaml)")
+            continue
+        at_base = lib.git(root, "cat-file", "-e", f"{base_sha}:./{rel}") is not None
+        if at_base:
+            problems.append(f"PROJECT SPECS UPDATED: запись `{rel}` была в базе ветки и правлена — записи базы только дописываются; "
+                            "новое решение — новая запись (`supersedes:`)")
+    if not any(p.startswith("PROJECT SPECS UPDATED") for p in problems):
+        verified.append("PROJECT SPECS UPDATED: записи решений в " + adr_dir + "/ на месте: " + ", ".join(listed))
+
+
 # ------------------------------------------------------------------ checks
 
 def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Optional[Dict[str, Any]],
           langs: List[Tuple[List[str], Optional[str]]], criteria: Dict[str, str],
-          baseline: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
+          baseline: Optional[Dict[str, Optional[str]]] = None,
+          baseline_spec: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     result: Dict[str, Any] = {"role": role, "report": str(report_path), "verdict": "ok", "problems": [],
                               "verified": [], "facts": [], "unchecked": [], "refused": False, "scratch_line": None}
     problems: List[str] = result["problems"]
@@ -343,6 +551,11 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
             problems.append(f"TREE STATE: остаток пробы в дереве — {l}")
     if untracked:
         facts.append("неотслеживаемые по TREE STATE: " + ", ".join(l[3:] for l in untracked))
+
+    # SPEC AMENDMENTS (coder): the diff of the task's spec.md against its committed state
+    if role == "coder":
+        check_spec_amendments(root, report_path, sections, problems, verified, facts, result["unchecked"], baseline_spec)
+        check_project_specs(root, report_path, sections, problems, verified, result["unchecked"])
 
     # MUTATIONS
     delta = agent_delta(root, artifacts, baseline)
@@ -504,11 +717,22 @@ class Parser(argparse.ArgumentParser):
 
 def cmd_baseline(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
     snap = snapshot(root, artifacts, store=True)
+    record: Dict[str, Any] = {"root": str(root), "artifacts": artifacts, "files": snap}
+    spec_note = ""
+    if ns.task:
+        spec = Path(ns.task).resolve() / "spec.md"
+        if spec.exists():   # the blob is stored whether or not the file is tracked: the only base for untracked artifacts
+            blob = content_hash(root, str(spec), store=True)
+            record["spec"] = {"path": str(spec), "blob": blob}
+            if blob:   # a ref keeps the blob out of `git gc`'s reach (loose objects are pruned after two weeks)
+                lib.git(root, "update-ref", f"refs/omixflow/snapshots/{spec.parent.name}/{blob}", blob)
+            spec_note = f", spec.md snapshot blob {blob}"     # the orchestrator writes the blob into log.md
+        else:
+            spec_note = ", no spec.md"
     out = Path(ns.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"root": str(root), "artifacts": artifacts, "files": snap}, ensure_ascii=False, indent=1),
-                   encoding="utf-8")
-    print(f"baseline: {len(snap)} uncommitted paths → {out}")
+    out.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"baseline: {len(snap)} uncommitted paths{spec_note} → {out}")
     return 0
 
 
@@ -516,10 +740,14 @@ def cmd_check(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
     baseline = None
     if ns.baseline:
         try:
-            baseline = json.loads(Path(ns.baseline).read_text(encoding="utf-8"))["files"]
-        except (OSError, ValueError, KeyError) as e:
+            loaded = json.loads(Path(ns.baseline).read_text(encoding="utf-8"))
+            baseline = loaded["files"]
+            baseline_spec = loaded.get("spec")
+        except (OSError, ValueError, KeyError, TypeError) as e:
             print(f"report.py: --baseline {ns.baseline}: {e}", file=sys.stderr)
             return USAGE
+    else:
+        baseline_spec = None
     langs = lang_tests(root)
     if ns.test_glob:
         langs = [(list(ns.test_glob), ns.declaration)]
@@ -530,7 +758,8 @@ def cmd_check(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
     except lib.OmixflowError as e:
         print(f"report.py: план гейтов не получен: {e}", file=sys.stderr)
         return USAGE
-    result = check(ns.role, Path(ns.report), root, artifacts.strip("/"), plan, langs, gate_criteria(root), baseline)
+    result = check(ns.role, Path(ns.report), root, artifacts.strip("/"), plan, langs, gate_criteria(root), baseline,
+                   baseline_spec)
     print(json.dumps(result, ensure_ascii=False, indent=2) if ns.json else render(result))
     return {"ok": OK, "stopped": OK, "return": RETURN, "broken": BROKEN}[result["verdict"]]
 
@@ -542,6 +771,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--root", default=None)
     p.add_argument("--artifacts", default=None)
+    p.add_argument("--task", default=None, help="TASK_DIR: its spec.md is snapshotted for the SPEC AMENDMENTS check")
     p.set_defaults(fn=cmd_baseline)
     p = sub.add_parser("check")
     p.add_argument("--role", required=True, choices=sorted(SECTIONS))

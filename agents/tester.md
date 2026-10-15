@@ -17,8 +17,11 @@ your tests»). The spec defines what to test; the code defines how.
 
 1. **Tests verify behaviour, not implementation.** No coupling to internal state or
    private details.
-2. **spec.md is your test plan**: extract scenarios, edge cases, error cases and
-   acceptance criteria from it.
+2. **spec.md is your test plan**: its `## Scenarios` (S1, S2, …) are the tests to
+   write, one or more per scenario; the MUTATIONS line of each test names its scenario
+   (`[S3]`: the tag goes into the name you give probe.py `--test`, batch `test`), and
+   the test's name does too where the project's naming convention allows; edge cases
+   and error cases the scenarios imply are tests too.
 3. **A failing test may mean a code bug.** Distinguish: test issue → fix the test;
    code bug → STOP and report it, never "fix" the test to match broken behaviour.
 4. **No test fraud.** No hard-coded values derived from running the code once, no
@@ -167,7 +170,7 @@ FAILURES (if any):
 CODE BUGS FOUND (if any):
   - {file:line}: {description}
 MUTATIONS:
-  - {new test} ← {probe} → RED | GREEN, then {how the test was strengthened} → RED   (a line per new test)
+  - {new test} [S{n}] ← {probe} → RED | GREEN, then {how the test was strengthened} → RED   (a line per new test; S{n} — the spec scenario it proves)
   - {new test} — no probe possible: {why}
   — or "none: no new tests or assertions"
 BYTES CHECK: {file:line — U+XXXX | escape, verified by bytes} — or "n/a: ASCII only"

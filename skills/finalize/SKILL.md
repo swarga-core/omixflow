@@ -65,7 +65,7 @@ git diff --stat {base}...HEAD
 git log --oneline {base}...HEAD | wc -l
 ```
 
-Из log.md: шаги, тесты, обновлённые project specs, findings ревью.
+Из log.md: шаги, тесты, обновлённые project specs или записи решений (по `specs.mode`), findings ревью.
 
 ### 2. log.md
 
@@ -113,7 +113,7 @@ push ветки и создание PR в base из состояния. Body:
 {ключевые изменения из log.md}
 
 ## Test plan
-- [ ] гейты typecheck, test, lint зелёные ({M} tests)
+- [ ] гейты typecheck, test, lint, structure (если объявлен) зелёные ({M} tests)
 - [ ] {e2e / build, если применимо}
 
 Task: {id}

@@ -67,6 +67,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(lib.schema_default("limits.coder_iterations"), 7)
         self.assertEqual(lib.schema_default("models"), {"strong": "opus", "light": "sonnet"})
         self.assertEqual(lib.schema_default("lead.actions.memory"), "lead")
+        self.assertEqual(lib.schema_default("tiers.max"), "L")
+        self.assertEqual(lib.schema_default("specs.mode"), "descriptions")
+        self.assertEqual(lib.schema_default("specs.adr_dir"), "docs/decisions")
         self.assertIsNone(lib.schema_default("tracker.project"))
         self.assertIsNone(lib.schema_default("nope.nope"))
         cfg = {"limits": {"review_passes": 5}, "lead": {"actions": {"backlog": "developer"}}}
@@ -198,7 +201,57 @@ class ScriptTests(unittest.TestCase):
             self.assertEqual(by_key[(f"port:{port}", "capabilities")]["status"], "OK", port)
         self.assertEqual(by_key[("port:tracker", "chain")]["detail"], "plugin:youtrack → project:youtrack")
         self.assertEqual(by_key[("workspace", "submodule:omix")]["status"], "OK")
+        self.assertEqual(by_key[("tiers", "thresholds")]["status"], "OK")
+        self.assertEqual(by_key[("tiers", "max")]["detail"], "потолок тира L")
         self.assertEqual(by_key[("workspace", "branch template")]["status"], "OK")
+
+    def test_doctor_flags_thresholds_out_of_order_and_shows_the_ceiling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude" / "omixflow").mkdir(parents=True)
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt}\ntiers: {s_max_files: 15, m_max_files: 15, max: M}\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            by_key = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(by_key[("tiers", "thresholds")]["status"], "FAIL")
+            self.assertIn("не меньше", by_key[("tiers", "thresholds")]["detail"])
+            self.assertIn("потолок тира M: триаж выше ставит потолок", by_key[("tiers", "max")]["detail"])
+            self.assertEqual(by_key[("specs", "mode")]["status"], "OK")
+            self.assertNotIn(("specs", "structure"), by_key)
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt}\nspecs: {mode: adr}\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            by_key = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(by_key[("specs", "mode")]["status"], "WARN")          # docs/decisions does not exist yet
+            self.assertEqual(by_key[("specs", "structure")]["status"], "WARN")     # adr without a structure gate
+            (root / "docs" / "decisions").mkdir(parents=True)
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt, structure: depcruise}\nspecs: {mode: adr}\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            by_key = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(by_key[("specs", "mode")]["status"], "OK")
+            self.assertNotIn(("specs", "structure"), by_key)
+            self.assertEqual(by_key[("verify", "structure")]["status"], "WARN")    # `depcruise` is not in PATH here
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt}\nspecs: {mode: none}\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            by_key = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(by_key[("specs", "mode")]["status"], "OK")
+            self.assertEqual(by_key[("specs", "structure")]["status"], "WARN")     # none without a structure gate
+            (root / ".claude" / "omixflow" / "flow.yaml").write_text(
+                "version: 1\ntracker: none\nforge: none\nlang: [ts]\nworkspace: {base: main, branch: 'task/{id}'}\n"
+                "verify: {test: tt, structure: depcruise}\nspecs: {mode: adr, adr_dir: adr}\n")
+            proc = run("doctor.py", "--project", tmp, "--json")
+            by_key = {(c["section"], c["name"]): c for c in json.loads(proc.stdout)["checks"]}
+            self.assertEqual(by_key[("specs", "mode")]["status"], "WARN")          # custom adr_dir, missing
+            self.assertIn("записи решений в adr", by_key[("specs", "mode")]["detail"])
+            cfg = lib.load_config(root)
+            cfg["specs"]["mode"] = "wiki"
+            self.assertTrue(any("specs.mode" in e for e in lib.validate_config(cfg)))
 
     def test_doctor_fails_without_config(self):
         with tempfile.TemporaryDirectory() as tmp:

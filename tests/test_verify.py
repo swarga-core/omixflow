@@ -110,6 +110,17 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(p["on_demand"], ["device"])
         self.assertEqual(p["gates"][2]["criterion"], "zero-diagnostics")
 
+    def test_structure_is_a_step_gate_when_declared(self):
+        """0.9 step 7: structural invariants (dependency direction, forbidden imports) live in a
+        gate the step set always runs, not in the prose of project specs."""
+        import copy
+        cfg = copy.deepcopy(self.cfg)
+        cfg["verify"]["structure"] = {"cmd": "dc", "criterion": "exit-code"}
+        self.write("tools/x.py")
+        self.assertIn("structure", self.names(lib.verify_plan(cfg, self.root, "step")["gates"]))
+        self.assertNotIn("structure", self.names(lib.verify_plan(self.cfg, self.root, "step")["gates"]))
+        self.assertIn("structure", lib.GATES)
+
     def test_also_adds_the_gates_a_checkpoint_names(self):
         """T-9: the step 6 checkpoint asked for build, which has no `when` and is outside the step set."""
         self.write("tools/x.py")
