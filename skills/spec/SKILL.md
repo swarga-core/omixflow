@@ -80,7 +80,7 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    артефактов из `agents/reviewer.md`, «Aspects by phase», `ARTIFACT_PATHS: task.md, research.md,
    spec.md, plan.md`, категории spec, plan, architecture,
    `FINDINGS_PATH: {TASK_DIR}/review/spec-pass{N}.json`.
-3. Findings и FIX-цикл по review-cycle.md; фиксы идут architect'у по имени. Re-review —
+3. Findings и FIX-цикл по review-cycle.md; фиксы идут architect'у по адресу. Re-review —
    только сверка фиксов по id; новые findings лишь `critical` и `warning [architecture]`,
    прочие оркестратор отклоняет строкой в log.md (`review-cycle.md`, «Лимит проходов»).
 4. Порог файлов плана после фиксов: `python3 {корень плагина}/scripts/plan.py files --task
@@ -102,8 +102,8 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    Категории spec, architecture. `FINDINGS_PATH: {TASK_DIR}/review/spec-pass{N}.json`.
 3. Findings: `suggestion` auto-accept; `warning [spec]` с понятным фиксом
    auto-accept; `warning [architecture]` и `critical` эскалация в точке `finding`.
-4. FIX: SendMessage `architect-{id}` с `MODE: fix` и принятыми findings. Re-review:
-   SendMessage `reviewer-{id}` по тем же id — только сверка фиксов по id; новые findings
+4. FIX: SendMessage architect'у по адресу из `agents.architect` с `MODE: fix` и принятыми
+   findings. Re-review: SendMessage reviewer'у по адресу из `agents.reviewer` по тем же id — только сверка фиксов по id; новые findings
    лишь `critical` и `warning [architecture]`, прочие оркестратор отклоняет строкой в
    log.md. Не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
    Перед каждым сообщением architect'у и reviewer'у — порог ротации (`tiers.md`, «Смена агента
@@ -112,9 +112,10 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
 
 Во всех тирах перед `finish` — строка стоимости из `cost.py phase TASK_DIR spec` в секцию
 `## Spec ✅` (`runtime.md`, «Стоимость»; в S и M фаза plan идёт в ту же строку), затем коммит
-артефактов после фазы (`artifacts.md`). Фактические имена агентов (после
-ротации — с суффиксом) записать в состояние: `state.py set TASK_DIR agents.architect={имя}
-agents.reviewer={имя}`.
+артефактов после фазы (`artifacts.md`). Адрес каждого агента (`runtime.md`, «Спавн агентов»:
+имя, с суффиксом после ротации, или agentId) оркестратор записывает сразу после его спавна, во
+всех тирах: `state.py set TASK_DIR agents.architect={адрес}` и `agents.reviewer={адрес}` — FIX
+и re-review идут по ним, и после перезапуска сессии посреди ревью тоже.
 
 ## Итог (mode manual)
 
@@ -128,4 +129,5 @@ Spec завершён: {TASK_DIR}/spec.md, findings: {N} ({resolved}), прох�
 - spec = дельта.
 - Ревью обязателен в M и L; critical без решения в точке `finding` останавливает фазу.
 - architect читает код сам: Source Files Map говорит что читать.
-- Спавн architect и reviewer без `name` это дефект: FIX-цикл идёт по имени.
+- Спавн architect и reviewer без имени роли (в `name`, когда харнесс его принимает, иначе
+  в `description`) и без адреса в `agents.*` это дефект: FIX-цикл идёт по адресу.

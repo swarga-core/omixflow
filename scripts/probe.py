@@ -7,7 +7,7 @@
                  [--check 'COMMAND'] [--rebuild 'COMMAND'] [--timeout SEC] [--no-baseline]
                  [--tail N] [--json]
     probe.py batch --root DIR --spec FILE [--rebuild 'COMMAND'] [--timeout SEC] [--tail N] [--json]
-    probe.py restore --root DIR --file PATH
+    probe.py restore --root DIR [--file PATH [--drop]]
 
 A new test is verified by mutation: break the behaviour it guards, see the test go red,
 restore the code. By hand that is four or five tool calls per test, each a model request
@@ -17,8 +17,12 @@ MUTATIONS line. The recipe is the one of the runs of 0.4–0.7:
 1. baseline: `--cmd` runs once on the unmutated tree; a test that is not green there
    proves nothing (a typo in the command, a filter that matches nothing, exit 127) — the
    probe is not run (`--no-baseline` skips this when the same command was just green);
-2. copy PATH to PATH.orig next to it — never `git checkout` or `git restore`, the
-   uncommitted step would go with the probe;
+2. copy PATH into the tree's git directory, `{git-dir}/omixflow-probes/{PATH relative to
+   the worktree's top level}.orig` — the same place whatever DIR inside the worktree is
+   given (outside git: `{DIR}/.omixflow-probes/`) — never next to the file: a loader that
+   takes every file of its directory (node-pg-migrate's migrations, SwAIS T-12) would load
+   the copy as a second module; never `git checkout` or `git restore`, the uncommitted step
+   would go with the probe; after the mutation its sha256 goes beside the copy (`.mutant`);
 3. mutate: `--replace OLD --with NEW` replaces one literal occurrence of OLD in PATH (it
    must occur exactly once; `\\n`, `\\t` stand for a newline and a tab, `\\\\` for one
    backslash; line endings are kept as they are), or `--patch FILE` applies a unified
@@ -32,7 +36,7 @@ MUTATIONS line. The recipe is the one of the runs of 0.4–0.7:
    a call expected to run past nine minutes — a slow suite, several builds, `run` or
    `batch` alike — goes through `gate.py start {label}-probes --root DIR -- 'python3 …
    probe.py …'` and `gate.py poll … --timeout 540`, the lines are read from its log;
-6. restore with `cp PATH.orig PATH` and remove the copy: `cp` writes a new modification
+6. restore by writing the copy's bytes back and remove the copy: `cp` writes a new modification
    time, `mv` would bring back the old one and a build that decides by it would keep
    the mutant (MEW-6). The mutant is dated 1 s ahead of the original and the restored file
    1 s ahead of the mutant: a build that rebuilds when the input is newer than its
@@ -41,7 +45,13 @@ MUTATIONS line. The recipe is the one of the runs of 0.4–0.7:
    same length. The restored bytes are compared with the copy, and `git diff -- PATH`
    with what it was before the probe. SIGTERM and SIGINT (a Bash timeout) kill the
    running command with its process group and restore too, exit 128+signal; a copy left
-   by a killed run blocks the next probe — `probe.py restore` puts the file back;
+   by a killed run blocks the next probe — `probe.py restore` puts the file back (without
+   `--file`: every file of the worktree with a copy left in the git directory; a
+   `PATH.orig` next to the file, left by probe.py before 0.9.1, blocks the probe as well
+   and comes back with `--file PATH`). A file that no longer holds the recorded mutant
+   changed after the probe: the restore keeps the copy, says so and exits 2 — a copy left
+   days ago never overwrites newer work; once the file is what the step needs, `restore
+   --file PATH --drop` removes the copy and leaves the file;
 7. `--rebuild` (the lang adapter's full rebuild, optional) runs after the restore: an
    incremental cache may still hold a mutant. With `run` it belongs on the last probe of
    a series; `batch` runs it once after all probes.
@@ -75,6 +85,7 @@ probe.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -87,6 +98,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 RED, GREEN, NOT_RUN, NO_PROBE = 0, 1, 2, 3
 ORIG = ".orig"
+BACKUP_DIR = "omixflow-probes"   # in the tree's git directory, beside gate.py's omixflow-gates
+ABS_MARK = "@abs"                # the copy of a file outside the tree: `{BACKUP_DIR}/@abs/{absolute path}.orig`
 DEFAULT_TIMEOUT = 240.0        # per command (baseline, --check, test, --rebuild); a long call goes through gate.py
 MTIME_STEP = 1                 # seconds the mutant and the restore are dated ahead (see date_ahead)
 _pending: List[Tuple[Path, Path]] = []   # (file, backup) of the probe in progress, for the signal handler
@@ -167,6 +180,51 @@ def patch_paths(root: Path, patch: Path) -> List[str]:
     return [rec.split("\t")[-1] for rec in out.decode("utf-8", errors="replace").split("\0") if rec.strip()]
 
 
+def tree_base(root: Path) -> Tuple[Path, Path]:
+    """(the base the copies' paths are relative to, the directory of the copies): the worktree's
+    top level and `{git-dir}/omixflow-probes` — out of every directory a loader scans, out of
+    `git status`, and the same for every --root inside the worktree (a probe of a monorepo
+    package runs with `--root {package}`, its restore may come with `--root {project}`);
+    outside git, ROOT and `{ROOT}/.omixflow-probes`."""
+    top, git_dir = git(root, "rev-parse", "--show-toplevel"), git(root, "rev-parse", "--absolute-git-dir")
+    if top and git_dir:
+        return (Path(top.decode("utf-8", errors="replace").strip()).resolve(),
+                Path(git_dir.decode("utf-8", errors="replace").strip()) / BACKUP_DIR)
+    return root.resolve(), root.resolve() / ".omixflow-probes"
+
+
+def backup_root(root: Path) -> Path:
+    return tree_base(root)[1]
+
+
+def backup_of(root: Path, path: Path) -> Path:
+    base, store = tree_base(root)
+    try:
+        rel = path.resolve().relative_to(base)
+    except ValueError:      # a file outside the tree keeps its absolute path under the marker
+        rel = Path(ABS_MARK) / str(path.resolve()).lstrip(os.sep)
+    return store / (str(rel) + ORIG)
+
+
+def mutant_record(backup: Path) -> Path:
+    """The sha256 of the mutant, written right after the mutation: a restore outside the probe
+    overwrites the file only while it still holds that mutant (a copy left days ago must not
+    overwrite newer work)."""
+    return backup.with_name(backup.name + ".mutant")
+
+
+def digest(path: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def legacy_backup(path: Path) -> Path:
+    """The copy probe.py made next to the file before 0.9.1."""
+    return path.with_name(path.name + ORIG)
+
+
 class NotRun(Exception):
     """The probe could not be run: an input error, nothing to do with the test."""
 
@@ -219,7 +277,42 @@ def restore_file(path: Path, backup: Path) -> None:
         mutant_mtime = 0.0
     path.write_bytes(backup.read_bytes())
     date_ahead(path, mutant_mtime)
-    backup.unlink()
+    drop_copy(backup)
+
+
+def store_of(backup: Path) -> Optional[Path]:
+    """The store a copy lives in: `{git-dir}/omixflow-probes` (its parent holds HEAD) or
+    `{ROOT}/.omixflow-probes`; None for a copy next to the file (probe.py before 0.9.1). By
+    path, not by a name alone: the project may have a directory called `omixflow-probes`."""
+    for a in backup.parents:
+        if a.name == BACKUP_DIR and (a.parent / "HEAD").is_file():
+            return a
+        if a.name == ".omixflow-probes":
+            return a
+    return None
+
+
+def drop_copy(backup: Path) -> None:
+    """Remove the copy and its record, then the directories left empty strictly below the
+    store; outside git the store itself (`{ROOT}/.omixflow-probes` must not stay in the
+    project). Nothing is pruned for a copy next to the file: those are project directories."""
+    backup.unlink(missing_ok=True)
+    mutant_record(backup).unlink(missing_ok=True)
+    store = store_of(backup)
+    if store is None:
+        return
+    d = backup.parent
+    while d != store and store in d.parents:
+        try:
+            d.rmdir()
+        except OSError:
+            return
+        d = d.parent
+    if store.name == ".omixflow-probes":
+        try:
+            store.rmdir()
+        except OSError:
+            pass
 
 
 def _on_signal(signum, _frame):
@@ -257,10 +350,11 @@ def probe(root: Path, name: str, file: str, cmd: str, replace: Optional[str] = N
 
     if not path.is_file():
         return not_run(f"file not found: {path}")
-    backup = path.with_name(path.name + ORIG)
-    if backup.exists():
-        return not_run(f"{backup.name} exists: a probe was left unfinished — `probe.py restore --root {root} "
-                       f"--file {path}` puts the file back, then run again")
+    backup = backup_of(root, path)
+    for left in (backup, legacy_backup(path)):
+        if left.exists():
+            return not_run(f"{left} exists: a probe was left unfinished — `probe.py restore --root {root} "
+                           f"--file {path}` puts the file back, then run again")
     if baseline:
         cache = baseline_cache if baseline_cache is not None else {}
         base = cache.get(cmd) or run_cmd(cmd, root, tail, timeout)
@@ -271,7 +365,8 @@ def probe(root: Path, name: str, file: str, cmd: str, replace: Optional[str] = N
     before_diff = git(root, "diff", "--", str(path))
     original = path.read_bytes()
     original_mtime = os.stat(path).st_mtime    # may already be ahead of now after an earlier restore
-    path.with_name(path.name + ORIG).write_bytes(original)
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    backup.write_bytes(original)
     _pending.append((path, backup))
     try:
         try:
@@ -279,6 +374,7 @@ def probe(root: Path, name: str, file: str, cmd: str, replace: Optional[str] = N
         except NotRun as e:
             return not_run(str(e))
         date_ahead(path, original_mtime)    # newer than the original and everything the baseline built
+        mutant_record(backup).write_text(digest(path) or "", encoding="utf-8")
         result["ran"] = True
         if check:
             chk = run_cmd(check, root, tail, timeout)
@@ -341,16 +437,67 @@ def cmd_run(ns: argparse.Namespace) -> int:
     return code_of(r)
 
 
+def left_copies(root: Path) -> List[Tuple[Path, Path]]:
+    """(file, copy) of every probe left unfinished in ROOT's worktree, in the backup directory."""
+    base, store = tree_base(root)
+    out = []
+    for copy in sorted(store.rglob("*" + ORIG)) if store.is_dir() else []:
+        if not copy.is_file():
+            continue
+        rel = Path(str(copy.relative_to(store))[: -len(ORIG)])
+        target = Path(os.sep, *rel.parts[1:]) if rel.parts and rel.parts[0] == ABS_MARK else base / rel
+        out.append((target, copy))
+    return out
+
+
+def restore_left(root: Path, path: Path, backup: Path) -> bool:
+    """Put back a file a killed probe left mutated; False (the copy kept) when the file no longer
+    holds the recorded mutant — it changed after the probe."""
+    record = mutant_record(backup)
+    current = digest(path)
+    if current is not None and current == digest(backup):    # the probe ended before the mutation
+        drop_copy(backup)
+        print(f"{path}: already the original, copy {backup} removed")
+        return True
+    if record.exists() and current != record.read_text(encoding="utf-8").strip():
+        print(f"PROBE COPY KEPT: {path} changed after the probe (it is not the probe's mutant); the copy "
+              f"stays at {backup} — compare `diff {backup} {path}`, bring the file to what the step needs, "
+              f"then `probe.py restore --root {root} --file {path} --drop` removes the copy")
+        return False
+    restore_file(path, backup)     # the mutant, or a copy without a record (probe.py before 0.9.1)
+    print(f"restored {path} from {backup}; check `git diff -- {path}` shows your step's change")
+    return True
+
+
 def cmd_restore(ns: argparse.Namespace) -> int:
     root = Path(ns.root).resolve()
-    path = resolve(root, ns.file)
-    backup = path.with_name(path.name + ORIG)
-    if not backup.exists():
-        print(f"probe.py: nothing to restore, {backup.name} is not there")
+    if ns.drop and not ns.file:
+        print("probe.py: --drop needs --file: a copy is dropped one file at a time, after a look at it")
         return NOT_RUN
-    restore_file(path, backup)
-    print(f"restored {path} from {backup.name}; check `git diff -- {path.name}` shows your step's change")
-    return 0
+    if ns.file:
+        path = resolve(root, ns.file)
+        pairs = [(path, b) for b in (backup_of(root, path), legacy_backup(path)) if b.is_file()][:1]
+        if not pairs:
+            print(f"probe.py: nothing to restore, no copy of {path} ({backup_of(root, path)})")
+            return NOT_RUN
+        if ns.drop:     # the file was reconciled by hand after PROBE COPY KEPT: the copy goes, the file stays
+            backup = pairs[0][1]
+            record = mutant_record(backup)
+            if record.exists() and digest(path) == record.read_text(encoding="utf-8").strip():
+                print(f"probe.py: {path} still holds the probe's mutant — `--drop` would lose the original; "
+                      f"`probe.py restore --root {root} --file {path}` puts it back")
+                return NOT_RUN
+            drop_copy(backup)
+            print(f"dropped the copy {backup}; {path} left as it is")
+            return 0
+    else:
+        pairs = left_copies(root)
+        if not pairs:
+            print(f"probe.py: nothing to restore under {backup_root(root)} (a `PATH.orig` next to a file, "
+                  "left by probe.py before 0.9.1: `restore --file PATH`)")
+            return 0
+    kept = [path for path, backup in pairs if not restore_left(root, path, backup)]
+    return NOT_RUN if kept else 0
 
 
 def cmd_batch(ns: argparse.Namespace) -> int:
@@ -430,7 +577,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.set_defaults(fn=cmd_batch)
     p = sub.add_parser("restore")
     p.add_argument("--root", required=True)
-    p.add_argument("--file", required=True)
+    p.add_argument("--file", default=None)
+    p.add_argument("--drop", action="store_true", help="remove the copy of --file, leave the file as it is")
     p.set_defaults(fn=cmd_restore)
     ns = ap.parse_args(argv)
     if ns.cmd == "run" and not ns.patch and (ns.replace is None or ns.with_ is None):

@@ -90,11 +90,11 @@ Run the gates of CHECKPOINT_GATES too, and only those: their commands come from
 {PROJECT_ROOT}`; report each in CHECKPOINT GATES. A gate in `also_missing` is one the
 project does not declare: `{gate}: not declared` there, as the coder does.
 
-Scratch outside the task (probes beyond `.orig` copies, experiments, builds) goes only into
-SCRATCH_DIR, a subdirectory per report label (without SCRATCH_DIR — the scratchpad your
-environment names, `{your name}/`): never bare `/tmp`, never the project tree. Remove it
-before replying. If a removal command is denied, do not try another form of removal: leave
-it and list it in SCRATCH with its size.
+Scratch outside the task (probes, experiments, builds; probe.py keeps its copies in the git
+directory) goes only into SCRATCH_DIR, a subdirectory per report label (without SCRATCH_DIR —
+the scratchpad your environment names, `{your name}/`): never bare `/tmp`, never the project
+tree. Remove it before replying. If a removal command is denied, do not try another form of
+removal: leave it and list it in SCRATCH with its size.
 
 Git is read-only for you (`status`, `diff`, `show`, `log`); never `stash`, `checkout`,
 `restore`, `reset`, `commit`, `clean`: the orchestrator commits, and uncommitted work
@@ -128,9 +128,11 @@ unchanged", "it checks existing behaviour" and "no probe was requested" are not 
 Only a probe that cannot be built (the mutant does not compile, the behaviour lives outside
 the tree) gets a MUTATIONS line saying why; a test that stays green is strengthened, not
 excused.
-Afterwards no `.orig` copy is left and `git diff` of every source file you probed is what it
-was before the probe; TREE STATE in the report is `git status --short` taken right before
-replying, never written from memory.
+Afterwards no probe copy is left (`probe.py restore --root {PROJECT_ROOT}` puts back those in
+the git directory; `PROBE COPY KEPT` — the file changed after a killed probe: compare with the
+copy, bring the file back to what it must be, `restore --file PATH --drop`, say so in the report) and `git diff` of every source file you probed is what it was before the
+probe; TREE STATE in the report is `git status --short` taken right before replying, never
+written from memory.
 
 ## Output format
 
@@ -173,7 +175,10 @@ MUTATIONS:
   - {new test} [S{n}] ← {probe} → RED | GREEN, then {how the test was strengthened} → RED   (a line per new test; S{n} — the spec scenario it proves)
   - {new test} — no probe possible: {why}
   — or "none: no new tests or assertions"
-BYTES CHECK: {file:line — U+XXXX | escape, verified by bytes} — or "n/a: ASCII only"
+BYTES CHECK:
+  - {file}: {Cyrillic, typographic …}; invisible and escapes: none — verified by bytes
+  - {file:line} — {U+XXXX | escape}, verified by bytes   (an invisible or ambiguous character, an escape)
+  — or "n/a: ASCII only" — only when the diff adds no non-ASCII line
 SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
 SCRATCH: clean | {path} {size} — left outside the tree, could not remove
 TREE STATE:

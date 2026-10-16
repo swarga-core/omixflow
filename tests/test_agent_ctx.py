@@ -43,11 +43,16 @@ class AgentCtxTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def agent(self, name: str, records: list, slug: str = "-proj", session: str = SESSION,
-              suffix: str = "abc", raw_tail: str = "") -> Path:
+              suffix: str = "abc", raw_tail: str = "", named: bool = True) -> Path:
+        """A subagent transcript; `named=False` is a spawn of Claude Code 2.1.300+, whose Agent
+        tool takes no `name` (SwAIS T-10: the meta has the type and the description only)."""
         d = self.projects / slug / session / "subagents"
         d.mkdir(parents=True, exist_ok=True)
         stem = f"agent-{agent_id(name, suffix)}"
-        (d / f"{stem}.meta.json").write_text(json.dumps({"name": name}))
+        meta = {"agentType": "omixflow:coder", "description": f"{name} step 1"}
+        if named:
+            meta["name"] = name
+        (d / f"{stem}.meta.json").write_text(json.dumps(meta))
         log = d / f"{stem}.jsonl"
         log.write_text("".join(json.dumps(r) + "\n" for r in records) + raw_tail)
         return log
@@ -148,6 +153,57 @@ class AgentCtxTests(unittest.TestCase):
         res = run("architect-X", env={"CLAUDE_CODE_SESSION_ID": SESSION, "CLAUDE_CONFIG_DIR": str(config)})
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertEqual(json.loads(res.stdout)["context"], 7)
+
+    def test_agent_spawned_without_a_name_is_found_by_its_id(self):
+        log = self.agent("coder-T-10", [reply("t1", 1, 494_000, 885)], named=False)
+        code, out = self.measure(agent_id("coder-T-10"))
+        self.assertEqual(code, 0, out)
+        self.assertEqual((out["context"], out["id"], out["name"], out["others"]),
+                         (494_886, agent_id("coder-T-10"), None, 0))
+        self.assertEqual(out["transcript"], str(log))
+        code, out = self.measure("coder-T-10")  # no name in the meta: a name finds nothing
+        self.assertEqual(code, 3)
+        self.assertIn("agentId", out["reason"])
+
+    def test_a_transcript_without_its_meta_is_found_by_id_only(self):
+        d = self.projects / "-proj" / SESSION / "subagents"
+        d.mkdir(parents=True)
+        (d / "agent-a0123456789abcdef.jsonl").write_text(json.dumps(reply("t", 1, 41, 0)) + "\n")
+        code, out = self.measure("a0123456789abcdef")
+        self.assertEqual((code, out["context"], out["name"]), (0, 42, None))
+
+    def test_a_named_agent_is_found_by_its_id_too(self):
+        self.agent("reviewer-X", [reply("t", 1, 40_000, 0)], suffix="old")
+        self.agent("reviewer-X", [reply("t", 1, 9, 0)], suffix="new")
+        code, out = self.measure(agent_id("reviewer-X", "old"))
+        self.assertEqual((code, out["context"], out["name"], out["others"]), (0, 40_001, "reviewer-X", 0))
+
+    def test_missing_subagents_directory_and_missing_transcript_are_told_apart(self):
+        code, out = self.measure("coder-X")
+        self.assertEqual(code, 3)
+        self.assertIn("нет каталога субагентов", out["reason"])
+        self.agent("coder-Y", [reply("t", 1, 1, 1)])
+        code, out = self.measure("coder-X")
+        self.assertEqual(code, 3)
+        self.assertIn("нет ни agent-coder-X.jsonl", out["reason"])
+        self.assertNotIn("нет каталога", out["reason"])
+
+    def test_list_shows_every_subagent_with_id_type_and_description(self):
+        old = self.agent("coder-T-10", [reply("t1", 1, 100, 0)], named=False)
+        os.utime(old, (time.time() - 100, time.time() - 100))
+        self.agent("reviewer-T-10", [reply("t2", 1, 200, 0)])
+        self.agent("tester-T-10", [reply("t3", 1, 300, 0)], session="other-session")
+        res = run("--list", "--session", SESSION, "--projects", str(self.projects))
+        self.assertEqual(res.returncode, 0, res.stderr)
+        rows = json.loads(res.stdout)["agents"]
+        self.assertEqual([r["id"] for r in rows], [agent_id("reviewer-T-10"), agent_id("coder-T-10")])
+        self.assertEqual(rows[1], {"id": agent_id("coder-T-10"), "name": None, "type": "omixflow:coder",
+                                   "description": "coder-T-10 step 1", "context": 101, "at": "t1"})
+        self.assertEqual(rows[0]["name"], "reviewer-T-10")
+
+    def test_agent_and_list_are_exclusive(self):
+        self.assertEqual(run("--session", SESSION).returncode, 2)
+        self.assertEqual(run("coder-X", "--list", "--session", SESSION).returncode, 2)
 
     def test_missing_or_malformed_session_id_is_unknown(self):
         res = run("coder-X", "--projects", str(self.projects))

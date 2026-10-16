@@ -121,6 +121,21 @@ class AdapterLint(unittest.TestCase):
                         self.assertIsInstance(meta.get("capabilities"), list)
                         self.assertIn("requires", meta)
 
+    def test_test_support_the_prose_names_is_machine_readable(self):
+        """G-67, SwAIS T-10: the ts adapter's prose named `test/` test support, its globs did
+        not, and `plan.py files` counted the helpers as code."""
+        for path in sorted((ROOT / "adapters" / "lang").glob("*.md")):
+            if path.name == "PORT.md":
+                continue
+            meta, body = lib.parse_frontmatter(path)
+            if "Тестовая поддержка" in body:
+                with self.subTest(file=path.name):
+                    support = (meta.get("tests") or {}).get("support")
+                    self.assertIsInstance(support, list)
+                    for d in re.findall(r"`([\w.-]+)/`", body.split("Тестовая поддержка", 1)[1].split("\n- ", 1)[0]):
+                        self.assertIn(f"**/{d}/**", support)
+        self.assertIn("support: [glob…]", (ROOT / "adapters" / "lang" / "PORT.md").read_text(encoding="utf-8"))
+
     def test_port_contracts_declare_required(self):
         for port in lib.PORTS:
             contract = lib.port_contract(port)
@@ -1027,7 +1042,7 @@ class AgentRulesLint(unittest.TestCase):
         """T-7, MEW-25: after `respawn` the session's earlier agents were unreachable by name;
         by id T-7 kept the reviewer's context, MEW-25 respawned them and lost it."""
         runtime = self.flat("protocol/runtime.md")
-        self.assertIn("по `id` из `python3 {корень плагина}/scripts/agent_ctx.py {имя}`", runtime)
+        self.assertIn("по `id` из `python3 {корень плагина}/scripts/agent_ctx.py {адрес}`", runtime)
         self.assertIn("Нет id или и по id не дошло — новый спавн", runtime)
         self.assertIn("После `/resume` с новым id сессии прежних агентов нет", runtime)
         for skill in ("implement", "spec", "plan", "review", "research", "finalize"):
@@ -1043,6 +1058,62 @@ class AgentRulesLint(unittest.TestCase):
         for rel in ("protocol/lead.md", "skills/lead/SKILL.md"):
             with self.subTest(rel=rel):
                 self.assertIn("прежних агентов — по id (`agent_ctx.py`)", self.flat(rel))
+
+    def test_an_agent_is_addressed_by_its_name_or_its_spawn_id(self):
+        """T-10: since Claude Code 2.1.300 the Agent tool takes no `name`; the session kept the
+        agentIds in state.yaml, agent_ctx.py found none of them by name."""
+        runtime = self.flat("protocol/runtime.md")
+        self.assertIn("**Адрес агента.**", runtime)
+        self.assertIn("иначе `agentId` из результата спавна", runtime)
+        self.assertIn("`state.py set TASK_DIR agents.{ключ}={адрес}`", runtime)
+        self.assertIn("`agent_ctx.py --list`", runtime)
+        self.assertNotIn("обязан иметь `name`", runtime)
+        self.assertIn('description: "{role}-{id}: {задание}"', runtime)
+        tiers = self.flat("protocol/tiers.md")
+        self.assertIn("agent_ctx.py {адрес агента}", tiers)
+        self.assertIn("<usage><subagent_tokens>N</subagent_tokens>", tiers)
+        stale = ("обязан иметь `name`", "FIX-цикл идёт по имени", "SendMessage to `", "спавн агента с именем",
+                 "имя может быть с суффиксом", "Имя — в `agents.", "с параметром `name`", "один спавн с `name`")
+        for path in [*iter_files("skills"), *iter_files("protocol"), *iter_files("agents")]:  # review F4, F10
+            with self.subTest(path=f"{path.parent.name}/{path.name}"):
+                text = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertNotRegex(text, r"agents\.[a-z_{}]+=\{имя\}")      # state keeps the address, not a name
+                self.assertNotRegex(text, r"SendMessage `[a-z]+-\{id\}")
+                for phrase in stale:
+                    self.assertNotIn(phrase, text)
+        research = self.flat("skills/research/SKILL.md")
+        self.assertIn("agents.researcher={адрес}", research)
+        self.assertIn("по адресу из `agents.researcher`", research)
+        self.assertIn("agentId — служебный", runtime)      # review F8: not in log.md or the tracker
+        self.assertIn("оркестратор записывает сразу после его спавна", self.flat("skills/spec/SKILL.md"))   # N3
+        self.assertNotIn("Спавн без имени там, где агента продолжают", self.flat("protocol/review-cycle.md"))   # N4
+        self.assertNotIn("{новый адрес}", tiers)
+
+    def test_lead_retires_a_rule_and_briefs_carry_open_rules_only(self):
+        """G-61, SwAIS R-1: `replace` refused the rule, `list --type rule` kept handing it on."""
+        lead_md = self.flat("protocol/lead.md")
+        self.assertIn("lead.py rule-retire R-{n} --decision D-{m}", lead_md)
+        skill = self.flat("skills/lead/SKILL.md")
+        self.assertIn("действующие правила (`lead.py list --type rule --open`: снятые `rule-retire` не идут", skill)
+        self.assertIn("действующие правила (`lead.py list --type rule --open`) и решения", skill)
+        self.assertNotRegex(skill, r"lead\.py list --type rule`")     # every rule listing for a brief or a decision is --open
+
+    def test_bytes_check_has_a_per_file_form_and_n_a_means_an_ascii_diff(self):
+        """G-71, SwAIS T-12: `n/a` written for «checked, nothing invisible» over Cyrillic lines."""
+        for rel in ("agents/coder.md", "agents/tester.md"):
+            with self.subTest(rel=rel):
+                text = self.flat(rel)
+                self.assertIn("invisible and escapes: none — verified by bytes", text)
+        self.assertIn("never for «checked, nothing invisible»", self.flat("agents/coder.md"))
+
+    def test_a_probe_copy_never_goes_next_to_the_file(self):
+        """G-69, SwAIS T-12: node-pg-migrate loaded the `.orig` copy as a second migration."""
+        for rel in ("agents/coder.md", "agents/tester.md"):
+            with self.subTest(rel=rel):
+                text = self.flat(rel)
+                self.assertNotIn("{file}.orig", text)
+                self.assertNotIn("`.orig` copy next to the file is the exception", text)
+        self.assertIn("{SCRATCH_DIR}/{label}/{name}.orig", self.flat("agents/coder.md"))
 
     def test_a_failed_agent_gets_the_same_assignment_again(self):
         """T-7: the reviewer broke off on ENOTFOUND before writing FINDINGS_PATH."""

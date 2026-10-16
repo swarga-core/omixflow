@@ -184,6 +184,9 @@ SendMessage, исполнитель фикса ревью по файлам пр
 (`plan.py check`); один содержательный проход ревью артефактов; research.md как вход спеки;
 coder правит спеку по ходу (`SPEC AMENDMENTS`, снимок spec.md в baseline); `specs.mode`
 (descriptions | adr | none) и гейт `structure`; `stats.py` для сравнения задач.
+`0.9.1`: агенты без имени (Claude Code 2.1.300+) — адрес агента это имя или agentId, `agent_ctx.py`
+по id и `--list`; снятие правила лида (`lead.py rule-retire`); копия мутационной пробы в git-каталоге;
+BYTES CHECK по файлу; тестовая поддержка (`tests.support`) вне порога тира.
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

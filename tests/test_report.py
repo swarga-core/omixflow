@@ -103,6 +103,12 @@ class ReportCheckTests(unittest.TestCase):
     def tree(self) -> str:
         return "   M src/a.ts\n  ?? src/a.test.ts\n   M .tasks/T-1/state.yaml"   # indented as the format shows it
 
+    def real_tree(self) -> str:
+        """TREE STATE as the agent takes it: `git status --short --untracked-files=all`, indented."""
+        out = subprocess.run(["git", "-C", str(self.root), "status", "--short", "--untracked-files=all"],
+                             capture_output=True, text=True, check=True).stdout
+        return "\n".join("  " + l for l in out.splitlines())
+
     def write(self, text: str | None = None, mutations: str = MUTATION_LINES, **changes: str) -> None:
         body = text if text is not None else REPORT.format(tree=self.tree(), mutations=mutations)
         for old, new in changes.items():
@@ -155,6 +161,20 @@ class ReportCheckTests(unittest.TestCase):
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
         self.assertIn("остаток пробы в дереве — ?? src/a.ts.orig", out)
+
+    def test_a_probe_copy_left_in_the_git_directory_is_flagged(self):
+        """G-69: probe.py keeps its copies out of the tree, in `{git-dir}/omixflow-probes`;
+        `git status` no longer shows one left behind, report.py looks there."""
+        self.write()
+        self.assertEqual(self.check("--also", "build")[0], 0)
+        copy = self.root / ".git" / "omixflow-probes" / "src" / "a.ts.orig"
+        copy.parent.mkdir(parents=True)
+        copy.write_text("x")
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("пробы не восстановлены", out)
+        self.assertIn("src/a.ts", out)
+        self.assertIn("probe.py restore --root", out)
 
     # ------------------------------------------------------------------ MUTATIONS
 
@@ -332,6 +352,108 @@ class ReportCheckTests(unittest.TestCase):
         self.write(**{"  (снято перед записью отчёта)": "  ?? src/snap.png"})
         code, out = self.check("--also", "build")
         self.assertEqual(code, 0, out)
+
+    def test_bytes_check_per_file_form_covers_cyrillic_and_every_such_file_is_named(self):
+        """G-71, SwAIS T-12: Cyrillic comments, test names and ADRs in six files; the coder wrote
+        `n/a` meaning «checked, nothing invisible», the step came back with no code change."""
+        src = self.root / "src" / "a.ts"
+        src.write_text(src.read_text() + "// сумма — итог\n")
+        test = self.root / "src" / "a.test.ts"
+        test.write_text(test.read_text() + "// проверка\n")
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "T-12-run-model.md").write_text("# Модель прогона\n")
+        tree = self.real_tree()
+        self.write(text=REPORT.format(tree=tree, mutations=MUTATION_LINES).replace(
+            "BYTES CHECK: n/a: ASCII only",
+            "BYTES CHECK: n/a: escapes нет; не-ASCII — только кириллица и видимые типографские символы"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("`n/a` только при ASCII-диффе", out)
+        for f in ("src/a.ts", "src/a.test.ts", "docs/T-12-run-model.md"):   # every file, not the first five
+            self.assertIn(f, out)
+        per_file = ("BYTES CHECK:\n  - src/a.ts: Cyrillic, typographic (—); invisible and escapes: none — verified by bytes\n"
+                    "  - a.test.ts: Cyrillic; invisible and escapes: none — verified by bytes")
+        self.write(text=REPORT.format(tree=tree, mutations=MUTATION_LINES).replace("BYTES CHECK: n/a: ASCII only", per_file))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("не называет файлы диффа с не-ASCII строками: ['docs/T-12-run-model.md']", out)
+        self.assertIn("по файлу:", out)
+        self.write(text=REPORT.format(tree=tree, mutations=MUTATION_LINES).replace(
+            "BYTES CHECK: n/a: ASCII only", per_file + "\n  - docs/T-12-run-model.md: Cyrillic; invisible and escapes: none"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("BYTES CHECK соответствует диффу", out)
+
+    def test_a_file_name_shared_by_two_files_or_a_longer_name_does_not_cover(self):
+        (self.root / "lib").mkdir()
+        for d in ("src", "lib"):
+            (self.root / d / "keys.ts").write_text("// ключи\n")
+        tree = self.real_tree()
+        body = REPORT.format(tree=tree, mutations=MUTATION_LINES)
+        self.write(text=body.replace("BYTES CHECK: n/a: ASCII only",
+                                     "BYTES CHECK:\n  - keys.ts: Cyrillic; invisible and escapes: none"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("'lib/keys.ts', 'src/keys.ts'", out)
+        self.write(text=body.replace("BYTES CHECK: n/a: ASCII only",
+                                     "BYTES CHECK:\n  - src/keys.tsx: Cyrillic\n  - lib/keys.ts: Cyrillic"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("['src/keys.ts']", out)
+
+    def test_bytes_check_takes_a_unique_tail_an_absolute_path_and_dot_slash(self):
+        """Review F3: T-10's per-file lines named `http/actions.test.ts` and `…/registry.ts`."""
+        deep = self.root / "packages" / "server" / "src" / "http"
+        deep.mkdir(parents=True)
+        for name in ("actions.test.ts", "registry.ts", "snap.ts"):
+            (deep / name).write_text("// кириллица\n")
+        tree = self.real_tree()
+        src = self.root / "src" / "a.ts"
+        body = REPORT.format(tree=tree, mutations=MUTATION_LINES)
+        lines = ("BYTES CHECK:\n  - http/actions.test.ts:1 — Cyrillic\n  - …/registry.ts: Cyrillic\n"
+                 f"  - {self.root}/packages/server/src/http/snap.ts: Cyrillic")
+        self.write(text=body.replace("BYTES CHECK: n/a: ASCII only", lines))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        src.write_text(src.read_text() + "// сумма\n")
+        self.write(text=REPORT.format(tree=self.real_tree(), mutations=MUTATION_LINES).replace(
+            "BYTES CHECK: n/a: ASCII only", lines + "\n  - src/a.ts.snap: Cyrillic"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("['src/a.ts']", out)                  # `a.ts.snap` does not name `a.ts`
+        self.write(text=REPORT.format(tree=self.real_tree(), mutations=MUTATION_LINES).replace(
+            "BYTES CHECK: n/a: ASCII only", lines + "\n  - ./src/a.ts: Cyrillic"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+
+    def test_bytes_check_does_not_take_another_path_for_the_file(self):
+        """Re-review N1: a unique tail inside a different path is not the file."""
+        for d in ("packages/server/src", "lib"):
+            (self.root / d).mkdir(parents=True, exist_ok=True)
+        (self.root / "packages" / "server" / "src" / "index.ts").write_text("// индекс\n")
+        (self.root / "lib" / "b.ts").write_text("// б\n")
+        body = REPORT.format(tree=self.real_tree(), mutations=MUTATION_LINES)
+        for named in ("packages/ui/src/index.ts", "lib/index.ts", "vendor/server/src/index.ts"):
+            with self.subTest(named=named):
+                self.write(text=body.replace("BYTES CHECK: n/a: ASCII only",
+                                             f"BYTES CHECK:\n  - {named}: Cyrillic\n  - lib/b.ts: Cyrillic"))
+                code, out = self.check("--also", "build")
+                self.assertEqual(code, 1, out)
+                self.assertIn("['packages/server/src/index.ts']", out)
+        self.write(text=body.replace("BYTES CHECK: n/a: ASCII only",
+                                     "BYTES CHECK:\n  - `server/src/index.ts:1` — Cyrillic\n  - Cyrillic only, in b.ts."))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "My File.md").write_text("# Заметка\n")        # re-review N8
+        body = REPORT.format(tree=self.real_tree(), mutations=MUTATION_LINES)
+        lines = "BYTES CHECK:\n  - server/src/index.ts: Cyrillic\n  - b.ts: Cyrillic\n"
+        self.write(text=body.replace("BYTES CHECK: n/a: ASCII only", lines + "  - docs/My File.md: Cyrillic"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        for other in ("docs/My File.mdx", "docs/My File.md.bak"):
+            self.write(text=body.replace("BYTES CHECK: n/a: ASCII only", lines + f"  - {other}: Cyrillic"))
+            self.assertEqual(self.check("--also", "build")[0], 1, other)
 
     def test_a_truncated_report_is_broken_and_a_refused_one_is_a_report(self):
         self.write(text=REPORT.format(tree=self.tree(), mutations=MUTATION_LINES).split("SUMMARY:")[0])

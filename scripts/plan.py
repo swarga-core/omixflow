@@ -9,11 +9,12 @@ Reads the plan's file lines (plan.md; S tier: the `## Steps` section of spec.md)
 forms the architect and the orchestrator write — `- CREATE: `p``, `- MODIFY `p``,
 `- **CREATE:** `p``, `Файлы: `p` (MODIFY)`, several paths on one line — and the task's
 tier from state.yaml, counts the unique paths, test files apart (the `tests.files` globs
-of every lang adapter in the chain, project extensions included), and compares the
+of every lang adapter in the chain, project extensions included) and test support apart
+(`tests.support`: fixtures, mocks, helpers — neither counts), and compares the
 non-test count with the tier's threshold from the config (`tiers.s_max_files`,
 `tiers.m_max_files`; L has no file threshold) and the step count with MAX_STEPS.
 
-Prints `tier`, `files`, `non_test`, `tests`, `steps`, `threshold`, `over` and the paths;
+Prints `tier`, `files`, `non_test`, `tests`, `support`, `steps`, `threshold`, `over` and the paths;
 exit 0 under the thresholds, 1 over either (the orchestrator opens the `scope-change`
 point), 2 when the plan or the state cannot be read or the plan has no recognisable
 file line (a form the script does not know is not «zero files»). The number is a signal
@@ -91,17 +92,20 @@ def plan_files(text: str) -> List[str]:
     return list(seen)
 
 
-def test_globs(root: Path) -> Optional[List[str]]:
-    """The union of `tests.files` over every lang adapter and its extensions; None when no
-    adapter declares any (then test files cannot be told apart)."""
+def test_globs(root: Path, key: str = "files") -> Optional[List[str]]:
+    """The union of `tests.{key}` over every lang adapter and its extensions; None when no
+    adapter declares any (for `files`: then test files cannot be told apart). `tests.support`
+    — the test support (fixtures, mocks, helpers) the adapter's test_conventions name: no
+    tests, but not code either (SwAIS T-10: helpers under `test/` pushed an M plan over the
+    threshold, the developer was asked for an exception with no code beyond it)."""
     globs: List[str] = []
     try:
         cfg = lib.load_config(root)
         for name in lib.adapters_for(cfg, "lang"):
             for adapter in lib.resolve_adapter("lang", name, root):
                 tests = adapter.meta.get("tests") or {}
-                if isinstance(tests, dict) and tests.get("files"):
-                    for g in tests["files"]:
+                if isinstance(tests, dict) and tests.get(key):
+                    for g in tests[key]:
                         if str(g) not in globs:
                             globs.append(str(g))
     except lib.OmixflowError:
@@ -154,12 +158,14 @@ def cmd_files(ns: argparse.Namespace) -> int:
         return NOT_READ
     globs = test_globs(root)
     tests = set(lib.area_files(globs, files)) if globs else set()
-    non_test = [f for f in files if f not in tests]
+    support_globs = test_globs(root, "support")
+    support = set(lib.area_files(support_globs, files)) - tests if support_globs else set()
+    non_test = [f for f in files if f not in tests and f not in support]
     tier = state.get("tier")
     over_files = threshold is not None and len(non_test) > threshold
     over_steps = steps > MAX_STEPS
     result = {"plan": str(source), "tier": tier, "files": len(files), "non_test": len(non_test),
-              "tests": len(tests) if globs else None, "steps": steps, "max_steps": MAX_STEPS,
+              "tests": len(tests) if globs else None, "support": len(support), "steps": steps, "max_steps": MAX_STEPS,
               "threshold": threshold, "over": over_files or over_steps, "over_files": over_files,
               "over_steps": over_steps, "paths": files}
     if ns.json:
@@ -167,11 +173,13 @@ def cmd_files(ns: argparse.Namespace) -> int:
     else:
         print(f"plan: {source}")
         tests_note = f"tests {len(tests)}" if globs else "tests not told apart: no tests.files in the lang adapters"
+        if support:
+            tests_note += f", test support {len(support)}"
         print(f"tier: {tier}, files: {len(files)} (non-test {len(non_test)}, {tests_note}), "
               f"threshold: {threshold if threshold is not None else 'none'}, steps: {steps}/{MAX_STEPS}, "
               f"over: {'yes' if result['over'] else 'no'}")
         for f in files:
-            print(f"  {'test ' if f in tests else '     '}{f}")
+            print(f"  {'test ' if f in tests else 'supp ' if f in support else '     '}{f}")
     return OVER if result["over"] else OK
 
 

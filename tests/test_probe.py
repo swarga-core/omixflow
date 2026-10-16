@@ -59,9 +59,14 @@ class ProbeTests(unittest.TestCase):
         return run("run", "--root", str(self.root), "--test", "test_add", "--file", "mod.py", "--cmd", self.cmd,
                    "--replace", old, "--with", new, *extra)
 
+    def copy(self, name: str = "mod.py") -> Path:
+        """Where probe.py keeps the copy of NAME: the tree's git directory (G-69)."""
+        return self.root / ".git" / "omixflow-probes" / (name + ".orig")
+
     def assert_clean(self):
         self.assertEqual((self.root / "mod.py").read_text(), SOURCE)
         self.assertFalse((self.root / "mod.py.orig").exists())
+        self.assertFalse(self.copy().exists())
         self.assertEqual((self.root / "other.py").read_text(), "X = 1\n")
 
     # ------------------------------------------------------------------ outcomes
@@ -177,22 +182,164 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("--rebuild after the restore failed", out)
         self.assert_clean()
         # a command that corrupts the backup: the restore no longer matches the original
-        cmd = f"echo corrupt >> mod.py.orig; {self.cmd}"
+        cmd = f"echo corrupt >> {self.copy()}; {self.cmd}"
         code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py", "--cmd", cmd,
                            "--no-baseline", "--replace", "return a + b", "--with", "return a - b")
         self.assertEqual(code, 2, out)
         self.assertIn("differs from before the probe", out)
 
     def test_a_leftover_copy_blocks_the_probe_and_restore_puts_the_file_back(self):
-        (self.root / "mod.py.orig").write_text(SOURCE)
-        (self.root / "mod.py").write_text("mutant")
-        code, out, _ = self.probe_run()
-        self.assertEqual(code, 2, out)
-        self.assertIn("probe.py restore", out)
-        self.assertEqual((self.root / "mod.py").read_text(), "mutant")
-        code, out, _ = run("restore", "--root", str(self.root), "--file", "mod.py")
+        for left in (self.copy(), self.root / "mod.py.orig"):   # 0.9.1 and the copy of probe.py before it
+            with self.subTest(left=left.name):
+                left.parent.mkdir(parents=True, exist_ok=True)
+                left.write_text(SOURCE)
+                (self.root / "mod.py").write_text("mutant")
+                code, out, _ = self.probe_run()
+                self.assertEqual(code, 2, out)
+                self.assertIn("probe.py restore", out)
+                self.assertEqual((self.root / "mod.py").read_text(), "mutant")
+                code, out, _ = run("restore", "--root", str(self.root), "--file", "mod.py")
+                self.assertEqual(code, 0, out)
+                self.assert_clean()
+
+    def test_the_copy_never_lands_in_the_mutated_files_directory(self):
+        """G-69, SwAIS T-12: node-pg-migrate loads every file of the migrations directory, a
+        copy next to the migration became a second one. The test sees the directory mid-probe."""
+        mig = self.root / "migrations"
+        mig.mkdir()
+        (mig / "001_init.py").write_text("V = 1\n")
+        self.git("add", "migrations")
+        self.git("commit", "-q", "-m", "mig")
+        seen = self.root / "seen.txt"           # what the test saw in the directory, run by run
+        check = self.root / "only_one.py"
+        check.write_text("import os, sys\nfiles = sorted(os.listdir(sys.argv[1]))\n"
+                         f"open({str(seen)!r}, 'a').write(' '.join(files) + '\\n')\n"
+                         "sys.path.insert(0, sys.argv[1])\nimport importlib\n"
+                         "assert importlib.import_module('001_init').V == 1\n")
+        code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "migrations/001_init.py",
+                           "--cmd", f"{sys.executable} -B {check} {mig}", "--replace", "V = 1", "--with", "V = 2")
         self.assertEqual(code, 0, out)
+        self.assertIn("→ RED", out)
+        self.assertEqual(seen.read_text().splitlines(), ["001_init.py", "001_init.py"])   # baseline, mutant
+        self.assertEqual(sorted(os.listdir(mig)), ["001_init.py"])
+        self.assertFalse(self.copy("migrations/001_init.py").exists())
+
+    def test_the_copy_is_keyed_by_the_worktree_not_by_the_root_given(self):
+        """Review F1: a package probe runs with `--root {package}`, its restore may come with
+        `--root {project}` (report.py names the project root) — the same file must come back."""
+        pkg = self.root / "pkg"
+        (pkg / "src").mkdir(parents=True)
+        (pkg / "src" / "x.py").write_text("V = 1\n")
+        (self.root / "src").mkdir()
+        (self.root / "src" / "x.py").write_text("OTHER = 1\n")
+        seen = self.root / "seen.txt"
+        cmd = (f"{sys.executable} -c \"import os; open({str(seen)!r}, 'w').write(str(os.path.isfile("
+               f"{str(self.copy('pkg/src/x.py'))!r}))); import sys; sys.exit(open('src/x.py').read() != 'V = 1\\n')\"")
+        code, out, _ = run("run", "--root", str(pkg), "--test", "t", "--file", "src/x.py", "--cmd", cmd,
+                           "--replace", "V = 1", "--with", "V = 2")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(seen.read_text(), "True")       # the copy sat under the worktree's path of the file
+        # a killed probe of the package, restored from the project root
+        copy = self.copy("pkg/src/x.py")
+        self.assertFalse(copy.parent.exists())            # the probe pruned the empty directories of its copy
+        copy.parent.mkdir(parents=True)
+        copy.write_text("V = 1\n")
+        (pkg / "src" / "x.py").write_text("V = 2\n")
+        probe.mutant_record(copy).write_text(probe.digest(pkg / "src" / "x.py"))
+        code, out, _ = run("restore", "--root", str(self.root))
+        self.assertEqual(code, 0, out)
+        self.assertEqual((pkg / "src" / "x.py").read_text(), "V = 1\n")
+        self.assertEqual((self.root / "src" / "x.py").read_text(), "OTHER = 1\n")
+        self.assertFalse(copy.exists() or probe.mutant_record(copy).exists())
+
+    def test_a_file_changed_after_the_probe_keeps_its_copy(self):
+        """Review F1: a copy left days ago must not overwrite newer work."""
+        copy = self.copy()
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_text(SOURCE)
+        (self.root / "mod.py").write_text("mutant")
+        probe.mutant_record(copy).write_text(probe.digest(self.root / "mod.py"))
+        (self.root / "mod.py").write_text("newer work\n")
+        for args in (("--file", "mod.py"), ()):
+            code, out, _ = run("restore", "--root", str(self.root), *args)
+            self.assertEqual(code, 2, out)
+            self.assertIn("PROBE COPY KEPT", out)
+            self.assertEqual((self.root / "mod.py").read_text(), "newer work\n")
+            self.assertTrue(copy.exists())
+        self.assertIn("--drop", out)                       # re-review N2: the way out is named
+        code, out, _ = self.probe_run()
+        self.assertEqual(code, 2, out)                      # the kept copy blocks the next probe
+        self.assertEqual(run("restore", "--root", str(self.root), "--drop")[0], 2)    # one file at a time
+        (self.root / "mod.py").write_text("mutant")              # re-review N6: still the mutant
+        code, out, _ = run("restore", "--root", str(self.root), "--file", "mod.py", "--drop")
+        self.assertEqual(code, 2, out)
+        self.assertIn("still holds the probe's mutant", out)
+        self.assertTrue(copy.exists())
+        (self.root / "mod.py").write_text("newer work\n")
+        code, out, _ = run("restore", "--root", str(self.root), "--file", "mod.py", "--drop")
+        self.assertEqual(code, 0, out)
+        self.assertEqual((self.root / "mod.py").read_text(), "newer work\n")      # the file stays as reconciled
+        self.assertFalse(copy.exists() or probe.mutant_record(copy).exists())
+        copy.write_text(SOURCE)
+        (self.root / "mod.py").write_text(SOURCE)        # someone put it back by hand: the copy just goes
+        code, out, _ = run("restore", "--root", str(self.root))
+        self.assertEqual(code, 0, out)
+        self.assertIn("already the original", out)
         self.assert_clean()
+
+    def test_dropping_a_copy_prunes_only_inside_the_store(self):
+        """Re-review N7: a copy next to the file must not prune project directories; a project
+        directory called `omixflow-probes` is not the store."""
+        mig = self.root / "migrations" / "2026"
+        mig.mkdir(parents=True)
+        legacy = mig / "001.py.orig"
+        legacy.write_text("V = 1\n")
+        code, out, _ = run("restore", "--root", str(self.root), "--file", "migrations/2026/001.py", "--drop")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(mig.is_dir())                    # the project's empty directory stays
+        nested = self.copy("tools/omixflow-probes/x.py")
+        nested.parent.mkdir(parents=True)
+        nested.write_text("x")
+        code, out, _ = run("restore", "--root", str(self.root), "--file", "tools/omixflow-probes/x.py", "--drop")
+        self.assertEqual(code, 0, out)
+        self.assertFalse((self.root / ".git" / "omixflow-probes" / "tools").exists())
+        self.assertTrue((self.root / ".git" / "omixflow-probes").is_dir())
+
+    def test_a_directory_named_like_a_copy_is_not_a_copy(self):
+        store = self.root / ".git" / "omixflow-probes"
+        (store / "build.orig").mkdir(parents=True)
+        code, out, _ = run("restore", "--root", str(self.root))
+        self.assertEqual(code, 0, out)
+        self.assertIn("nothing to restore", out)
+
+    def test_outside_git_the_copy_lives_in_the_roots_hidden_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = Path(tmp)
+            (plain / "mod.py").write_text(SOURCE)
+            (plain / "test_add.py").write_text(TEST)
+            seen = plain / "seen.txt"
+            cmd = (f"{sys.executable} -c \"import os; open({str(seen)!r}, 'w').write(' '.join(sorted(os.listdir("
+                   f"{str(plain / '.omixflow-probes')!r}))))\" && {sys.executable} test_add.py {plain}")
+            code, out, _ = run("run", "--root", str(plain), "--test", "t", "--file", "mod.py", "--cmd", cmd,
+                               "--no-baseline", "--replace", "return a + b", "--with", "return a - b")
+            self.assertEqual(code, 0, out)       # RED: the mutant fails the test, the listing ran first
+            self.assertEqual(seen.read_text(), "mod.py.orig mod.py.orig.mutant")
+            self.assertEqual((plain / "mod.py").read_text(), SOURCE)
+            self.assertFalse((plain / ".omixflow-probes").exists())     # re-review: nothing stays in the project
+
+    def test_restore_without_a_file_puts_back_every_copy_left(self):
+        for name, mutant in (("mod.py", "mutant"), ("other.py", "Y = 2\n")):
+            original = (self.root / name).read_text()
+            self.copy(name).parent.mkdir(parents=True, exist_ok=True)
+            self.copy(name).write_text(original)
+            (self.root / name).write_text(mutant)
+        code, out, _ = run("restore", "--root", str(self.root))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("restored "), 2)
+        self.assert_clean()
+        self.assertFalse(self.copy("other.py").exists())
+        code, out, _ = run("restore", "--root", str(self.root))
+        self.assertEqual((code, "nothing to restore" in out), (0, True))
 
     def test_sigterm_restores_the_file_and_kills_the_test_process(self):
         """A Bash timeout: the file comes back, the endless mutant's process dies with it, and
@@ -286,9 +433,10 @@ class ProbeTests(unittest.TestCase):
         must therefore stay in the messages (finding 39)."""
         cases = [self.probe_run(old="nothing", new="x"), self.probe_run(old="a", new="x"),
                  self.probe_run("--rebuild", "false")]
-        (self.root / "mod.py.orig").write_text(SOURCE)
+        self.copy().parent.mkdir(parents=True, exist_ok=True)
+        self.copy().write_text(SOURCE)
         cases.append(self.probe_run())
-        (self.root / "mod.py.orig").unlink()
+        self.copy().unlink()
         cases.append(run("run", "--root", str(self.root), "--test", "t", "--file", "nope.py", "--cmd", self.cmd,
                          "--replace", "a", "--with", "b"))
         cases.append(run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py",

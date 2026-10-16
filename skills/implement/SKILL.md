@@ -94,7 +94,8 @@ AMENDMENTS` — единственная база при `artifacts.tracked: fal
 Иначе спавн по шаблону runtime.md: `name: coder-{id}` (часть: `coder-{id}-{part}`),
 `STEP: N`, `TASK_DIR`, `ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `SPECS` (из
 `specs.mode` и `specs.adr_dir` конфига), `PLUGIN_ROOT`,
-`REPORT_PATH`, `ITERATION_LIMIT`. Записать `state.py set TASK_DIR agents.coder=… session=…`.
+`REPORT_PATH`, `ITERATION_LIMIT`. Записать `state.py set TASK_DIR agents.coder={адрес} session=…`
+(имя или agentId из результата спавна: `runtime.md`, «Спавн агентов»).
 
 **Ротация** по `tiers.md`, «Смена агента по ходу задачи»: порог проверяется перед
 каждым шагом и пакетом фиксов, новый `coder-{id}-{k}` получает `PREVIOUS_REPORTS`

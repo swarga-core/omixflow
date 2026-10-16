@@ -34,8 +34,8 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 
 ## Алгоритм
 
-1. **Architect.** Если агент из `agents.architect` (`state.yaml`, имя может быть с суффиксом
-   ротации) жив в этой сессии (`session` совпадает), SendMessage ему `MODE: plan`; иначе
+1. **Architect.** Если агент из `agents.architect` (`state.yaml`, адрес: имя с суффиксом
+   ротации или agentId) жив в этой сессии (`session` совпадает), SendMessage ему `MODE: plan`; иначе
    спавн с `name: architect-{id}`, `MODE: plan`, `TASK_DIR`, `ADAPTERS.lang`,
    `RULES`, `SPECS` (из `specs.mode`). Формат: Overview, Steps (Covers — сценарии, контракты и D-n шага; Design;
    файлы CREATE/MODIFY; тест-чекпоинт), Project Specs to Update, Verification. Порядок:
@@ -59,7 +59,7 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
 3. **Findings.** `suggestion` auto-accept; `warning [plan]` и `warning [spec]` с понятным
    фиксом auto-accept (фикс `spec` — architect правит spec.md: недостающее решение или
    сценарий); `warning [architecture]` и `critical` эскалация в точке `finding`.
-4. **FIX и re-review** по review-cycle.md: фиксы architect'у по имени, re-review
+4. **FIX и re-review** по review-cycle.md: фиксы architect'у по адресу, re-review
    тому же reviewer по тем же id (только сверка фиксов по id; новые findings лишь
    `critical` и `warning [architecture]`, прочие оркестратор отклоняет строкой в log.md),
    не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).

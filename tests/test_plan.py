@@ -77,16 +77,43 @@ class PlanFilesTests(unittest.TestCase):
         self.cfg(CFG + "tiers: {m_max_files: 5}\n")
         code, r, _ = self.files()
         self.assertEqual(code, 0, r)
-        # test support under test/ is not a test file by the ts adapter's globs; the bold `**CREATE:**` counts
-        self.assertEqual((r["files"], r["non_test"], r["tests"], r["threshold"], r["over"]), (6, 5, 1, 5, False))
+        # test support under test/ (the ts adapter's tests.support, G-67) counts neither as code nor as
+        # a test; the bold `**CREATE:**` counts
+        self.assertEqual((r["files"], r["non_test"], r["tests"], r["support"], r["threshold"], r["over"]),
+                         (6, 4, 1, 1, 5, False))
         self.assertEqual(r["paths"][0], "packages/schemas/src/action.ts")
         self.assertIn("packages/server/src/old.ts", r["paths"])
         self.assertIn("packages/server/test/actions.ts", r["paths"])
         self.cfg(CFG + "tiers: {m_max_files: 4}\n")
+        self.assertEqual(self.files()[0], 0)        # SwAIS T-10: 31 by the script, 29 in fact, threshold 30
+        self.cfg(CFG + "tiers: {m_max_files: 3}\n")
         code, out, _ = run("files", "--task", str(self.task))
         self.assertEqual(code, 1, out)
         self.assertIn("over: yes", out)
         self.assertIn("test packages/schemas/src/action.test.ts", out)
+        self.assertIn("supp packages/server/test/actions.ts", out)
+        self.assertIn("non-test 4, tests 1, test support 1", out)
+
+    def test_a_test_file_under_a_support_directory_is_a_test(self):
+        """`packages/server/test/x.test.ts` matches both globs: a test, not support (review F11)."""
+        self.state("M")
+        (self.task / "plan.md").write_text("### Step 1\n\n- MODIFY `packages/server/test/x.test.ts`\n"
+                                           "- MODIFY `packages/server/test/db.ts`\n- MODIFY `src/a.ts`\n")
+        code, r, _ = self.files()
+        self.assertEqual((r["non_test"], r["tests"], r["support"]), (1, 1, 1))
+
+    def test_a_project_extension_adds_its_own_test_support(self):
+        """A layout the plugin adapter does not know: the project's extension of the ts adapter
+        names it, `plan.py` takes the union of the chain."""
+        self.state("M")
+        (self.task / "plan.md").write_text("### Step 1\n\n- MODIFY `src/a.ts`\n- MODIFY `e2e/helpers/login.ts`\n")
+        code, r, _ = self.files()
+        self.assertEqual((r["non_test"], r["support"]), (2, 0))
+        ext = self.root / ".claude" / "omixflow" / "lang" / "ts.md"
+        ext.parent.mkdir(parents=True)
+        ext.write_text("---\nport: lang\nname: ts\nextends: omixflow:ts\ntests:\n  support: [\"e2e/helpers/**\"]\n---\n")
+        code, r, _ = self.files()
+        self.assertEqual((r["non_test"], r["support"]), (1, 1))
 
     def test_every_form_the_architect_and_the_orchestrator_write_is_read(self):
         """SwAIS T-2/T-3: `- MODIFY `p``; mewria MEW-11: `Файлы: `p` (MODIFY)`; several

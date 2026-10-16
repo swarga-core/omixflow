@@ -22,7 +22,7 @@ What `check` verifies, each against evidence the agent cannot write:
   format's indentation and notes are dropped, only porcelain lines count, the artifacts
   directory is left out on both sides), and both the collapsed form (`?? dir/`) and the
   expanded one (`--untracked-files=all`) are accepted; a `*.orig` or `*.rej` leftover is a
-  problem;
+  problem, and so is a copy probe.py left unrestored in `{git-dir}/omixflow-probes`;
 - SPEC AMENDMENTS (coder): the task's spec.md diffed against the baseline's snapshot of it
   (`baseline --task TASK_DIR`; the only base when artifacts are kept outside git or when
   uncommitted edits preceded the assignment), else against HEAD when tracked; a change
@@ -45,7 +45,8 @@ What `check` verifies, each against evidence the agent cannot write:
   background gate names its `gate.py` run (coder: on the gate's line; tester: in BACKGROUND
   GATES) and, for the exit-code criterion, the run's exit file agrees with the outcome; the
   script runs no gate itself;
-- BYTES CHECK is not `n/a` when the agent's diff adds non-ASCII text lines;
+- BYTES CHECK is not `n/a` when the agent's diff adds non-ASCII text lines, and names every
+  such file (by its path, or by a tail of it from a `/` that no other such file shares);
 - SUPPRESSIONS CHECK is present; SCRATCH not `clean` becomes the log.md line.
 
 The verdict always carries what the orchestrator acts on without reading the report: each
@@ -134,6 +135,18 @@ def is_none(body: str) -> bool:
 
 # ------------------------------------------------------------------ evidence
 
+def probe_copies_left(root: Path) -> Tuple[Optional[Path], List[str]]:
+    """The copies probe.py left unrestored (`{git-dir}/omixflow-probes`, probe.py «2.»): the
+    files they belong to, relative to the worktree's top level (as probe.py keys them)."""
+    git_dir = (lib.git_raw(root, "rev-parse", "--absolute-git-dir") or "").strip()
+    if not git_dir:
+        return None, []
+    base = Path(git_dir) / "omixflow-probes"
+    if not base.is_dir():
+        return base, []
+    return base, sorted(str(c.relative_to(base))[: -len(".orig")] for c in base.rglob("*.orig") if c.is_file())
+
+
 def status_lines(root: Path, artifacts: str, expanded: bool) -> List[str]:
     args = ["status", "--short"] + (["--untracked-files=all"] if expanded else [])
     out = lib.git_raw(root, *args) or ""
@@ -191,6 +204,42 @@ def agent_delta(root: Path, artifacts: str, baseline: Optional[Dict[str, Optiona
     if baseline is None:
         return sorted(now)
     return sorted(p for p, h in now.items() if baseline.get(p, "∅") != h)
+
+
+BYTES_FORM_HINT = ("по файлу: `- {file}: {что за не-ASCII: Cyrillic, typographic …}; invisible and escapes: "
+                   "none — verified by bytes`, невидимые и escape — строкой `{file:line} — U+XXXX`")
+
+
+def uncovered(files: List[str], section: str, root: Optional[Path] = None) -> List[str]:
+    """The files BYTES CHECK does not name (G-71: a per-file line covers Cyrillic comments and
+    test names). The section is split into whole path-like tokens (`keys.ts:29` → `keys.ts`;
+    an absolute path under the root made relative, `./` and `…/` dropped); a file is named when a token equals its path or a
+    tail of it from a `/` on — `http/actions.test.ts`, `…/registry.ts`, as T-10 wrote them —
+    that no other file of the list ends with. `packages/ui/src/index.ts` does not name
+    `packages/server/src/index.ts`, `vendor/src/a.ts` does not name `src/a.ts`, `a.ts.snap`
+    does not name `a.ts`."""
+    tokens = set()
+    for raw in re.findall(r"[\w./@+…-]+", section):
+        token = re.sub(r"^(?:\.\.\.|…|\.)/", "", raw).rstrip(".")
+        if token.startswith("/") and root is not None:     # an absolute path under the root, symlinks resolved
+            try:
+                token = str(Path(token).resolve().relative_to(root.resolve()))
+            except (OSError, ValueError):
+                pass
+        if token:
+            tokens.add(token)
+
+    def tails(f: str) -> List[str]:
+        parts = f.split("/")
+        return ["/".join(parts[i:]) for i in range(len(parts))]
+
+    def unique(tail: str, f: str) -> bool:
+        return not any(o != f and (o == tail or o.endswith("/" + tail)) for o in files)
+
+    def spaced(f: str) -> bool:     # a name with a space never forms one token: the whole path, as written
+        return " " in f and re.search(r"(?<![\w./-])" + re.escape(f) + r"(?![\w-]|\.\w)", section) is not None
+
+    return [f for f in files if not spaced(f) and not any(tail in tokens and unique(tail, f) for tail in tails(f))]
 
 
 def is_binary(root: Path, path: str) -> bool:
@@ -548,7 +597,13 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
     untracked = [l for l in claimed if l.startswith("??")]
     for l in expanded:          # the real tree, every file: a collapsed `?? dir/` line hides a copy inside
         if re.search(r"\.(orig|rej)$", l):
-            problems.append(f"TREE STATE: остаток пробы в дереве — {l}")
+            hint = (f" (если это копия probe.py до 0.9.1, а не остаток слияния или patch: `probe.py restore "
+                    f"--root {root} --file {l[3:-len('.orig')]}`)" if l.endswith(".orig") else "")
+            problems.append(f"TREE STATE: остаток пробы в дереве — {l}{hint}")
+    base, left = probe_copies_left(root)   # probe.py keeps its copies in the git directory, out of `git status`
+    if left:
+        problems.append(f"TREE STATE: пробы не восстановлены, копии в {base}: {', '.join(left[:5])} — "
+                        f"`python3 {{корень плагина}}/scripts/probe.py restore --root {root}`")
     if untracked:
         facts.append("неотслеживаемые по TREE STATE: " + ", ".join(l[3:] for l in untracked))
 
@@ -663,7 +718,11 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
                  and any(any(ord(ch) > 127 for ch in l) for l in diff_lines(root, p, baseline)[0])]
     bytes_check = section_text(sections, "BYTES CHECK")
     if non_ascii and (not bytes_check or bytes_check.lstrip("-* ").lower().startswith("n/a")):
-        problems.append(f"BYTES CHECK: n/a, а в диффе не-ASCII строки: {non_ascii[:5]}")
+        problems.append(f"BYTES CHECK: n/a, а в диффе не-ASCII строки: {non_ascii} — `n/a` только при "
+                        f"ASCII-диффе; {BYTES_FORM_HINT}")
+    elif non_ascii and uncovered(non_ascii, bytes_check, root):
+        problems.append(f"BYTES CHECK не называет файлы диффа с не-ASCII строками: {uncovered(non_ascii, bytes_check, root)}; "
+                        f"{BYTES_FORM_HINT}")
     elif "BYTES CHECK" in sections:
         verified.append("BYTES CHECK соответствует диффу")
 

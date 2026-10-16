@@ -7,6 +7,7 @@
     lead.py [--journal PATH] replace D-n --with D-m
     lead.py [--journal PATH] rule --text TEXT [--task T ...] [--decision D-n ...]
     lead.py [--journal PATH] rule-use R-n --task T [--decision D-n]
+    lead.py [--journal PATH] rule-retire R-n --decision D-m   # a rule the developer withdrew
     lead.py [--journal PATH] oblige --trigger TEXT --action TEXT [--task T]
     lead.py [--journal PATH] fulfil O-n [--note TEXT]
     lead.py [--journal PATH] approve --action TEXT --answer TEXT [--task T]
@@ -113,7 +114,7 @@ def fold(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, Any]]]:
         elif t == "escalation":
             out[t][e["id"]] = {**e, "resolved": None}
         elif t == "rule":
-            out[t][e["id"]] = {**e, "uses": []}
+            out[t][e["id"]] = {**e, "uses": [], "retired": None}
         elif t == "obligation":
             out[t][e["id"]] = {**e, "fulfilled": None}
         elif t in ("approval", "merge"):
@@ -134,6 +135,8 @@ def fold(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, Any]]]:
                                                        "decision": e.get("decision")}
         elif t == "replace":
             out["decision"][e["ref"]]["replaced_by"] = e["with"]
+        elif t == "rule-retire":
+            out["rule"][e["ref"]]["retired"] = e["decision"]
         elif t == "rule-use":
             out["rule"][e["ref"]]["uses"].append({"task": e["task"], "decision": e.get("decision")})
         elif t == "fulfil":
@@ -157,6 +160,8 @@ def is_open(record: Dict[str, Any]) -> bool:
         return record["replaced_by"] is None
     if t == "gotcha":
         return record["routed"] is None
+    if t == "rule":
+        return record["retired"] is None
     return True
 
 
@@ -203,13 +208,24 @@ def cmd_resolve(ns: argparse.Namespace) -> int:
 
 
 def cmd_replace(ns: argparse.Namespace) -> int:
+    resting: List[str] = []
+
     def build(events, records):
+        if ns.ref in records["rule"]:
+            raise lib.OmixflowError(f"{ns.ref} — правило: снять его — `lead.py rule-retire {ns.ref} "
+                                    "--decision D-m`, `replace` заменяет решения")
         old = require(records["decision"], ns.ref, "decision")
         require(records["decision"], ns.with_, "decision")
         if old["replaced_by"] is not None:
             raise lib.OmixflowError(f"{ns.ref} уже заменено на {old['replaced_by']}")
+        resting.extend(r["id"] for r in records["rule"].values()
+                       if r["retired"] is None and ns.ref in (r.get("decisions") or []))
         return ({"type": "replace", "ref": ns.ref, "with": ns.with_}, ns.ref)
-    return write(ns, build)
+    code = write(ns, build)
+    for rid in resting:     # not retired here: the rule may rest on other decisions too (G-61, SwAIS R-1)
+        print(f"{rid} держится на {ns.ref}: если правило снято — `lead.py rule-retire {rid} "
+              f"--decision {ns.with_}`", file=sys.stderr)
+    return code
 
 
 def cmd_rule(ns: argparse.Namespace) -> int:
@@ -222,9 +238,32 @@ def cmd_rule(ns: argparse.Namespace) -> int:
     return write(ns, build)
 
 
+def cmd_rule_retire(ns: argparse.Namespace) -> int:
+    alive: Dict[str, List[str]] = {}
+
+    def build(events, records):
+        rule = require(records["rule"], ns.ref, "rule")
+        require(records["decision"], ns.decision, "decision")
+        if rule["retired"] is not None:
+            raise lib.OmixflowError(f"{ns.ref} уже снято решением {rule['retired']}")
+        points = {records["decision"][d]["point"] for d in rule.get("decisions") or [] if d in records["decision"]}
+        for d in records["decision"].values():     # what `precedents` still hands out at the rule's points
+            if (d["point"] in points and d["id"] != ns.decision and d["replaced_by"] is None
+                    and developer_made(d) and not d.get("exception")):
+                alive.setdefault(d["point"], []).append(d["id"])
+        return ({"type": "rule-retire", "ref": ns.ref, "decision": ns.decision}, ns.ref)
+    code = write(ns, build)
+    for point, ids in alive.items():    # SwAIS: R-1 rested on D-163 only, its text cited D-97 and D-152 too
+        print(f"precedents в точке {point} по-прежнему отдаёт {', '.join(ids)}: то из них, что держит "
+              f"снятое правило, — `lead.py replace D-k --with {ns.decision}`", file=sys.stderr)
+    return code
+
+
 def cmd_rule_use(ns: argparse.Namespace) -> int:
     def build(events, records):
-        require(records["rule"], ns.ref, "rule")
+        rule = require(records["rule"], ns.ref, "rule")
+        if rule["retired"] is not None:
+            raise lib.OmixflowError(f"{ns.ref} снято решением {rule['retired']}: по нему не решают")
         if ns.decision:
             require(records["decision"], ns.decision, "decision")
         return ({"type": "rule-use", "ref": ns.ref, "task": ns.task, "decision": ns.decision}, ns.ref)
@@ -328,7 +367,9 @@ def describe(rec: Dict[str, Any]) -> str:
         return f"{rec['id']} {rec['task']}#{rec['q']} {rec['item']} [{rec['point']}]: {rec['summary']} — {state}"
     if t == "rule":
         uses = ", ".join(u["task"] for u in rec["uses"])
-        return f"{rec['id']} {rec['text']} (задачи: {', '.join(rec['tasks'] or []) or '—'}; применено: {uses or '—'})"
+        tail = f" — снято {rec['retired']}" if rec["retired"] else ""
+        return (f"{rec['id']} {rec['text']} (задачи: {', '.join(rec['tasks'] or []) or '—'}; "
+                f"применено: {uses or '—'}){tail}")
     if t == "obligation":
         state = "исполнено" if rec["fulfilled"] else "открыто"
         return f"{rec['id']} при «{rec['trigger']}»: {rec['action']} — {state}"
@@ -374,7 +415,8 @@ def cmd_precedents(ns: argparse.Namespace) -> int:
     decisions = [d for d in records["decision"].values()
                  if d["point"] == ns.point and d["replaced_by"] is None and developer_made(d)
                  and not d.get("exception")]     # protocol/lead.md: an exception is not a precedent
-    print(json.dumps({"decisions": decisions, "rules": list(records["rule"].values())},
+    rules = [r for r in records["rule"].values() if r["retired"] is None]     # a withdrawn rule is no precedent
+    print(json.dumps({"decisions": decisions, "rules": rules},
                      ensure_ascii=False, indent=2))
     return 0
 
@@ -490,6 +532,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--task", required=True)
     p.add_argument("--decision", default=None)
     p.set_defaults(fn=cmd_rule_use)
+
+    p = sub.add_parser("rule-retire")
+    p.add_argument("ref")
+    p.add_argument("--decision", required=True)
+    p.set_defaults(fn=cmd_rule_retire)
 
     p = sub.add_parser("oblige")
     p.add_argument("--trigger", required=True)

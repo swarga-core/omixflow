@@ -9,6 +9,7 @@ scripts: {}
 tests:                                   # test_conventions machine-readable (report.py check)
   files: ["**/*.test.ts", "**/*.test.tsx", "**/*.a11y.test.tsx", "**/*.variants.test.tsx", "**/*.visual.test.tsx"]
   declaration: '^\s*(it|test)\s*\('
+  support: ["**/__mocks__/**", "**/fixtures/**", "**/test/**", "**/test-utils/**"]   # test_conventions, «Тестовая поддержка»: plan.py files
 ---
 
 # Адаптер lang: TypeScript / JavaScript
@@ -44,8 +45,12 @@ tests:                                   # test_conventions machine-readable (re
 - Варианты и конфигурация компонентов: `*.variants.test.tsx`.
 - Визуальные: `*.visual.test.tsx`, отдельный гейт в браузере, в `test` не входит.
 - Тестовая поддержка (правит tester, исполнитель фикса ревью — по ней же): `__mocks__/`,
-  `fixtures/`, `test/` и `test-utils/` пакета, файлы `setupFiles` конфига vitest. Проект
-  с другой раскладкой называет свои каталоги в правилах tester'а.
+  `fixtures/`, `test/` и `test-utils/` пакета, файлы `setupFiles` конфига vitest; те же
+  каталоги — `tests.support` фронтматтера (`plan.py files` не считает их кодом). Проект
+  с другой раскладкой называет свои каталоги в правилах tester'а и в `tests.support`
+  расширения адаптера (`.claude/omixflow/lang/ts.md`, `extends: omixflow:ts`); расширение
+  только добавляет глобы — проект, у которого в `test/` или `fixtures/` лежит продуктовый код
+  (опубликованный пакет хелперов, сиды), заменяет адаптер (`adapters.md`, «Три уровня кастомизации»).
 - Один файл: `pnpm test {Name}` или `pnpm exec vitest run {Name}`; один тест:
   `pnpm test -t "{name}"`. **Никогда `pnpm test -- {X}`**: с `--` pnpm искажает
   аргументы, и vitest тихо прогоняет всё. **Никогда `--filter={X}`** для vitest.

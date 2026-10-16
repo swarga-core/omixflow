@@ -23,12 +23,12 @@ links: [omixflow-agent-resume-by-id, omixflow-rotation-context-teammates, omixfl
 - Харнесс сменил инструмент Agent: в 2.1.296 параметр `name` был — в `.meta.json`
   субагентов SwAIS T-8, T-9, T-11 есть `"name": "coder-T-8"` и т. п. Сессия T-10 шла на
   2.1.300–2.1.301: у Agent нет параметра `name` (у сессии omixflow-lead на 2.1.301 — тоже),
-  во всех 16 `.meta.json` T-10 поля `name` нет (`agentType`, `description`, `toolUseId`,
+  во всех 8 `.meta.json` T-10 поля `name` нет (`agentType`, `description`, `toolUseId`,
   `model`). Продолжение — только по agentId; T-10 так и делала, хранила id в
   `state.yaml` `agents.*`.
 - Оркестратор T-10 вызвал `agent_ctx.py a6a303d678e606a77` (id вместо имени) — код 3,
   `"reason": "транскрипт агента не найден: …/84ebdefc-…/subagents"`. Каталог `subagents`
-  при этом был (16 транскриптов, `agent-a6a303d678e606a77.jsonl` среди них): скрипт не
+  при этом был (8 транскриптов, `agent-a6a303d678e606a77.jsonl` среди них): скрипт не
   нашёл совпадения по `name`, а текст причины читается как «каталога нет» — так гоча
   и записана.
 - Ротация пошла по запасному пути tiers.md: «контекст ~498k по usage уведомления (порог

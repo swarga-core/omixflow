@@ -72,7 +72,8 @@ runtime.md, `model: {models.strong}` на L и всегда при `triage: fals
 ```
 Agent tool:
   subagent_type: "{агент researcher по маппингу}"
-  name: "researcher-{id}"            # часть: "researcher-{id}-{part}"
+  name: "researcher-{id}"            # часть: "researcher-{id}-{part}"; только когда Agent принимает name
+  description: "researcher-{id}: research"
   model: "{по tiers.md}"
   prompt: |
     PROJECT_ROOT: …   TASK_DIR: …   ADAPTERS: lang …   RULES: …   PARENT: …
@@ -89,8 +90,10 @@ web-fetcher здесь и researcher'ы частей в режиме плани�
 
 **Блокирующий вопрос.** Ответ агента начинается с `STATUS:`. На `STATUS: blocked`
 спросить в точке `research-blocking`, записать вопрос и ответ в `log.md` задачи
-или части и продолжить того же агента:
-SendMessage to `researcher-{id}` (часть: `researcher-{id}-{part}`) с ответом.
+или части и продолжить того же агента: SendMessage по его адресу с ответом. Адрес (имя,
+если харнесс принял `name`, иначе agentId из результата спавна: `runtime.md`, «Спавн агентов»)
+оркестратор записывает сразу после спавна: `state.py set {TASK_DIR задачи или части}
+agents.researcher={адрес}`.
 Research.md появляется только после `STATUS: done`.
 
 Формат записи в `log.md`, по нему же собирается `ANSWERS` при перезапуске: в секции
@@ -177,9 +180,9 @@ Research завершён: {артефакт}, файлов в карте: {N}, 
    его нет). Если части
    репозитория уже идут на checkout, новые части этого репозитория ждут их
    завершения, затем группа переходит на research-worktree.
-4. `STATUS: blocked` от `researcher-{id}-{part}`: вопрос в точке `research-blocking`,
+4. `STATUS: blocked` от researcher'а части: вопрос в точке `research-blocking`,
    запись `### Blocking Q{n}`
-   в `log.md` части, SendMessage to `researcher-{id}-{part}` с ответом.
+   в `log.md` части, SendMessage по адресу из `agents.researcher` состояния части с ответом.
    `STATUS: done`: `## Research ✅` в `log.md` части,
    `state.py finish {TASK_DIR}/{part} research`, вложенный
    `finalize {id} --part {part}` (коммит по пути, push по правилу общей ветки,

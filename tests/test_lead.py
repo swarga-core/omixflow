@@ -90,6 +90,43 @@ class JournalTests(unittest.TestCase):
         self.ok("fulfil", "O-1", "--note", "перенесено")
         self.assertEqual([r["id"] for r in self.records("--type", "obligation", "--open")], ["O-2"])
 
+    def test_a_retired_rule_leaves_the_open_list_and_the_precedents(self):
+        """G-61, SwAIS R-1: the developer withdrew the rule, `replace` refused it and `list`,
+        `precedents` kept handing it to briefs."""
+        base = self.ok("decide", "--task", "T-8", "--q", "4", "--item", "P1", "--point", "scope-change",
+                       "--choice", "a", "--basis", "developer E-28", "--by", "lead")
+        self.ok("rule", "--text", "тир остаётся M", "--task", "T-8", "--decision", base)
+        self.ok("rule", "--text", "даты в UTC")
+        new = self.ok("decide", "--task", "T-10", "--q", "0", "--item", "config", "--point", "scope-change",
+                      "--choice", "R-1 снято", "--basis", "developer", "--by", "lead")
+        code, _, err = self.call("replace", "R-1", "--with", new)
+        self.assertEqual(code, 2)
+        self.assertIn("lead.py rule-retire R-1", err)
+        code, _, err = self.call("replace", base, "--with", new)
+        self.assertEqual(code, 0, err)
+        self.assertIn(f"R-1 держится на {base}", err)       # a hint, not a retirement
+        self.assertEqual([r["id"] for r in self.records("--type", "rule", "--open")], ["R-1", "R-2"])
+        kept = self.ok("decide", "--task", "T-9", "--q", "2", "--item", "P1", "--point", "scope-change",
+                       "--choice", "a: M при 35 файлах", "--basis", "developer E-25", "--by", "lead")   # SwAIS D-152
+        code, out, err = self.call("rule-retire", "R-1", "--decision", new)
+        self.assertEqual((code, out), (0, "R-1"), err)
+        self.assertIn(f"precedents в точке scope-change по-прежнему отдаёт {kept}:", err)   # review F5
+        self.assertNotIn(base, err.split("отдаёт", 1)[1].split(":", 1)[0])    # replaced: no longer handed out
+        self.assertNotIn(new, err.split("отдаёт", 1)[1].split(":", 1)[0])     # the retiring decision itself
+        self.assertEqual([r["id"] for r in self.records("--type", "rule", "--open")], ["R-2"])
+        self.assertEqual({r["id"]: r["retired"] for r in self.records("--type", "rule")}, {"R-1": new, "R-2": None})
+        precedents = json.loads(self.ok("precedents", "--point", "scope-change"))
+        self.assertEqual([r["id"] for r in precedents["rules"]], ["R-2"])
+        self.assertIn(f"R-1 тир остаётся M (задачи: T-8; применено: —) — снято {new}", self.ok("show"))
+        code, _, err = self.call("rule-use", "R-1", "--task", "T-12")
+        self.assertEqual(code, 2)
+        self.assertIn("снято", err)
+        code, _, err = self.call("rule-retire", "R-1", "--decision", new)
+        self.assertEqual(code, 2)
+        self.assertIn("уже снято", err)
+        self.assertEqual(self.call("rule-retire", "R-9", "--decision", new)[0], 2)
+        self.assertEqual(self.call("rule-retire", "R-2", "--decision", "D-99")[0], 2)
+
     def test_register_upserts_session(self):
         self.ok("register", "AL-1", "--task", "AL-1", "--phase", "refine", "--asked", "2")
         self.ok("register", "AL-1", "--asked", "3")

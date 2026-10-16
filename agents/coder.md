@@ -171,17 +171,21 @@ the mutant fails `--check`, the line goes into MUTATIONS with that reason; 2 —
 was not run (`PROBE NOT RUN: …`): the test is not green without the mutant, OLD is
 missing or ambiguous, the patch does not apply or touches another file, a copy is left
 from a killed probe (`probe.py restore --root … --file …` puts it back): fix the call and
-run again, such a line never goes into MUTATIONS. Give `--check` when the adapter has a
-typecheck or build: a mutant that does not compile turns every test red and proves
-nothing. Give `--rebuild` when the lang adapter names a full rebuild (its `verify`
+run again, such a line never goes into MUTATIONS. `PROBE COPY KEPT` from `probe.py restore`
+means the file changed after a killed probe: compare it with the copy (`diff`), bring the file
+to what your step needs, then `restore --file PATH --drop`, and say so in NOTES. Give
+`--check` when the adapter has a typecheck or build: a mutant that does not compile turns
+every test red and proves nothing. Give `--rebuild` when the lang adapter names a full rebuild (its `verify`
 section) — once, on the last probe of the series or in `batch`: an incremental cache may
 still hold a mutant. OLD or NEW with quotes, backslashes or `$`: use the batch JSON spec or
 `--patch` (a diff written by a script), not shell quoting. By hand (the script is
 unavailable), the same recipe: restore from a copy, never from git — `git checkout` or
 `git restore` of the mutated file erases your uncommitted step with the probe; `cp
-{file} {file}.orig`, mutate, run, `cp {file}.orig {file}`, `rm {file}.orig` — `cp`, not
-`mv`, which brings back the copy's old modification time and lets a build that decides by
-it keep the mutated binary (MEW-6); afterwards no `.orig` copy is left, `git diff` of
+{file} {SCRATCH_DIR}/{label}/{name}.orig`, mutate, run, `cp` the copy back, remove it — the
+copy never next to the file (a loader that takes every file of the directory, like
+node-pg-migrate's migrations, loads it as a second module: SwAIS T-12), `cp`, not `mv`,
+which brings back the copy's old modification time and lets a build that decides by it
+keep the mutated binary (MEW-6); afterwards no copy is left, `git diff` of
 the file shows exactly your step's change (not that it is empty), and after the series
 the gates run as a full rebuild when the adapter names one.
 
@@ -252,8 +256,9 @@ MUTATIONS:
   - {new test} — no probe possible: {why}
   — or "none: no new tests or assertions"
 BYTES CHECK:
-  - {file:line} — {U+XXXX | escape \uXXXX}, verified by bytes
-  — or "n/a: ASCII only"
+  - {file}: {the non-ASCII it adds: Cyrillic, typographic (— « ») …}; invisible and escapes: none — verified by bytes
+  - {file:line} — {U+XXXX | escape \uXXXX}, verified by bytes   (an invisible or ambiguous character, an escape)
+  — or "n/a: ASCII only" — only when the diff adds no non-ASCII line, never for «checked, nothing invisible»
 SUPPRESSIONS CHECK: clean | {file:line — construct — fixed | kept, why}
 SCRATCH: clean | {path} {size} — left outside the tree, could not remove
 TREE STATE:
@@ -294,7 +299,10 @@ your last step, and a stale tree state sends it after files that do not exist.
   '[^\x00-\x7F]' {file}`, `cat -v {file}`) and report what the file holds. To write a
   backslash escape reliably, generate the line with a script that builds the backslash
   as `chr(92)`. Invisible or ambiguous characters (no-break and zero-width spaces,
-  joiners, combining marks, BOM, homoglyphs) appear in sources only as escapes.
+  joiners, combining marks, BOM, homoglyphs) appear in sources only as escapes. BYTES
+  CHECK has a line for every file of your diff that adds non-ASCII lines — Cyrillic
+  comments, test names and decision records too (the per-file form); `n/a` is for an ASCII
+  diff only: report.py checks each file and returns a report that skips one (SwAIS T-12).
 - **Commands without `cd`.** A `cd` in a compound command can stop on a permission
   prompt (nobody sees it in a background session) or be refused in a worktree-isolated
   session, and within that call the scripts that look for flow.yaml from the current
@@ -310,11 +318,11 @@ your last step, and a stale tree state sends it after files that do not exist.
 - **Scratch outside the task.** Probes, experiments, clones and builds that are not part
   of the step's change go only into SCRATCH_DIR, a subdirectory per report label
   (`{SCRATCH_DIR}/{label}/`; without SCRATCH_DIR — the scratchpad your environment names,
-  `{your name}/`): never bare `/tmp`, never the project tree (a mutation probe's `.orig`
-  copy next to the file is the exception, removed within the probe). Remove what you made
-  before replying. If a removal command is denied, do not try another form of removal
-  (`rm -r`, `find -delete`, a script, `mv` elsewhere): leave it and list it in SCRATCH with
-  its size (MEW-17: 118 MB of agents' probes stayed in `/tmp`).
+  `{your name}/`): never bare `/tmp`, never the project tree (probe.py keeps its copies in
+  the git directory, `{git-dir}/omixflow-probes`, and removes them within the probe).
+  Remove what you made before replying. If a removal command is denied, do not try another
+  form of removal (`rm -r`, `find -delete`, a script, `mv` elsewhere): leave it and list it
+  in SCRATCH with its size (MEW-17: 118 MB of agents' probes stayed in `/tmp`).
 - **Never edit read-only paths** the workspace adapter declares (e.g. submodules).
 - **The spec learns from the implementation.** When the step shows that spec.md is
   imprecise — a scenario's outcome stated loosely, an edge case no scenario names, a

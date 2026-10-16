@@ -61,7 +61,7 @@ approve, шаг 5), не идти в ревью с красным. Красны�
 
 Спавн с `name: reviewer-{id}-code` (часть: `reviewer-{id}-{part}-code`): ревью кода
 начинает свежий reviewer, ревьюер артефактов Spec и Plan сюда не переходит
-(`review-cycle.md`, шаг 4). Имя — в `agents.reviewer_code` (`state.py set`); живой агент
+(`review-cycle.md`, шаг 4). Адрес — в `agents.reviewer_code` (`state.py set`); живой агент
 оттуда в той же сессии (повторный запуск review) получает SendMessage, если порог
 ротации не сработал. `MODE: review`,
 `ADAPTERS.lang`, `ADAPTERS.workspace`, `RULES`, `SPECS` (из `specs.mode`), `PLUGIN_ROOT`, ASPECTS:
@@ -100,7 +100,7 @@ spec-sync с понятным фиксом auto-accept; `warning [architecture]`
 
 Исполнитель — по файлам правки каждого finding (`review-cycle.md`, шаг 3), не по
 категории: правка задевает исходники → coder целиком (SendMessage живому агенту из
-`agents.coder`, имя может быть с суффиксом ротации, или спавн с `name: coder-{id}` и
+`agents.coder`: адрес — имя с суффиксом ротации или agentId, или спавн с `name: coder-{id}` и
 `SPECS` из `specs.mode`),
 правка только в тестах и тестовой поддержке любой категории → tester (спавн с
 `name: tester-{id}`; файл, который в этом проходе правит coder, — coder'у), spec и plan → architect
