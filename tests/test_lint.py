@@ -19,6 +19,7 @@ skipped; outside a git checkout every file is linted.
 from __future__ import annotations
 
 import functools
+import json
 import re
 import subprocess
 import sys
@@ -1169,6 +1170,36 @@ class LeadLaunchLint(unittest.TestCase):
         begin = text.index(start)
         end = text.find("\n## ", begin + 1)
         return " ".join(text[begin:end if end != -1 else len(text)].split())
+
+    def test_the_orchestrators_model_is_the_projects_and_always_passed(self):
+        """0.9.2: SwAIS T-10, T-12…T-14 ran on Fable under `"model": "opus"` — launch passed no model."""
+        flat = lambda rel: " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+        tiers = flat("protocol/tiers.md")
+        self.assertIn("**Модель оркестратора.**", tiers)
+        self.assertIn("`models.orchestrator`, без значения — `models.strong`", tiers)
+        self.assertIn("**Модель.** `sessions.py launch` всегда передаёт `--model`", flat("protocol/lead.md"))
+        lead_skill = flat("skills/lead/SKILL.md")
+        self.assertIn("[--model {модель}]", lead_skill)
+        self.assertIn("--worktree --model={model}`", lead_skill)          # the session learns its launch model
+        self.assertIn("--worktree --model={model}`", flat("protocol/lead.md"))
+        develop = flat("skills/develop/SKILL.md")
+        self.assertIn("`--model=M`", develop)
+        self.assertIn("`state.py set TASK_DIR model_requested=M`", develop)        # a relaunch by the lead
+        self.assertIn("`model_requested` — как в резюме задачи", develop)          # a part's relaunch
+        self.assertIn("`state.py set TASK_DIR model_requested=null`", develop)      # review N4: a developer's session
+        self.assertEqual(develop.count("[--model=M]"), 4)      # task start, multitask M1 and MS, part M3
+        self.assertIn("--part {part} --lead=… --model={model}`", lead_skill)          # review N1: parts too
+        self.assertIn("с `--model={model}`", lead_skill)                              # the research multitask
+        start = flat("skills/start/SKILL.md")
+        self.assertIn("`--model-requested M`", start)
+        self.assertEqual(start.count("[--model-requested {M}]"), 3)    # task, multitask, part init
+        self.assertIn("model_requested:", flat("protocol/artifacts.md"))
+        self.assertNotIn("(в конфиге", tiers)
+        self.assertIn("модель оркестратора по транскрипту (`model`)", flat("skills/start/SKILL.md"))
+        self.assertIn("Строка называет модель оркестратора", flat("protocol/runtime.md"))
+        schema = json.loads((ROOT / "schema" / "flow.schema.json").read_text(encoding="utf-8"))
+        self.assertIn("orchestrator", schema["properties"]["models"]["properties"])
+        self.assertIn("# orchestrator:", (ROOT / "templates" / "flow.yaml").read_text(encoding="utf-8"))
 
     def test_protocol_describes_the_launch(self):
         lead_md = (ROOT / "protocol" / "lead.md").read_text(encoding="utf-8")

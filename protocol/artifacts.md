@@ -107,11 +107,13 @@ step: 3                    # текущий шаг плана, только в i
 steps_total: 6
 steps_done: [1, 2]
 iteration: 1               # номер доработки после возврата; 1 = первая реализация
-agents:                    # живые continuation-агенты этой сессии
-  coder: coder-AL-822
+agents:                    # адреса continuation-агентов этой сессии (runtime.md, «Спавн агентов»)
+  coder: coder-AL-822                  # имя, когда харнесс принял name, иначе agentId
   reviewer: reviewer-AL-822          # ревьюер артефактов (Spec, Plan)
   reviewer_code: reviewer-AL-822-code  # ревьюер кода (Review), review-cycle.md
 session: 3f2a…             # id сессии, в которой созданы agents
+model_requested: opus      # модель запуска (develop --model; tiers.md, «Модель оркестратора»)
+model: claude-opus-5-5     # модель сессии по транскрипту; пишет cost.py phase
 syncs:                     # синхронизации с базой (порт workspace, sync; sync.py record)
   - {base_sha: 9f8e7d6, commit: 1a2b3c4, how: merge, at: 2026-10-04T12:00:00Z}
 checks:                    # проверка оркестратора → полный sha HEAD её последнего зелёного полного прогона
@@ -121,7 +123,7 @@ cost:                      # ведёт cost.py phase (runtime.md, «Стоим�
   session: 3f2a…                        # сессия, записавшая курсор: чужие курсоры частей не учитываются
   total_eq: 8400000
   phases:
-    - {phase: research, requests: 40, cost_eq: 1200000, avg_context: 90000, by_role: {orchestrator: 400000, researcher: 800000}}
+    - {phase: research, model: claude-opus-5-5, requests: 40, cost_eq: 1200000, avg_context: 90000, by_role: {orchestrator: 400000, researcher: 800000}}
 lead:                      # только у задачи, запущенной с лидом (lead.md)
   name: lead-omix          # имя сессии лида
   journal: /abs/…/_lead/journal.jsonl   # путь журнала лида из brief

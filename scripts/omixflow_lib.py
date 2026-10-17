@@ -115,7 +115,10 @@ def load_config(root: Path) -> Dict[str, Any]:
     path = config_path(root)
     if not path.exists():
         raise OmixflowError(f"конфиг не найден: {path}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:      # a broken config is the config's error, not a traceback
+        raise OmixflowError(f"конфиг {path} не разобран: {e}") from e
     if data is None:
         data = {}
     if not isinstance(data, dict):
@@ -397,6 +400,36 @@ def duration_seconds(text: str) -> int:
     if not m:
         raise OmixflowError(f"длительность вида 30s, 10m или 1h, получено {text!r}")
     return int(m.group(1)) * {"s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+def orchestrator_model(cfg: Dict[str, Any]) -> str:
+    """The model of a task session the lead launches: `models.orchestrator`, else `models.strong`
+    (protocol/tiers.md, «Модель оркестратора»). A background session does not take `model` of
+    the user settings: it runs on its parent's model or the harness default (SwAIS: Fable under
+    `"model": "opus"`), so the lead always passes one."""
+    for key in ("models.orchestrator", "models.strong"):
+        value = config_value(cfg, key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if not isinstance(value, str):
+            raise OmixflowError(f"{key}: не имя модели: {value!r}")
+        return value.strip()
+    raise OmixflowError("ни models.orchestrator, ни models.strong не заданы")
+
+
+def model_key(name: Optional[str]) -> str:
+    """A model name to compare: lower case, without spaces and a `[1m]`-style suffix."""
+    return re.sub(r"\[[^\]]*\]$", "", (name or "").strip().lower())
+
+
+def same_model(wanted: Optional[str], actual: Optional[str]) -> bool:
+    """`opus` (an alias) is `claude-opus-5-5`, `opus[1m]` too; a full name must be the same name
+    (`claude-opus-5` is another model than `claude-opus-5-5`). `default` and `opusplan` name no
+    one model: never a mismatch."""
+    w, a = model_key(wanted), model_key(actual)
+    if not w or w in ("default", "opusplan"):
+        return True
+    return bool(a) and (w == a or (not w.startswith("claude-") and w in a))
 
 
 def lead_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:

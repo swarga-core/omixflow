@@ -40,6 +40,8 @@ Setup разработки: ветка или worktree, артефакты, ст
   где K последний номер вопроса к лиду до появления состояния.
 - `--base=BRANCH`: база задачи вместо `resolve.py base`; под лидом это интеграционная
   ветка из `brief` (её передаёт `develop`).
+- `--model=M`: модель, на которой лид запустил сессию; состояние получает
+  `--model-requested M`, и строка «Стоимость» помечает сессию, которая идёт на другой.
 
 ## Алгоритм: одиночная задача
 
@@ -89,15 +91,17 @@ scope, tier с обоснованием в одну строку). Затем:
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" init "{TASK_DIR}" --id {id} --kind task \
   --profile {profile} [--tier {tier} [--forced --tier-source {flag|statement|brief}]] --mode {manual|pipeline} --branch {branch} --base {base} --session {session} \
-  [--lead {NAME} --asked {K}]
+  [--lead {NAME} --asked {K}] [--model-requested {M}]
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" refine
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/state.py" finish "{TASK_DIR}" start
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
 ```
 
 `--tier` не передаётся при `triage: false`. `cost.py phase TASK_DIR start` ставит курсор
-стоимости: следующие фазы считаются от задачи (`runtime.md`, «Стоимость»); его строка —
-в `## Start ✅`. `log.md`: секция `## Start ✅` с веткой,
+стоимости: следующие фазы считаются от задачи (`runtime.md`, «Стоимость»), и пишет в
+`state.yaml` модель оркестратора по транскрипту (`model`); его строка — в `## Start ✅`,
+вместе с моделью и пометкой «(запущена на …)», если сессия идёт не на модели запуска
+(`model_requested`; `tiers.md`, «Модель оркестратора»). `log.md`: секция `## Start ✅` с веткой,
 базой, профилем, тиром и его источником при `--forced` («тир S — бриф лида»), статусом
 трекера, стоимостью. Коммит артефактов (`artifacts.md`).
 
@@ -130,7 +134,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
 3. `TASK_DIR = {artifacts.dir}/{id}`: `multitask.md` из блока
    (`multitask.py file --from {desc} --id {id} --title "{summary}"`), постановки
    частей дополнить из описания и уточнённой формулировки; `state.py init --kind
-   multitask --profile {profile}`; `log.md`.
+   multitask --profile {profile} [--model-requested {M}]`; `log.md`.
 4. Снимок (раздел «Кросс-репо» multitask.md): для каждого имени из `meta.repos`
    `resolve.py repo {name} --json`; `sha: null` → СТОП с причиной. Запись одним
    JSON-объектом, чтобы sha остался строкой:
@@ -171,7 +175,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
    на `task/{id}`.
 4. `TASK_DIR = {artifacts.dir}/{id}/{part}`: `task.md` из секции части
    в `multitask.md`; `state.py init --kind part --multitask-id {id} --part {part}
-   [--lead {NAME} --asked {K}]`
+   [--lead {NAME} --asked {K}] [--model-requested {M}]`
    (профиль наследуется из состояния мультизадачи, `--tier` только при
    `triage: true`, с `--forced --tier-source statement`, когда тир назван в постановке
    части); затем `state.py finish` refine и start; при `part_runner: sequential`

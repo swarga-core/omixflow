@@ -32,6 +32,8 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 - `--tier=S|M|L`: форсированный тир; с профилем `triage: false` ошибка.
 - `--worktree`: изолировать задачу в worktree.
 - `--lead=NAME`: сессия задачи под лидом `NAME` (`protocol/lead.md`).
+- `--model=M`: модель, на которой лид запустил сессию (`sessions.py launch` подставляет её
+  в промпт); уходит в start (`tiers.md`, «Модель оркестратора»).
 - `{id} --part {part}`: взять конкретную часть мультизадачи.
 
 ## Вызов фазового скила
@@ -74,7 +76,11 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 ### 2. Резюм
 
-`TASK_DIR/state.yaml` существует:
+`TASK_DIR/state.yaml` существует. С `--model=M` (сессию заново запустил лид, возможно на
+другой модели) — сначала `state.py set TASK_DIR model_requested=M`: строка «Стоимость» сверяет
+модель с последним запуском, а не с первым (`tiers.md`, «Модель оркестратора»). Без `--model`
+в другой сессии, чем `session` состояния (задачу продолжает сессия, открытая разработчиком), —
+`state.py set TASK_DIR model_requested=null`: прежний запуск лида к ней не относится.
 
 - `state.py agents TASK_DIR --session {session}` (агенты чужой сессии
   очищаются).
@@ -111,7 +117,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 1. `refine {id} [--lead=NAME]`: только для адаптеров с описанием в трекере; для `none`
    пропускается (уточнение фиксируется в task.md на Start).
 2. `start {id} --profile={profile} [--tier={tier} [--forced --tier-source={flag|statement|brief}]] --mode=pipeline [--worktree]
-   [--lead=NAME --base={интеграционная ветка из brief}]`.
+   [--lead=NAME --base={интеграционная ветка из brief}] [--model=M]`.
 3. Фазы профиля после start через `state.py next`, пока фаза не станет `done`.
 
 Инвариант 7: одна задача мутирует один репозиторий, немутирующие фазы читают
@@ -131,7 +137,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 Профиль с `part_runner: scheduler` ведётся делегированием, M2–M3 к нему не
 применяются:
 
-- **MS.** `start {id}` (если мультизадача не стартована), затем по
+- **MS.** `start {id} [--model=M]` (если мультизадача не стартована), затем по
   `state.py next TASK_DIR` состояния мультизадачи:
   - `research` → `research {id} --parts` (планировщик, `multitask.md`
     «Планировщик»); после него снова `state.py next`: фаза `research` не закрыта
@@ -142,7 +148,7 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 ### M1. Старт мультизадачи
 
-`start {id} --mode=pipeline` (ветка мультизадачи, multitask.md, состояние,
+`start {id} --mode=pipeline [--model=M]` (ветка мультизадачи, multitask.md, состояние,
 статус, комментарий). → M2.
 
 ### M2. Выбор части (`part_runner: sequential`)
@@ -169,9 +175,10 @@ description: Full OMIXFlow development pipeline for a task — picks the pipelin
 
 - fresh: триаж части по её постановке из multitask.md, как у задачи (потолок
   `tiers.max`, тир из постановки части — форсированный) → `start {id} --part {part}
-  --tier={tier} [--forced --tier-source=statement] --mode=pipeline [--lead=NAME]`.
+  --tier={tier} [--forced --tier-source=statement] --mode=pipeline [--lead=NAME] [--model=M]`.
 - resume: войти в worktree части по `path` (пересоздать из ветки, если исчез),
-  `PART_DIR = {artifacts.dir}/{id}/{part}`, `state.py next PART_DIR`.
+  `PART_DIR = {artifacts.dir}/{id}/{part}`; `model_requested` — как в резюме задачи (с
+  `--model=M` — `M`, без него в другой сессии — `null`); `state.py next PART_DIR`.
 
 Фазы research → review для `{id}/{part}` как у одиночной задачи. Затем
 `finalize {id} --part {part}`. → M2.

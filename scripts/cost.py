@@ -2,7 +2,7 @@
 """Cost of a session's model requests, from the transcripts the harness keeps.
 
     cost.py session [--session ID] [--projects DIR] [--since TS] [--until TS] [--json] [--line]
-                    [--model-factor opus=1,sonnet=0.6,haiku=0.04]
+                    [--model-factor opus=1,fable=1.8,sonnet=0.6,haiku=0.04]
     cost.py phase TASK_DIR PHASE [--session ID] [--projects DIR] [--json] [--model-factor …]
 
 The requests written to the transcripts of the orchestrator and of its subagents are read
@@ -16,9 +16,11 @@ result as a cross-check (`usd`).
 
 Prices are relative: cost_eq is the request in "Opus input tokens" — input 1, cache write
 1.25 (2.0 for the 1-hour cache), cache read 0.1, output 5 — times a model factor. The
-default factors (opus 1, sonnet 0.6, haiku 0.04) are the ratios of the harness's own
-price table, read from the `cost-state` records of the runs of 2026-10 (sonnet $2.0 and
-opus $2.5–3.0 per weighted MTok); `session` derives them from the session's own
+default factors (opus 1, fable 1.8, sonnet 0.6, haiku 0.04) are the ratios of the harness's
+own price table, read from the `cost-state` records of the runs of 2026-10 (sonnet $2.0 and
+opus $2.5–3.0 per weighted MTok; fable — median 1.825 over the 16 sessions that had both, T-10
+1.856, with each model's cache writes split into 5-minute and 1-hour by its transcripts — Fable
+writes 1-hour; without a fable factor `phase` counted Fable as Opus: T-10 33.3M); `session` derives them from the session's own
 `cost-state` record when it has one opus model (by full model name; models with web
 search left out). cost_eq compares runs and roles; it is not a bill. The rule it exposes:
 cost ≈ 0.1 × Σ(context of every request), so the number of requests and the average context
@@ -70,12 +72,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import omixflow_lib as lib  # noqa: E402  (PyYAML only when a config is read)
 
 UNKNOWN = 3
 USAGE = 2
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]+$")
 WEIGHTS = {"input": 1.0, "cache_write": 1.25, "cache_write_1h": 2.0, "cache_read": 0.1, "output": 5.0}
-MODEL_FACTORS = {"opus": 1.0, "sonnet": 0.6, "haiku": 0.04}
+MODEL_FACTORS = {"opus": 1.0, "fable": 1.8, "sonnet": 0.6, "haiku": 0.04}
 REBUILD_SHARE = 0.5          # cache write over this share of the context = the cache was rebuilt
 ISOLATION = "This session is isolated in the worktree"
 RUNNING = re.compile(r"^RUNNING \d+s", re.M)
@@ -121,6 +124,11 @@ def in_window(ts: Optional[datetime], since: Optional[datetime], until: Optional
     if ts is None:
         return True
     return not ((since and ts < since) or (until and ts > until))
+
+
+def priced(model: Optional[str], factors: Dict[str, float]) -> bool:
+    name = (model or "").lower()
+    return name in factors or any(key in name for key in factors)
 
 
 def model_factor(model: Optional[str], factors: Dict[str, float]) -> float:
@@ -264,8 +272,11 @@ def summarize(name: str, role: str, data: Dict[str, Any], since: Optional[dateti
     retries = sum(1 for ts in data["retries"] if in_window(ts, since, until))
     polls = sum(1 for ts in data["polls"] if in_window(ts, since, until))
     models = collections.Counter(r["model"] for r in reqs if r["model"])
+    latest = next((r["model"] for r in reversed(reqs_all) if r["model"]), None)
+    in_order = list(dict.fromkeys(r["model"] for r in reqs if r["model"]))    # by first appearance
     return {
         "agent": name, "role": role, "model": models.most_common(1)[0][0] if models else None,
+        "models": {name_: models[name_] for name_ in in_order}, "latest_model": latest,
         "requests": len(reqs), "assignments": len(data["boundaries"]) + 1 if reqs_all else 0,
         "avg_context": int(sum(contexts) / len(contexts)) if contexts else 0,
         "max_context": max(contexts) if contexts else 0,
@@ -310,14 +321,32 @@ def transcripts(projects: Path, session: str) -> Tuple[Optional[Path], List[Tupl
     return main, agents
 
 
-def weighted_tokens(usage: Dict[str, Any]) -> float:
+def weighted_tokens(usage: Dict[str, Any], share_1h: float = 0.0) -> float:
+    """A cost-state entry in weighted tokens. The entry does not split 5-minute from 1-hour
+    cache writes; SHARE_1H — the model's 1-hour share of its cache writes in the transcripts —
+    splits them the way `cost_of` weighs requests (Fable writes 1-hour, Opus 5-minute: without
+    the split the 1-hour premium was counted twice for Fable, its factor came out ~10 % high)."""
+    write = float(usage.get("cacheCreationInputTokens") or 0)
     return (float(usage.get("inputTokens") or 0) * WEIGHTS["input"]
-            + float(usage.get("cacheCreationInputTokens") or 0) * WEIGHTS["cache_write"]
+            + write * (1 - share_1h) * WEIGHTS["cache_write"] + write * share_1h * WEIGHTS["cache_write_1h"]
             + float(usage.get("cacheReadInputTokens") or 0) * WEIGHTS["cache_read"]
             + float(usage.get("outputTokens") or 0) * WEIGHTS["output"])
 
 
-def harness_cost(cost_state: Optional[Dict[str, Any]], factors: Dict[str, float]) -> Tuple[Optional[Dict[str, Any]], Dict[str, float]]:
+def shares_1h(datas: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Per model (full name, lower case): the 1-hour share of its cache writes in the transcripts."""
+    total: Dict[str, List[int]] = {}
+    for data in datas:
+        for r in data["requests"]:
+            if r["model"]:
+                acc = total.setdefault(str(r["model"]).lower(), [0, 0])
+                acc[0] += r["cache_write_1h"]
+                acc[1] += r["cache_write"]
+    return {model: (h / w if w else 0.0) for model, (h, w) in total.items()}
+
+
+def harness_cost(cost_state: Optional[Dict[str, Any]], factors: Dict[str, float],
+                 shares: Optional[Dict[str, float]] = None) -> Tuple[Optional[Dict[str, Any]], Dict[str, float]]:
     """The harness's own figures for the whole session and the model factors they imply: the
     price per weighted token of each model (by full name), relative to the opus model of the
     session. Without an opus model the unit of cost_eq would drift: the factors stay as given.
@@ -326,9 +355,10 @@ def harness_cost(cost_state: Optional[Dict[str, Any]], factors: Dict[str, float]
         return None, factors
     prices: Dict[str, float] = {}
     for model, usage in cost_state["modelUsage"].items():
-        if (isinstance(usage, dict) and weighted_tokens(usage) > 0 and usage.get("costUSD")
+        share = (shares or {}).get(str(model).lower(), 0.0)
+        if (isinstance(usage, dict) and weighted_tokens(usage, share) > 0 and usage.get("costUSD")
                 and not usage.get("webSearchRequests")):
-            prices[str(model).lower()] = float(usage["costUSD"]) / weighted_tokens(usage)
+            prices[str(model).lower()] = float(usage["costUSD"]) / weighted_tokens(usage, share)
     derived = dict(factors)
     opus = [p for m, p in prices.items() if "opus" in m]
     if len(opus) == 1:
@@ -346,14 +376,16 @@ def measure(session: str, projects: Path, since: Optional[datetime], until: Opti
     if main is None and not agents:
         return {"session": session, "error": f"транскрипт сессии не найден: {projects}/*/{session}.jsonl"}
     main_data = read_transcript(main) if main is not None else None
-    usd, derived = harness_cost(main_data["cost_state"] if main_data else None, factors)
+    agent_data = [(name, role, read_transcript(log)) for name, role, log in agents]
+    shares = shares_1h(([main_data] if main_data else []) + [d for _, _, d in agent_data])
+    usd, derived = harness_cost(main_data["cost_state"] if main_data else None, factors, shares)
     if derive_factors:
         factors = derived
     rows: List[Dict[str, Any]] = []
     if main_data is not None:
         rows.append(summarize(ORCHESTRATOR, ORCHESTRATOR, main_data, since, until, factors))
-    for name, role, log in agents:
-        rows.append(summarize(name, role, read_transcript(log), since, until, factors))
+    for name, role, data in agent_data:
+        rows.append(summarize(name, role, data, since, until, factors))
     rows = [r for r in rows if r["requests"]] or rows[:1]
     by_role: Dict[str, Dict[str, Any]] = {}
     for r in rows:
@@ -377,6 +409,8 @@ def measure(session: str, projects: Path, since: Optional[datetime], until: Opti
         "refusals": sum(r["refusals"] for r in rows), "retries": sum(r["retries"] for r in rows),
         "polls": sum(r["polls"] for r in rows),
         "model_factors": factors, "usd": usd,
+        # a model no factor names is counted as Opus — the way Fable was before 0.9.2
+        "unpriced": sorted({mdl for a in rows for mdl in (a.get("models") or {}) if not priced(mdl, factors)}),
         "by_role": dict(sorted(by_role.items(), key=lambda kv: -kv[1]["cost_eq"])),
         "agents": rows,
     }
@@ -399,6 +433,17 @@ def line_of(result: Dict[str, Any]) -> str:
         extras.append(f"отказов изоляции {result['refusals']}")
     if result["polls"]:
         extras.append(f"опросов гейтов {result['polls']}")
+    orchestrator = next((a for a in result.get("agents") or [] if a["role"] == ORCHESTRATOR), None)
+    if orchestrator and (orchestrator.get("models") or orchestrator.get("latest_model")):
+        counts = orchestrator.get("models") or {}
+        text = (" → ".join(f"{name} {n}" for name, n in counts.items()) if len(counts) > 1   # a /model switch, in time order
+                else next(iter(counts), None) or orchestrator["latest_model"])
+        expected = result.get("model_expected")
+        if expected and not lib.same_model(expected, orchestrator.get("latest_model")):
+            text += f" (запущена на {expected})"
+        extras.append(f"оркестратор {text}")
+    if result.get("unpriced"):
+        extras.append(f"без коэффициента (как Opus): {', '.join(result['unpriced'])}")
     tail = f"; {'; '.join(extras)}" if extras else ""
     return (f"- Стоимость: {m(result['cost_eq'])} cost_eq, запросов {result['requests']}, "
             f"средний контекст {k(result['avg_context'])}; {roles}{tail}")
@@ -480,7 +525,6 @@ def cursor_of(path: Path, session: Optional[str] = None) -> Optional[datetime]:
     """`cost.last` of a state.yaml; with SESSION, only a cursor that session wrote
     (`cost.session`): a cursor from another owner's session says nothing about this one.
     None when there is no state, no cursor or it is unreadable."""
-    import omixflow_lib as lib
     import state as st
 
     try:
@@ -532,7 +576,14 @@ def cmd_phase(ns: argparse.Namespace) -> int:
     if "error" in result:
         print(json.dumps(result, ensure_ascii=False))
         return UNKNOWN
-    entry = {"phase": ns.phase, "requests": result["requests"], "cost_eq": result["cost_eq"],
+    orchestrator = next((a for a in result["agents"] if a["role"] == ORCHESTRATOR), None)
+    actual = orchestrator.get("latest_model") if orchestrator else None
+    # the model the session was launched on (`develop --model`, state.yaml `model_requested`);
+    # none — a session the developer opened himself: nothing to flag
+    result["model_expected"] = state.get("model_requested")
+    if actual:      # the model the session runs on, by its transcript — not the launch flag
+        state["model"] = actual
+    entry = {"phase": ns.phase, "model": actual, "requests": result["requests"], "cost_eq": result["cost_eq"],
              "avg_context": result["avg_context"], "rebuild_tokens": result["rebuild_tokens"],
              "refusals": result["refusals"], "polls": result["polls"],
              "by_role": {role: acc["cost_eq"] for role, acc in result["by_role"].items()},

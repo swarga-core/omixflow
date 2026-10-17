@@ -3,7 +3,8 @@
 
     state.py init DIR --id ID --kind task|multitask|part [--mode pipeline|manual]
                       [--profile NAME] [--tier S|M|L] [--forced] [--branch B] [--base B]
-                      [--multitask-id X --part P] [--session S] [--lead NAME [--asked K]] [--force]
+                      [--multitask-id X --part P] [--session S] [--model-requested M]
+                      [--lead NAME [--asked K]] [--force]
     state.py get DIR [KEY]                 # whole state as JSON, or one value
     state.py get DIR profile [--json]      # effective profile (full for legacy states); --json: with properties
     state.py set DIR KEY=VALUE ...         # dotted keys; JSON for lists/objects
@@ -270,6 +271,7 @@ def cmd_init(ns: argparse.Namespace) -> int:
         "iteration": 1,
         "agents": {},
         "session": ns.session,
+        "model_requested": ns.model_requested,
         "branch": ns.branch,
         "base": ns.base,
     }
@@ -500,6 +502,8 @@ def main(argv=None) -> int:
     p.add_argument("--multitask-id", default=None)
     p.add_argument("--part", default=None)
     p.add_argument("--session", default=None)
+    p.add_argument("--model-requested", default=None,
+                   help="the model the session was launched on (develop --model; protocol/tiers.md «Модель оркестратора»)")
     p.add_argument("--lead", default=None)
     p.add_argument("--asked", type=int, default=0)
     p.add_argument("--force", action="store_true")

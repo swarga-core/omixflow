@@ -108,6 +108,7 @@ tiers:
 models:
   strong: opus
   light: sonnet
+  # orchestrator: opus          # модель сессии задачи, которую запускает лид; без значения — strong
 
 # Мультизадача.
 multitask:

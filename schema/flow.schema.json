@@ -162,7 +162,8 @@
       "additionalProperties": false,
       "properties": {
         "strong": { "type": "string", "default": "opus" },
-        "light": { "type": "string", "default": "sonnet" }
+        "light": { "type": "string", "default": "sonnet" },
+        "orchestrator": { "type": "string", "description": "модель сессии задачи, которую запускает лид (sessions.py launch --model); без значения — models.strong. Одна на проект: модель задаётся при запуске, до триажа" }
       }
     },
     "multitask": {

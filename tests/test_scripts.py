@@ -80,6 +80,34 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(lib.config_value(cfg, "limits.coder_iterations", defaults=False))
 
 
+class ModelTests(unittest.TestCase):
+    """0.9.2: the orchestrator's model (protocol/tiers.md, «Модель оркестратора»)."""
+
+    def test_same_model_takes_an_alias_but_not_another_full_name(self):
+        same = [("opus", "claude-opus-5-5"), ("OPUS", "claude-opus-5-5"), (" opus ", "claude-opus-5-5"),
+                ("opus[1m]", "claude-opus-5-5"), ("claude-opus-5-5[1m]", "claude-opus-5-5"),
+                ("claude-opus-5-5", "claude-opus-5-5"), ("default", "claude-fable-5-1"),
+                ("opusplan", "claude-sonnet-5-5"), (None, "claude-fable-5-1")]
+        differ = [("opus", "claude-fable-5-1"), ("claude-opus-5", "claude-opus-5-5"),
+                  ("claude-opus-5-5", "claude-opus-5"), ("sonnet", None)]
+        for wanted, actual in same:
+            with self.subTest(wanted=wanted, actual=actual):
+                self.assertTrue(lib.same_model(wanted, actual))
+        for wanted, actual in differ:
+            with self.subTest(wanted=wanted, actual=actual):
+                self.assertFalse(lib.same_model(wanted, actual))
+
+    def test_orchestrator_model_falls_back_to_strong_and_refuses_a_non_name(self):
+        self.assertEqual(lib.orchestrator_model({}), "opus")                     # the schema's strong
+        self.assertEqual(lib.orchestrator_model({"models": {"strong": "fable"}}), "fable")
+        self.assertEqual(lib.orchestrator_model({"models": {"strong": "fable", "orchestrator": " sonnet "}}), "sonnet")
+        self.assertEqual(lib.orchestrator_model({"models": {"orchestrator": "", "strong": "fable"}}), "fable")
+        with self.assertRaises(lib.OmixflowError):
+            lib.orchestrator_model({"models": {"orchestrator": {"a": 1}}})
+        with self.assertRaises(lib.OmixflowError):
+            lib.orchestrator_model({"models": {"strong": "  "}})
+
+
 class CfgScriptTests(unittest.TestCase):
     """cfg.py: values from flow.yaml, schema defaults for missing keys, `get` tolerated."""
 

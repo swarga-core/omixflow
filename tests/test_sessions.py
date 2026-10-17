@@ -171,9 +171,10 @@ class SessionsTests(unittest.TestCase):
         code, out = self.launch(session=SESSION)
         self.assertEqual(code, 0)
         self.assertEqual(out, {"name": "T-18", "mode": "background", "permission_mode": "acceptEdits",
-                               "id": "1a2b3c4d"})
+                               "model": "opus", "model_source": "config", "id": "1a2b3c4d"})
         [bg] = self.bg_calls()
-        self.assertEqual(bg["argv"], ["--bg", "--name", "T-18", "--permission-mode", "acceptEdits", PROMPT])
+        self.assertEqual(bg["argv"], ["--bg", "--name", "T-18", "--permission-mode", "acceptEdits",
+                                      "--model", "opus", PROMPT])
         self.assertEqual(os.path.realpath(bg["cwd"]), str(self.root))
 
     def test_explicit_mode_wins_and_unknown_mode_passes_no_flag(self):
@@ -186,6 +187,44 @@ class SessionsTests(unittest.TestCase):
         code, out = self.launch(session="no-such-session")
         self.assertEqual((code, out["permission_mode"]), (0, None))
         self.assertNotIn("--permission-mode", self.bg_calls()[-1]["argv"])
+
+    def test_the_model_is_always_passed_flag_then_orchestrator_then_strong(self):
+        """SwAIS T-10, T-12…T-14: without --model a background session ran on Fable under the user's
+        `"model": "opus"`; the session's model is the project's, set at launch."""
+        flow = self.root / ".claude" / "omixflow" / "flow.yaml"
+        cases = [("version: 1\nmodels: {strong: fable}\n", (), ("fable", "config")),
+                 ("version: 1\nmodels: {strong: fable, orchestrator: claude-opus-5-5}\n", (), ("claude-opus-5-5", "config")),
+                 ("version: 1\nmodels: {orchestrator: opus}\n", ("--model", "sonnet"), ("sonnet", "flag"))]
+        for text, extra, (model, source) in cases:
+            with self.subTest(config=text, extra=extra):
+                flow.write_text(text)
+                code, out = self.launch(*extra)
+                self.assertEqual((code, out["model"], out["model_source"]), (0, model, source), out)
+                argv = self.bg_calls()[-1]["argv"]
+                self.assertEqual(argv[argv.index("--model") + 1], model)
+                self.assertEqual(argv.count("--model"), 1)
+        flow.write_text("version: 1\nmodels: {orchestrator: sonnet}\n")
+        code, out = self.launch(mode="terminal", osascript=False)
+        self.assertIn("--model sonnet", out["command"])
+
+    def test_the_prompt_learns_the_model_and_a_broken_config_is_refused(self):
+        """Review F3: the session must know what it was launched on (`develop --model={model}`);
+        F1, F5: a malformed flow.yaml or an empty model is exit 3 with a reason, not a traceback."""
+        flow = self.root / ".claude" / "omixflow" / "flow.yaml"
+        flow.write_text("version: 1\nmodels: {orchestrator: claude-opus-5-5}\n")
+        code, out = self.launch(prompt="/omixflow:develop T-18 --lead=swais-lead --worktree --model={model}")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.bg_calls()[-1]["argv"][-1],
+                         "/omixflow:develop T-18 --lead=swais-lead --worktree --model=claude-opus-5-5")
+        for text in ("version: 1\nmodels: {orchestrator: [unclosed\n", "version: 1\nmodels: {strong: '  '}\n",
+                     "version: 1\nmodels: {orchestrator: {a: 1}}\n"):
+            with self.subTest(config=text):
+                flow.write_text(text)
+                code, out = self.launch()
+                self.assertEqual(code, 3, out)
+                self.assertIn("передай --model", out["error"])
+        code, out = self.launch("--model", "sonnet")      # the flag needs no config
+        self.assertEqual((code, out["model"]), (0, "sonnet"))
 
     def test_launch_refuses_a_name_active_anywhere_but_not_a_stopped_one(self):
         self.polls([[self.entry("T-18", "idle", sid="mew1", cwd=self.other)]])
@@ -209,7 +248,7 @@ class SessionsTests(unittest.TestCase):
         self.assertIn("не назвал id", out["error"])
         self.polls([[], [self.entry("T-18", "busy", sid="late1")]])
         self.assertEqual(self.launch(), (0, {"name": "T-18", "mode": "background", "permission_mode": None,
-                                             "id": "late1"}))
+                                             "model": "opus", "model_source": "config", "id": "late1"}))
 
     def test_background_failure_is_reported_with_the_harness_message(self):
         (self.stub / "bg_code").write_text("1")
@@ -253,7 +292,8 @@ class SessionsTests(unittest.TestCase):
         self.assertEqual(i, len(script) - 1, "текст после конца строки AppleScript")
         self.assertEqual("".join(shell), out["command"])
         self.assertEqual(shlex.split(out["command"]), ["cd", str(self.root), "&&", str(self.claude), "-n",
-                                                       "T-18", "--permission-mode", "acceptEdits", prompt])
+                                                       "T-18", "--permission-mode", "acceptEdits", "--model", "opus",
+                                                       prompt])
         self.assertFalse(self.bg_calls())
 
     def test_terminal_without_osascript_hands_the_command_to_the_developer(self):

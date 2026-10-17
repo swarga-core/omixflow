@@ -2,7 +2,7 @@
 """Task sessions the lead launches: in the background (`claude --bg`) or in a Terminal window.
 
     sessions.py probe [--root DIR]
-    sessions.py launch NAME --root DIR --mode background|terminal [--permission-mode MODE] -- PROMPT
+    sessions.py launch NAME --root DIR --mode background|terminal [--permission-mode MODE] [--model M] -- PROMPT
     sessions.py status --root DIR [NAME ...]
     sessions.py watch NAME ... --root DIR --owner LEAD [--known NAME=STATE ...] [--notify]
                       [--interval SEC] [--max-polls N]
@@ -26,8 +26,15 @@ its file tools only under `bgIsolation: none`. Exit 0; no `claude`: exit 3.
 of its transcript (`{projects}/*/{session}.jsonl`, session from $CLAUDE_CODE_SESSION_ID),
 else no flag and the session inherits `defaultMode` (`permission_mode: null`). A session in
 another permission mode than the lead's prompts where the lead's would not, and one in
-another class holds cross-session messages for its user's approval. Background: prints
-`{"name", "mode", "id", "permission_mode"}`, exit 0. The harness may add a suffix to a
+another class holds cross-session messages for its user's approval. The model is M, else
+the project's `models.orchestrator`, else `models.strong` (`model_source`: flag, config):
+always passed — without `--model` a background session ran on its parent's model or the
+harness default, not on `model` of the user settings (SwAIS T-10, T-12…T-14: Fable under
+`"model": "opus"`, Fable at about 1.8 times Opus's price); `claude respawn` keeps the model of
+the launch (checked on Claude Code 2.1.302). `{model}` in PROMPT becomes the model, so the
+session learns what it was launched on (`/omixflow:develop … --model={model}`: state.yaml
+`model_requested`, the cost line flags a session that runs on another). Background: prints `{"name", "mode", "id",
+"permission_mode", "model", "model_source"}`, exit 0. The harness may add a suffix to a
 taken name (`T-18 (2)`): exit 3 with the `id` and `actual_name` it got. Terminal: opens a
 Terminal window with `cd DIR && claude -n NAME … PROMPT`, exit 0; no osascript, or it
 failed or timed out: the command for the developer, exit 4 (check whether a window opened).
@@ -68,6 +75,9 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import omixflow_lib as lib  # noqa: E402
 
 NO_EVENT = 1
 USAGE = 2
@@ -243,8 +253,17 @@ def cmd_launch(ns: argparse.Namespace) -> Dict[str, Any]:
         raise SessionsError(f"имя {ns.name} занято активной сессией "
                             f"(id {taken[0].get('id')}, {taken[0].get('cwd')})")
     mode = ns.permission_mode or lead_mode()
-    flags = ["--permission-mode", mode] if mode else []
-    out: Dict[str, Any] = {"name": ns.name, "mode": ns.mode, "permission_mode": mode}
+    if ns.model:
+        model, source = ns.model, "flag"
+    else:
+        try:
+            model, source = lib.orchestrator_model(lib.load_config(root)), "config"
+        except lib.OmixflowError as e:
+            raise SessionsError(f"модель сессии: {e}; передай --model") from e
+    flags = (["--permission-mode", mode] if mode else []) + ["--model", model]
+    ns.prompt = ns.prompt.replace("{model}", model)
+    out: Dict[str, Any] = {"name": ns.name, "mode": ns.mode, "permission_mode": mode,
+                           "model": model, "model_source": source}
     if ns.mode == "background":
         res = run([claude(), "--bg", "--name", ns.name, *flags, ns.prompt], cwd=root)
         if res.returncode != 0:
@@ -414,6 +433,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--root", required=True)
     p.add_argument("--mode", required=True, choices=("background", "terminal"))
     p.add_argument("--permission-mode", default=None)
+    p.add_argument("--model", default=None)
     p.add_argument("prompt")
     p = sub.add_parser("status")
     p.add_argument("names", nargs="*")

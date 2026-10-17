@@ -87,18 +87,22 @@ description: Lead session of OMIXFlow — coordinates the developer's task sessi
    ```
    Ответ — `launch: background | terminal` в `lead.yaml`, коммит `_lead/` (раздел 6).
    Нет `terminal` в `probe` — окно откроет разработчик командой из вывода (шаг 5).
-3. **Промпт.** Задача: имя `{id}`, `/omixflow:develop {id} --lead={имя лида} --worktree`;
+3. **Промпт.** Задача: имя `{id}`, `/omixflow:develop {id} --lead={имя лида} --worktree --model={model}`
+   (`{model}` буквально: `sessions.py launch` подставляет модель запуска);
    без `--worktree` при `workspace.worktree: off` или по слову разработчика. Часть
    мультизадачи с `part_runner: sequential`: имя `{id}-{part}`, `/omixflow:develop {id}
-   --part {part} --lead=…` (изоляция по `part_isolation`). Мультизадача research
-   (`part_runner: scheduler`): одна сессия `{id}` без `--part` и `--worktree`.
+   --part {part} --lead=… --model={model}` (изоляция по `part_isolation`). Мультизадача
+   research (`part_runner: scheduler`): одна сессия `{id}` без `--part` и `--worktree`,
+   с `--model={model}`.
 4. **Изоляция.** Фон и сессия в основном дереве (без `--worktree`, часть `shared`,
    мультизадача research), а `bg_isolation` не `none` → фоном не запускать; разработчику:
    эту задачу в окне или `"worktree": {"bgIsolation": "none"}` в настройках проекта
    (меняет он).
 5. **Санкция и запуск.** `lead.py approve --action "запуск {имя}: {launch}" --answer
    "{дословно}" --task {id}` → `A-{n}`. `SESSIONS launch {имя} --root {корень} --mode
-   {launch} -- "{промпт}"`. Код 3 — разработчику причину из вывода; есть `actual_name` —
+   {launch} [--model {модель}] -- "{промпт}"` — `--model`, только когда разработчик назвал
+   модель для задачи; без него скрипт берёт `models.orchestrator` (иначе `models.strong`)
+   и называет её в выводе (`model`). Код 3 — разработчику причину из вывода; есть `actual_name` —
    сессия идёт под другим именем: разработчику её id, остановить (`claude stop {id}`)
    по его слову. Код 4 — разработчику команду из вывода. `permission_mode: null` —
    сказать, что сессия взяла `defaultMode` настроек, а не режим лида.

@@ -272,6 +272,46 @@ class CostTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertTrue(out.startswith("- Стоимость: 0.1M cost_eq, запросов 1, средний контекст 100k; orchestrator 100 %"), out)
 
+    def test_fable_costs_about_1_8_opus_by_default(self):
+        """SwAIS T-10: `phase` without derived factors counted Fable as Opus (33.3M)."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=100_000, out=0, inp=0, rid="o1",
+                             model="claude-fable-5-1")])
+        whole = self.session("--model-factor", "fable=1")     # a given factor overrides the default
+        self.assertEqual(whole["cost_eq"], 125_000)
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--json")
+        self.assertEqual(json.loads(out)["model_factors"]["fable"], 1.8)
+        self.assertEqual(json.loads(out)["cost_eq"], 225_000)
+        self.assertEqual(json.loads(out)["unpriced"], [])
+
+    def test_a_derived_factor_splits_the_one_hour_cache_writes(self):
+        """Review F2: cost-state does not split 5-minute from 1-hour writes; Fable writes 1-hour,
+        and weighing them at 1.25 put the 1-hour premium into its factor a second time."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=100_000, out=0, inp=0, rid="o1"),
+                       reply("2026-10-10T20:00:02Z", read=0, create=100_000, out=0, inp=0, rid="f1",
+                             model="claude-fable-5-1", create_1h=100_000),
+                       {"type": "cost-state", "totalCostUSD": 3.0, "modelUsage": {
+                           "claude-opus-5-5": {"inputTokens": 0, "cacheCreationInputTokens": 100_000,
+                                               "cacheReadInputTokens": 0, "outputTokens": 0, "costUSD": 1.0},
+                           "claude-fable-5-1": {"inputTokens": 0, "cacheCreationInputTokens": 100_000,
+                                                "cacheReadInputTokens": 0, "outputTokens": 0, "costUSD": 2.0}}}])
+        factors = self.session()["model_factors"]
+        self.assertEqual(factors["claude-fable-5-1"], round(2.0 / (100_000 * 2.0) / (1.0 / (100_000 * 1.25)), 3))   # 1.25
+
+    def test_a_model_without_a_factor_is_named(self):
+        """Review F7: an unknown family is counted as Opus — the way Fable was before 0.9.2."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", model="claude-mythos-5-1")])
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
+        self.assertIn("без коэффициента (как Opus): claude-mythos-5-1", out)
+
+    def test_the_line_names_the_orchestrators_model_and_a_switch_in_time_order(self):
+        """T-13, T-14: started on Fable, the developer switched them to Opus with /model; by
+        count the later model may lead (T-13: 37 Fable, 50 Opus) — the line keeps time order."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", model="claude-fable-5-1"),
+                       reply("2026-10-10T20:00:02Z", read=1000, create=10, rid="o2", model="claude-opus-5-5"),
+                       reply("2026-10-10T20:00:03Z", read=1000, create=10, rid="o3", model="claude-opus-5-5")])
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
+        self.assertTrue(out.rstrip().endswith("; оркестратор claude-fable-5-1 1 → claude-opus-5-5 2"), out)
+
     def test_unknown_session_is_json_with_exit_3(self):
         code, out = run("session", "--session", "nope", "--projects", str(self.projects))
         self.assertEqual(code, 3)
@@ -280,6 +320,26 @@ class CostTests(unittest.TestCase):
         self.assertEqual(code, 3)
 
     # ----------------------------------------------------------------- phase
+
+    def test_phase_records_the_model_the_session_runs_on_and_flags_another_than_launched(self):
+        """0.9.2: the model in state.yaml is the transcript's, not the launch flag's; a session that
+        runs on another model than it was launched on (`model_requested`) is flagged in the line."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", model="claude-fable-5-1")])
+        task = Path(self.tmp.name) / ".tasks" / "T-1"
+        task.mkdir(parents=True)
+        base = f"schema: 1\nid: T-1\nkind: task\nsession: {SESSION}\n"
+        (task / "state.yaml").write_text(base + "model_requested: opus\n")
+        code, out = run("phase", str(task), "start", "--projects", str(self.projects))
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.rstrip().endswith("; оркестратор claude-fable-5-1 (запущена на opus)"), out)
+        state = yaml.safe_load((task / "state.yaml").read_text())
+        self.assertEqual((state["model"], state["cost"]["phases"][0]["model"]), ("claude-fable-5-1", "claude-fable-5-1"))
+        for requested in ("fable", "claude-fable-5-1", "fable[1m]", "default", None):   # same model, or none asked
+            with self.subTest(requested=requested):
+                (task / "state.yaml").write_text(base + (f"model_requested: '{requested}'\n" if requested else ""))
+                code, out = run("phase", str(task), "spec", "--projects", str(self.projects))
+                self.assertEqual(code, 0, out)
+                self.assertTrue(out.rstrip().endswith("; оркестратор claude-fable-5-1"), out)
 
     def test_phase_sums_since_the_cursor_moves_it_and_accumulates_the_total(self):
         self.main_log([

@@ -39,6 +39,11 @@ class StateTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             state = json.loads(run("state.py", "get", d).stdout)
             self.assertEqual((state["tier"], state["tier_forced"], state["tier_source"]), ("S", True, "brief"))
+            self.assertIsNone(state["model_requested"])      # a session the developer opened: none asked
+            d3 = str(root / ".tasks" / "AL-3")             # 0.9.2: the launch model (develop --model)
+            self.assertEqual(run("state.py", "init", d3, "--id", "AL-3", "--kind", "task",
+                                 "--model-requested", "opus").returncode, 0)
+            self.assertEqual(json.loads(run("state.py", "get", d3).stdout)["model_requested"], "opus")
             self.assertEqual(run("state.py", "set", d, "tier=M").returncode, 0)
             proc = run("state.py", "set", d, "tier=L")
             self.assertEqual(proc.returncode, 2)
