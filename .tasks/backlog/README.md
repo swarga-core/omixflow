@@ -95,3 +95,4 @@
 | [omixflow-kanban-git-c-isolation.md](omixflow-kanban-git-c-isolation.md) | Swarga AI Studio T-13 (G-80 swais-lead, 2026-10-18) — kanban.md советует `git -C .tasks/board`, изолированная сессия это отклоняет |
 | [omixflow-probe-no-tests-ran.md](omixflow-probe-no-tests-ran.md) | Swarga AI Studio T-14 (G-85 swais-lead, 2026-10-18) — фильтр vitest без совпадений: все тесты skipped, exit 0 — 12 ложно GREEN проб; `tests.ran` в адаптере, `PROBE NOT RUN` |
 | [omixflow-checkpoint-vs-design.md](omixflow-checkpoint-vs-design.md) | Swarga AI Studio T-14 (G-86 swais-lead, 2026-10-18) — чекпоинт «прежние тесты без правок» при Design, меняющем их поведение; аспект ревью плана |
+| [omixflow-report-sync-mode.md](omixflow-report-sync-mode.md) | Swarga AI Studio T-14 (G-88 swais-lead, 2026-10-18) — `report.py check` на отчёте синхронизации требует FILES и насчитал 93 «новых теста» — тесты T-13 из базы; режим sync: конфликтные файлы, новое — то, чего нет ни в одном родителе |
