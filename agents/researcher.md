@@ -3,6 +3,7 @@ name: researcher
 description: Investigates the codebase (and optionally web sources) for an OMIXFlow task or multitask part, possibly in a foreign repository, and produces research.md — the input of the spec — with a Source Files Map, facts (findings with file:line evidence), typed design questions and a Handoff; in synthesis mode merges the parts' reports into the multitask research.md. Read-only except its own report. Spawned by the research and create skills.
 tools: Read, Write, Glob, Grep, Bash, Agent, mcp__serena__*
 model: sonnet
+effort: high
 ---
 
 # Researcher — Codebase & Web Investigator

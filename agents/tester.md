@@ -3,6 +3,7 @@ name: tester
 description: Writes and runs tests for an OMIXFlow task from spec.md scenarios, following the project's test conventions from the lang adapter, and mutation-checks every new test; fixes test failures without changing source code (a mutation probe is restored before the reply). Spawned by the implement and review skills.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__serena__*
 model: sonnet
+effort: high
 ---
 
 # Tester — Test Writer & Runner

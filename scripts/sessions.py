@@ -2,7 +2,8 @@
 """Task sessions the lead launches: in the background (`claude --bg`) or in a Terminal window.
 
     sessions.py probe [--root DIR]
-    sessions.py launch NAME --root DIR --mode background|terminal [--permission-mode MODE] [--model M] -- PROMPT
+    sessions.py launch NAME --root DIR --mode background|terminal [--permission-mode MODE] [--model M]
+                       [--effort E] -- PROMPT
     sessions.py status --root DIR [NAME ...]
     sessions.py watch NAME ... --root DIR --owner LEAD [--known NAME=STATE ...] [--notify]
                       [--interval SEC] [--max-polls N]
@@ -33,8 +34,14 @@ harness default, not on `model` of the user settings (SwAIS T-10, T-12…T-14: F
 `"model": "opus"`, Fable at about 1.8 times Opus's price); `claude respawn` keeps the model of
 the launch (checked on Claude Code 2.1.302). `{model}` in PROMPT becomes the model, so the
 session learns what it was launched on (`/omixflow:develop … --model={model}`: state.yaml
-`model_requested`, the cost line flags a session that runs on another). Background: prints `{"name", "mode", "id",
-"permission_mode", "model", "model_source"}`, exit 0. The harness may add a suffix to a
+`model_requested`, the cost line flags a session that runs on another). The effort is E, else
+the project's `effort.orchestrator`, else xhigh (`effort_source`: flag, config): always passed
+too — without `--effort` the session takes the level the user settings keep for its model,
+else the model's default (medium on Opus 5.5, which ignores a top-level `effortLevel`);
+`claude --bg --effort` and `claude respawn` keep it (checked on Claude Code 2.1.303). The
+agents' effort is their frontmatter's (protocol/tiers.md, «Effort агентов»). Background:
+prints `{"name", "mode", "id", "permission_mode", "model", "model_source", "effort",
+"effort_source"}`, exit 0. The harness may add a suffix to a
 taken name (`T-18 (2)`): exit 3 with the `id` and `actual_name` it got. Terminal: opens a
 Terminal window with `cd DIR && claude -n NAME … PROMPT`, exit 0; no osascript, or it
 failed or timed out: the command for the developer, exit 4 (check whether a window opened).
@@ -253,17 +260,31 @@ def cmd_launch(ns: argparse.Namespace) -> Dict[str, Any]:
         raise SessionsError(f"имя {ns.name} занято активной сессией "
                             f"(id {taken[0].get('id')}, {taken[0].get('cwd')})")
     mode = ns.permission_mode or lead_mode()
+    loaded: List[Dict[str, Any]] = []
+
+    def config() -> Dict[str, Any]:     # read once, and only when a flag leaves a value to it
+        if not loaded:
+            loaded.append(lib.load_config(root))
+        return loaded[0]
+
     if ns.model:
         model, source = ns.model, "flag"
     else:
         try:
-            model, source = lib.orchestrator_model(lib.load_config(root)), "config"
+            model, source = lib.orchestrator_model(config()), "config"
         except lib.OmixflowError as e:
             raise SessionsError(f"модель сессии: {e}; передай --model") from e
-    flags = (["--permission-mode", mode] if mode else []) + ["--model", model]
+    if ns.effort:
+        effort, effort_source = ns.effort, "flag"
+    else:
+        try:
+            effort, effort_source = lib.orchestrator_effort(config()), "config"
+        except lib.OmixflowError as e:
+            raise SessionsError(f"effort сессии: {e}; передай --effort") from e
+    flags = (["--permission-mode", mode] if mode else []) + ["--model", model, "--effort", effort]
     ns.prompt = ns.prompt.replace("{model}", model)
     out: Dict[str, Any] = {"name": ns.name, "mode": ns.mode, "permission_mode": mode,
-                           "model": model, "model_source": source}
+                           "model": model, "model_source": source, "effort": effort, "effort_source": effort_source}
     if ns.mode == "background":
         res = run([claude(), "--bg", "--name", ns.name, *flags, ns.prompt], cwd=root)
         if res.returncode != 0:
@@ -434,6 +455,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", required=True, choices=("background", "terminal"))
     p.add_argument("--permission-mode", default=None)
     p.add_argument("--model", default=None)
+    p.add_argument("--effort", default=None, choices=lib.EFFORT_LEVELS)
     p.add_argument("prompt")
     p = sub.add_parser("status")
     p.add_argument("names", nargs="*")

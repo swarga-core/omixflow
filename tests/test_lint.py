@@ -108,6 +108,7 @@ class TerminologyLint(unittest.TestCase):
                 self.assertTrue(meta.get("description"))
                 self.assertIn("tools", meta)
                 self.assertIn("model", meta)
+                self.assertIn(meta.get("effort"), lib.EFFORT_LEVELS)     # not the developer's settings (0.9.3)
 
 
 class AdapterLint(unittest.TestCase):
@@ -1196,10 +1197,33 @@ class LeadLaunchLint(unittest.TestCase):
         self.assertIn("model_requested:", flat("protocol/artifacts.md"))
         self.assertNotIn("(в конфиге", tiers)
         self.assertIn("модель оркестратора по транскрипту (`model`)", flat("skills/start/SKILL.md"))
-        self.assertIn("Строка называет модель оркестратора", flat("protocol/runtime.md"))
+        self.assertIn("Строка называет модель и effort оркестратора", flat("protocol/runtime.md"))
         schema = json.loads((ROOT / "schema" / "flow.schema.json").read_text(encoding="utf-8"))
         self.assertIn("orchestrator", schema["properties"]["models"]["properties"])
         self.assertIn("# orchestrator:", (ROOT / "templates" / "flow.yaml").read_text(encoding="utf-8"))
+
+    def test_effort_is_the_plugins_and_the_orchestrators_is_always_passed(self):
+        """0.9.3: a subagent took the level the developer's settings keep for its model (Opus 5.5:
+        medium by default) — the plugin set none; launch passed no effort either."""
+        flat = lambda rel: " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+        tiers = flat("protocol/tiers.md")
+        section = self.section((ROOT / "protocol" / "tiers.md").read_text(encoding="utf-8"), "## Effort агентов")
+        for path in sorted((ROOT / "agents").glob("*.md")):
+            meta, _ = lib.parse_frontmatter(path)
+            with self.subTest(agent=path.stem):
+                self.assertIn(f"| {path.stem} | {meta['effort']} |", section)   # the table names the frontmatter's level
+        self.assertIn("**Effort оркестратора.**", tiers)
+        self.assertIn("`effort.orchestrator` проекта, без значения — xhigh", tiers)
+        self.assertIn("Оркестратор не передаёт `effort` при спавне", tiers)
+        self.assertIn("`CLAUDE_CODE_EFFORT_LEVEL`", section)
+        self.assertIn("**Effort.** `sessions.py launch` всегда передаёт и `--effort`", flat("protocol/lead.md"))
+        self.assertIn("[--effort {уровень}]", flat("skills/lead/SKILL.md"))
+        self.assertIn("параметр `effort` при спавне оркестратор не передаёт", flat("protocol/runtime.md"))
+        self.assertIn("effort: {orchestrator: xhigh", flat("protocol/artifacts.md"))
+        schema = json.loads((ROOT / "schema" / "flow.schema.json").read_text(encoding="utf-8"))
+        orchestrator = schema["properties"]["effort"]["properties"]["orchestrator"]
+        self.assertEqual((orchestrator["default"], tuple(orchestrator["enum"])), ("xhigh", lib.EFFORT_LEVELS))
+        self.assertIn("effort:\n  orchestrator: xhigh", (ROOT / "templates" / "flow.yaml").read_text(encoding="utf-8"))
 
     def test_protocol_describes_the_launch(self):
         lead_md = (ROOT / "protocol" / "lead.md").read_text(encoding="utf-8")

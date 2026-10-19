@@ -166,6 +166,14 @@
         "orchestrator": { "type": "string", "description": "модель сессии задачи, которую запускает лид (sessions.py launch --model); без значения — models.strong. Одна на проект: модель задаётся при запуске, до триажа" }
       }
     },
+    "effort": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "effort сессии задачи; effort агентов задаёт их фронтматтер (protocol/tiers.md, «Effort агентов»)",
+      "properties": {
+        "orchestrator": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"], "default": "xhigh", "description": "effort сессии задачи, которую запускает лид (sessions.py launch --effort). Одна на проект: задаётся при запуске, как модель" }
+      }
+    },
     "multitask": {
       "type": "object",
       "additionalProperties": false,

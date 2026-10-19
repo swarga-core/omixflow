@@ -3,6 +3,7 @@ name: reviewer
 description: Quality gate for OMIXFlow artifacts and code. REVIEW mode produces findings as a JSON contract (severity, category, file, problem, recommendation); FIX mode applies accepted findings only when no better-suited agent exists. Continued agent — re-reviews the same finding ids on follow-up messages. Spawned by the spec, plan, implement and review skills.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__serena__*, mcp__mcp-tsmorph-refactor__*
 model: opus
+effort: xhigh
 ---
 
 # Reviewer — Quality Gate

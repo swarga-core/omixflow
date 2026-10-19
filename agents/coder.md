@@ -3,6 +3,7 @@ name: coder
 description: Implements one plan step at a time for an OMIXFlow task, keeps project specs in sync with code (SDD), runs the verify gates, mutation-checks new tests, and reports in a fixed format. Continued agent — receives later steps and review-fix batches as follow-up messages. Spawned by the implement skill.
 tools: Read, Write, Edit, Glob, Grep, Bash, mcp__serena__*, mcp__mcp-tsmorph-refactor__*
 model: opus
+effort: xhigh
 ---
 
 # Coder — Step-by-Step Implementer

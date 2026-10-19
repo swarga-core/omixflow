@@ -40,6 +40,12 @@ cost_eq, and the mechanics that cost most in the runs of 0.5–0.7:
   call); a refusal costs one empty request, the retry does the refused work;
 - `polls` — `gate.py poll` results still RUNNING: empty requests too.
 
+Per agent also the effort its requests ran at (`effort` of the transcript records): the
+phase entry keeps the levels by role (`effort`), the line names the orchestrator's and flags
+a plugin agent whose requests ran at another level than its frontmatter sets
+(`CLAUDE_CODE_EFFORT_LEVEL`, an `effort` spawn parameter, a cap; protocol/tiers.md,
+«Effort агентов»). A project's agent replacing a role is not flagged: it sets its own.
+
 `session` prints a table (--json: one object; --line: one line for log.md). --since/--until
 (ISO timestamps, naive ones as UTC) keep the requests, refusals and polls of a time window:
 a phase. A rebuild on the first request of a window still counts: the flag is computed over
@@ -232,6 +238,7 @@ def read_transcript(log: Path) -> Dict[str, Any]:
                     "cache_read": int(usage.get("cache_read_input_tokens") or 0),
                     "output": int(usage.get("output_tokens") or 0),
                     "ts": ts, "model": message.get("model"),
+                    "effort": rec.get("effort") if isinstance(rec.get("effort"), str) else None,
                 }
             for block in message.get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Bash":
@@ -274,9 +281,19 @@ def summarize(name: str, role: str, data: Dict[str, Any], since: Optional[dateti
     models = collections.Counter(r["model"] for r in reqs if r["model"])
     latest = next((r["model"] for r in reversed(reqs_all) if r["model"]), None)
     in_order = list(dict.fromkeys(r["model"] for r in reqs if r["model"]))    # by first appearance
+    efforts = collections.Counter(r["effort"] for r in reqs if r.get("effort"))
+    runs: List[List[Any]] = []       # the levels in time order: an `/effort` switch and a switch back
+    for r in reqs:
+        if r.get("effort"):
+            if runs and runs[-1][0] == r["effort"]:
+                runs[-1][1] += 1
+            else:
+                runs.append([r["effort"], 1])
     return {
         "agent": name, "role": role, "model": models.most_common(1)[0][0] if models else None,
         "models": {name_: models[name_] for name_ in in_order}, "latest_model": latest,
+        "efforts": {e: efforts[e] for e in dict.fromkeys(r["effort"] for r in reqs if r.get("effort"))},
+        "effort_runs": runs,
         "requests": len(reqs), "assignments": len(data["boundaries"]) + 1 if reqs_all else 0,
         "avg_context": int(sum(contexts) / len(contexts)) if contexts else 0,
         "max_context": max(contexts) if contexts else 0,
@@ -304,9 +321,16 @@ def role_of(meta: Dict[str, Any], name: str) -> str:
     return name.split("-", 1)[0] if name else "agent"
 
 
-def transcripts(projects: Path, session: str) -> Tuple[Optional[Path], List[Tuple[str, str, Path]]]:
+def plugin_agent(meta: Dict[str, Any]) -> bool:
+    """A subagent of the plugin's own agent file (`omixflow:{role}`): its frontmatter sets the
+    effort it should run at. A project's agent replacing a role sets its own."""
+    return any(str(meta.get(key) or "").startswith("omixflow:")
+               for key in ("spawnedAgentType", "customAgentType", "agentType"))
+
+
+def transcripts(projects: Path, session: str) -> Tuple[Optional[Path], List[Tuple[str, str, Path, bool]]]:
     main = next(iter(projects.glob(f"*/{session}.jsonl")), None)
-    agents: List[Tuple[str, str, Path]] = []
+    agents: List[Tuple[str, str, Path, bool]] = []
     for meta_path in sorted(projects.glob(f"*/{session}/subagents/*.meta.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -317,7 +341,7 @@ def transcripts(projects: Path, session: str) -> Tuple[Optional[Path], List[Tupl
         log = meta_path.with_name(meta_path.name[: -len(".meta.json")] + ".jsonl")
         if log.is_file():
             name = str(meta.get("name") or log.stem)
-            agents.append((name, role_of(meta, name), log))
+            agents.append((name, role_of(meta, name), log, plugin_agent(meta)))
     return main, agents
 
 
@@ -376,24 +400,34 @@ def measure(session: str, projects: Path, since: Optional[datetime], until: Opti
     if main is None and not agents:
         return {"session": session, "error": f"транскрипт сессии не найден: {projects}/*/{session}.jsonl"}
     main_data = read_transcript(main) if main is not None else None
-    agent_data = [(name, role, read_transcript(log)) for name, role, log in agents]
-    shares = shares_1h(([main_data] if main_data else []) + [d for _, _, d in agent_data])
+    agent_data = [(name, role, plugin, read_transcript(log)) for name, role, log, plugin in agents]
+    shares = shares_1h(([main_data] if main_data else []) + [d for _, _, _, d in agent_data])
     usd, derived = harness_cost(main_data["cost_state"] if main_data else None, factors, shares)
     if derive_factors:
         factors = derived
     rows: List[Dict[str, Any]] = []
     if main_data is not None:
-        rows.append(summarize(ORCHESTRATOR, ORCHESTRATOR, main_data, since, until, factors))
-    for name, role, data in agent_data:
-        rows.append(summarize(name, role, data, since, until, factors))
+        rows.append({**summarize(ORCHESTRATOR, ORCHESTRATOR, main_data, since, until, factors), "effort_expected": None})
+    for name, role, plugin, data in agent_data:
+        # the level the agent's frontmatter sets (protocol/tiers.md, «Effort агентов»)
+        rows.append({**summarize(name, role, data, since, until, factors),
+                     "effort_expected": lib.agent_effort(role) if plugin else None})
     rows = [r for r in rows if r["requests"]] or rows[:1]
     by_role: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         acc = by_role.setdefault(r["role"], {"requests": 0, "cost_eq": 0, "cache_read": 0, "cache_write": 0,
-                                             "output": 0, "rebuild_tokens": 0, "refusals": 0, "agents": 0})
+                                             "output": 0, "rebuild_tokens": 0, "refusals": 0, "agents": 0,
+                                             "efforts": {}, "plugin_efforts": {}, "effort_expected": None})
         for key in ("requests", "cost_eq", "cache_read", "cache_write", "output", "rebuild_tokens", "refusals"):
             acc[key] += r[key]
         acc["agents"] += 1
+        for level, n in r["efforts"].items():
+            acc["efforts"][level] = acc["efforts"].get(level, 0) + n
+            if r["effort_expected"]:   # a project's agent named like a plugin role is not held to its frontmatter
+                acc["plugin_efforts"][level] = acc["plugin_efforts"].get(level, 0) + n
+        acc["effort_expected"] = acc["effort_expected"] or r["effort_expected"]
+        if r["role"] == ORCHESTRATOR:
+            acc["effort_runs"] = r["effort_runs"]
     total_cost = sum(r["cost_eq"] for r in rows) or 1
     for acc in by_role.values():
         acc["share"] = round(100 * acc["cost_eq"] / total_cost, 1)
@@ -424,6 +458,47 @@ def m(n: float) -> str:
     return f"{n / 1e6:.1f}M"
 
 
+def effort_text(counts: Dict[str, int]) -> Optional[str]:
+    """The level of a role, or its levels with their requests (agents of one role on two levels),
+    low to max: the agents of a role come in file-name order, not in time."""
+    if not counts:
+        return None
+    if len(counts) == 1:
+        return next(iter(counts))
+    rank = {level: i for i, level in enumerate(lib.EFFORT_LEVELS)}
+    return ", ".join(f"{level} {n}" for level, n in sorted(counts.items(), key=lambda kv: rank.get(kv[0], len(rank))))
+
+
+def runs_text(runs: List[List[Any]]) -> Optional[str]:
+    """The orchestrator's level, or its switches in time order: «xhigh 30 → high 12 → xhigh 5»."""
+    if not runs:
+        return None
+    if len(runs) == 1:
+        return str(runs[0][0])
+    return " → ".join(f"{level} {n}" for level, n in runs)
+
+
+def efforts_by_role(result: Dict[str, Any]) -> Dict[str, str]:
+    """The levels each role's requests ran at, for the phase entry; roles without the field
+    (a model without effort, an older transcript) are left out."""
+    out = {}
+    for role, acc in result["by_role"].items():
+        text = runs_text(acc.get("effort_runs") or []) if role == ORCHESTRATOR else effort_text(acc.get("efforts") or {})
+        if text:
+            out[role] = text
+    return out
+
+
+def off_effort(result: Dict[str, Any]) -> List[str]:
+    """Plugin roles whose requests ran at another level than their frontmatter sets:
+    `CLAUDE_CODE_EFFORT_LEVEL`, an `effort` spawn parameter, a `maxEffortLevel` cap. Only the
+    plugin's agents count: a project's agent of the same role name sets its own level."""
+    return [f"{role} {effort_text(acc['plugin_efforts'])} (фронтматтер {acc['effort_expected']})"
+            for role, acc in result["by_role"].items()
+            if role != ORCHESTRATOR and acc.get("effort_expected") and acc.get("plugin_efforts")
+            and set(acc["plugin_efforts"]) != {acc["effort_expected"]}]
+
+
 def line_of(result: Dict[str, Any]) -> str:
     roles = ", ".join(f"{role} {acc['share']:.0f} %" for role, acc in result["by_role"].items())
     extras = []
@@ -441,7 +516,11 @@ def line_of(result: Dict[str, Any]) -> str:
         expected = result.get("model_expected")
         if expected and not lib.same_model(expected, orchestrator.get("latest_model")):
             text += f" (запущена на {expected})"
-        extras.append(f"оркестратор {text}")
+        effort = runs_text(orchestrator.get("effort_runs") or [])
+        extras.append(f"оркестратор {text}" + (f", effort {effort}" if effort else ""))
+    off = off_effort(result)
+    if off:
+        extras.append(f"effort не по фронтматтеру: {', '.join(off)}")
     if result.get("unpriced"):
         extras.append(f"без коэффициента (как Opus): {', '.join(result['unpriced'])}")
     tail = f"; {'; '.join(extras)}" if extras else ""
@@ -450,15 +529,17 @@ def line_of(result: Dict[str, Any]) -> str:
 
 
 def render(result: Dict[str, Any]) -> str:
-    out = [f"{'agent':30} {'role':13} {'model':16} {'req':>4} {'avg':>6} {'max':>6} {'intro':>6} "
+    out = [f"{'agent':30} {'role':13} {'model':16} {'effort':7} {'req':>4} {'avg':>6} {'max':>6} {'intro':>6} "
            f"{'cache_r':>8} {'cache_w':>8} {'out':>6} {'cost_eq':>8} {'rebuild':>8} {'refus':>5}"]
     for r in result["agents"]:
-        out.append(f"{r['agent'][:30]:30} {r['role'][:13]:13} {str(r['model'] or '')[:16]:16} {r['requests']:4d} "
+        efforts = r.get("efforts") or {}     # the most frequent level, «+» when there were more
+        effort = (max(efforts, key=efforts.get) + ("+" if len(efforts) > 1 else "")) if efforts else ""
+        out.append(f"{r['agent'][:30]:30} {r['role'][:13]:13} {str(r['model'] or '')[:16]:16} {effort:7} {r['requests']:4d} "
                    f"{k(r['avg_context']):>6} {k(r['max_context']):>6} {k(r['intro']):>6} "
                    f"{k(r['cache_read']):>8} {k(r['cache_write']):>8} {k(r['output']):>6} {m(r['cost_eq']):>8} "
                    f"{(str(r['rebuilds']) + '/' + k(r['rebuild_tokens'])) if r['rebuilds'] else '—':>8} "
                    f"{r['refusals'] or '—':>5}")
-    out.append(f"{'TOTAL':30} {'':13} {'':16} {result['requests']:4d} {k(result['avg_context']):>6} {'':>6} {'':>6} "
+    out.append(f"{'TOTAL':30} {'':13} {'':16} {'':7} {result['requests']:4d} {k(result['avg_context']):>6} {'':>6} {'':>6} "
                f"{k(result['cache_read']):>8} {k(result['cache_write']):>8} {k(result['output']):>6} "
                f"{m(result['cost_eq']):>8} {(str(result['rebuilds']) + '/' + k(result['rebuild_tokens'])) if result['rebuilds'] else '—':>8} "
                f"{result['refusals'] or '—':>5}")
@@ -583,7 +664,8 @@ def cmd_phase(ns: argparse.Namespace) -> int:
     result["model_expected"] = state.get("model_requested")
     if actual:      # the model the session runs on, by its transcript — not the launch flag
         state["model"] = actual
-    entry = {"phase": ns.phase, "model": actual, "requests": result["requests"], "cost_eq": result["cost_eq"],
+    entry = {"phase": ns.phase, "model": actual, "effort": efforts_by_role(result),
+             "requests": result["requests"], "cost_eq": result["cost_eq"],
              "avg_context": result["avg_context"], "rebuild_tokens": result["rebuild_tokens"],
              "refusals": result["refusals"], "polls": result["polls"],
              "by_role": {role: acc["cost_eq"] for role, acc in result["by_role"].items()},

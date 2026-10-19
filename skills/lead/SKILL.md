@@ -100,9 +100,11 @@ description: Lead session of OMIXFlow — coordinates the developer's task sessi
    (меняет он).
 5. **Санкция и запуск.** `lead.py approve --action "запуск {имя}: {launch}" --answer
    "{дословно}" --task {id}` → `A-{n}`. `SESSIONS launch {имя} --root {корень} --mode
-   {launch} [--model {модель}] -- "{промпт}"` — `--model`, только когда разработчик назвал
-   модель для задачи; без него скрипт берёт `models.orchestrator` (иначе `models.strong`)
-   и называет её в выводе (`model`). Код 3 — разработчику причину из вывода; есть `actual_name` —
+   {launch} [--model {модель}] [--effort {уровень}] -- "{промпт}"` — `--model`, только когда
+   разработчик назвал модель для задачи; без него скрипт берёт `models.orchestrator` (иначе
+   `models.strong`) и называет её в выводе (`model`). `--effort` — так же: только уровень,
+   названный разработчиком; без него `effort.orchestrator` (иначе xhigh), в выводе `effort`.
+   Код 3 — разработчику причину из вывода; есть `actual_name` —
    сессия идёт под другим именем: разработчику её id, остановить (`claude stop {id}`)
    по его слову. Код 4 — разработчику команду из вывода. `permission_mode: null` —
    сказать, что сессия взяла `defaultMode` настроек, а не режим лида.

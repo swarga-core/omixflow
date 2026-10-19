@@ -110,6 +110,11 @@ models:
   light: sonnet
   # orchestrator: opus          # модель сессии задачи, которую запускает лид; без значения — strong
 
+# Effort сессии задачи, которую запускает лид (sessions.py launch --effort): low, medium, high,
+# xhigh, max. Effort агентов задаёт их фронтматтер (protocol/tiers.md, «Effort агентов»).
+effort:
+  orchestrator: xhigh
+
 # Мультизадача.
 multitask:
   parallel_per_owner: 1                # активных частей на одного исполнителя

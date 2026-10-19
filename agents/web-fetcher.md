@@ -3,6 +3,7 @@ name: web-fetcher
 description: Utility micro-agent that searches the web, fetches pages, strips navigation and boilerplate, and returns clean concatenated article text without summarising. Used by the researcher agent and the research skill for external research.
 tools: WebSearch, WebFetch
 model: haiku
+effort: medium
 ---
 
 # Web Fetcher — Utility Micro-Agent

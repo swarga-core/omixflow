@@ -432,6 +432,40 @@ def same_model(wanted: Optional[str], actual: Optional[str]) -> bool:
     return bool(a) and (w == a or (not w.startswith("claude-") and w in a))
 
 
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def orchestrator_effort(cfg: Dict[str, Any]) -> str:
+    """The effort of a task session the lead launches: `effort.orchestrator`, else its schema
+    default xhigh (protocol/tiers.md, «Effort агентов»). Without `--effort` a session takes the
+    level the user settings keep for its model, else the model's default — medium on Opus 5.5,
+    which ignores a top-level `effortLevel` — so the lead always passes one."""
+    block = config_get(cfg, "effort")
+    if block is not None and not isinstance(block, dict):      # `effort: low` would silently be xhigh
+        raise OmixflowError(f"effort: ожидается объект (effort: {{orchestrator: …}}), получено {block!r}")
+    value = config_value(cfg, "effort.orchestrator")
+    if isinstance(value, str) and not value.strip():
+        value = schema_default("effort.orchestrator")
+    if not isinstance(value, str) or value.strip() not in EFFORT_LEVELS:    # the schema's enum, in its case
+        raise OmixflowError(f"effort.orchestrator: не уровень effort ({', '.join(EFFORT_LEVELS)}): {value!r}")
+    return value.strip()
+
+
+def agent_effort(role: str) -> Optional[str]:
+    """The effort a plugin agent's frontmatter sets (`agents/{role}.md`, `effort:`): the level a
+    subagent of the role runs at unless `CLAUDE_CODE_EFFORT_LEVEL` or a spawn's `effort`
+    parameter overrides it. None for a role the plugin has no agent for, or no field."""
+    path = PLUGIN_ROOT / "agents" / f"{role}.md"
+    if not role or not path.is_file():
+        return None
+    try:
+        meta, _ = parse_frontmatter(path)
+    except (OmixflowError, OSError, yaml.YAMLError if yaml else ValueError):
+        return None
+    value = meta.get("effort")
+    return str(value).strip().lower() if value else None
+
+
 def lead_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """lead.default, lead.timeout, lead.stall, lead.actions, lead.notify, lead.delivery and
     lead.plugin_session with defaults; durations in seconds."""

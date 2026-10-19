@@ -171,10 +171,11 @@ class SessionsTests(unittest.TestCase):
         code, out = self.launch(session=SESSION)
         self.assertEqual(code, 0)
         self.assertEqual(out, {"name": "T-18", "mode": "background", "permission_mode": "acceptEdits",
-                               "model": "opus", "model_source": "config", "id": "1a2b3c4d"})
+                               "model": "opus", "model_source": "config", "effort": "xhigh",
+                               "effort_source": "config", "id": "1a2b3c4d"})
         [bg] = self.bg_calls()
         self.assertEqual(bg["argv"], ["--bg", "--name", "T-18", "--permission-mode", "acceptEdits",
-                                      "--model", "opus", PROMPT])
+                                      "--model", "opus", "--effort", "xhigh", PROMPT])
         self.assertEqual(os.path.realpath(bg["cwd"]), str(self.root))
 
     def test_explicit_mode_wins_and_unknown_mode_passes_no_flag(self):
@@ -223,8 +224,49 @@ class SessionsTests(unittest.TestCase):
                 code, out = self.launch()
                 self.assertEqual(code, 3, out)
                 self.assertIn("передай --model", out["error"])
-        code, out = self.launch("--model", "sonnet")      # the flag needs no config
-        self.assertEqual((code, out["model"]), (0, "sonnet"))
+        flow.write_text("version: 1\nmodels: {orchestrator: [unclosed\n")
+        code, out = self.launch("--model", "sonnet")      # 0.9.3: the effort still comes from the config
+        self.assertEqual(code, 3, out)
+        self.assertIn("передай --effort", out["error"])
+        code, out = self.launch("--model", "sonnet", "--effort", "high")      # both flags need no config
+        self.assertEqual((code, out["model"], out["effort"]), (0, "sonnet", "high"))
+
+    def test_the_effort_is_always_passed_flag_then_config_then_xhigh(self):
+        """Without --effort a session takes the level the user settings keep for its model, else the
+        model's default — medium on Opus 5.5, which ignores a top-level `effortLevel`."""
+        flow = self.root / ".claude" / "omixflow" / "flow.yaml"
+        cases = [("version: 1\n", (), ("xhigh", "config")),
+                 ("version: 1\neffort: {orchestrator: high}\n", (), ("high", "config")),
+                 ("version: 1\neffort: {orchestrator: ' '}\n", (), ("xhigh", "config")),
+                 ("version: 1\neffort: {orchestrator: high}\n", ("--effort", "max"), ("max", "flag"))]
+        for text, extra, (effort, source) in cases:
+            with self.subTest(config=text, extra=extra):
+                flow.write_text(text)
+                code, out = self.launch(*extra)
+                self.assertEqual((code, out["effort"], out["effort_source"]), (0, effort, source), out)
+                argv = self.bg_calls()[-1]["argv"]
+                self.assertEqual(argv[argv.index("--effort") + 1], effort)
+                self.assertEqual(argv.count("--effort"), 1)
+        flow.write_text("version: 1\neffort: {orchestrator: medium}\n")
+        code, out = self.launch(mode="terminal", osascript=False)
+        self.assertIn("--effort medium", out["command"])
+
+    def test_an_unknown_effort_is_refused(self):
+        """Review 0.9.3: `effort: low` (not an object) silently became xhigh; `High` passed here
+        but not the schema's enum."""
+        flow = self.root / ".claude" / "omixflow" / "flow.yaml"
+        for text in ("version: 1\neffort: {orchestrator: ultra}\n", "version: 1\neffort: {orchestrator: 3}\n",
+                     "version: 1\neffort: low\n", "version: 1\neffort: {orchestrator: High}\n"):
+            with self.subTest(config=text):
+                flow.write_text(text)
+                code, out = self.launch()
+                self.assertEqual(code, 3, out)
+                self.assertIn("передай --effort", out["error"])
+        code, out = self.launch("--effort", "ultra")
+        self.assertEqual(code, 2, out)
+        self.assertFalse(self.bg_calls())
+        code, out = self.launch("--effort", "low")      # the flag wins over a bad config value
+        self.assertEqual((code, out["effort"]), (0, "low"))
 
     def test_launch_refuses_a_name_active_anywhere_but_not_a_stopped_one(self):
         self.polls([[self.entry("T-18", "idle", sid="mew1", cwd=self.other)]])
@@ -248,7 +290,8 @@ class SessionsTests(unittest.TestCase):
         self.assertIn("не назвал id", out["error"])
         self.polls([[], [self.entry("T-18", "busy", sid="late1")]])
         self.assertEqual(self.launch(), (0, {"name": "T-18", "mode": "background", "permission_mode": None,
-                                             "model": "opus", "model_source": "config", "id": "late1"}))
+                                             "model": "opus", "model_source": "config", "effort": "xhigh",
+                                             "effort_source": "config", "id": "late1"}))
 
     def test_background_failure_is_reported_with_the_harness_message(self):
         (self.stub / "bg_code").write_text("1")
@@ -293,7 +336,7 @@ class SessionsTests(unittest.TestCase):
         self.assertEqual("".join(shell), out["command"])
         self.assertEqual(shlex.split(out["command"]), ["cd", str(self.root), "&&", str(self.claude), "-n",
                                                        "T-18", "--permission-mode", "acceptEdits", "--model", "opus",
-                                                       prompt])
+                                                       "--effort", "xhigh", prompt])
         self.assertFalse(self.bg_calls())
 
     def test_terminal_without_osascript_hands_the_command_to_the_developer(self):

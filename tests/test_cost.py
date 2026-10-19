@@ -36,16 +36,20 @@ def run(*args: str) -> tuple[int, str]:
 
 
 def reply(ts: str, read: int, create: int, out: int = 100, model: str = "claude-opus-5-5",
-          rid: str | None = None, tools: list | None = None, inp: int = 1, create_1h: int = 0) -> dict:
+          rid: str | None = None, tools: list | None = None, inp: int = 1, create_1h: int = 0,
+          effort: str | None = None) -> dict:
     content = [{"type": "text", "text": "ok"}]
     for i, (name, arg) in enumerate(tools or []):
         content.append({"type": "tool_use", "id": f"{rid}-t{i}", "name": name, "input": arg})
-    return {"type": "assistant", "timestamp": ts, "requestId": rid or f"req-{ts}",
-            "message": {"model": model, "content": content,
-                        "usage": {"input_tokens": inp, "cache_read_input_tokens": read,
-                                  "cache_creation_input_tokens": create, "output_tokens": out,
-                                  "cache_creation": {"ephemeral_5m_input_tokens": create - create_1h,
-                                                     "ephemeral_1h_input_tokens": create_1h}}}}
+    rec = {"type": "assistant", "timestamp": ts, "requestId": rid or f"req-{ts}",
+           "message": {"model": model, "content": content,
+                       "usage": {"input_tokens": inp, "cache_read_input_tokens": read,
+                                 "cache_creation_input_tokens": create, "output_tokens": out,
+                                 "cache_creation": {"ephemeral_5m_input_tokens": create - create_1h,
+                                                    "ephemeral_1h_input_tokens": create_1h}}}}
+    if effort:      # Claude Code writes the level of the request next to the message (2.1.30x)
+        rec.update({"effort": effort, "perTurnEffort": effort})
+    return rec
 
 
 def split(ts: str, read: int, create: int, outs: list[int], rid: str) -> list[dict]:
@@ -311,6 +315,71 @@ class CostTests(unittest.TestCase):
                        reply("2026-10-10T20:00:03Z", read=1000, create=10, rid="o3", model="claude-opus-5-5")])
         code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
         self.assertTrue(out.rstrip().endswith("; оркестратор claude-fable-5-1 1 → claude-opus-5-5 2"), out)
+
+    def test_effort_by_role_and_a_plugin_agent_off_its_frontmatter_is_flagged(self):
+        """0.9.3: the level each role ran at, by the transcript; a plugin agent whose requests ran at
+        another level than its frontmatter sets is named, a project's own agent is not."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", effort="xhigh"),
+                       reply("2026-10-10T20:00:02Z", read=1000, create=10, rid="o2", effort="xhigh"),
+                       reply("2026-10-10T20:00:03Z", read=1000, create=10, rid="o3", effort="high")])
+        self.agent("coder-T-1", [reply("2026-10-10T20:01:01Z", read=0, create=1000, rid="c1", effort="xhigh")])
+        self.agent("tester-T-1", [reply("2026-10-10T20:02:01Z", read=0, create=1000, rid="t1", effort="medium",
+                                        model="claude-sonnet-5-5")])
+        self.agent("my-coder-1", [reply("2026-10-10T20:03:01Z", read=0, create=1000, rid="m1", effort="low")],
+                   meta={"agentType": "my-coder"})
+        self.agent("helper-x", [reply("2026-10-10T20:04:01Z", read=0, create=10, rid="h1")], meta={})
+        task = Path(self.tmp.name) / ".tasks" / "T-1"
+        task.mkdir(parents=True)
+        (task / "state.yaml").write_text(f"schema: 1\nid: T-1\nkind: task\nsession: {SESSION}\n")
+        code, out = run("phase", str(task), "start", "--projects", str(self.projects))
+        self.assertEqual(code, 0, out)
+        self.assertIn("; оркестратор claude-opus-5-5, effort xhigh 2 → high 1;", out)
+        self.assertTrue(out.rstrip().endswith("; effort не по фронтматтеру: tester medium (фронтматтер high)"), out)
+        state = yaml.safe_load((task / "state.yaml").read_text())
+        self.assertEqual(state["cost"]["phases"][0]["effort"],
+                         {"orchestrator": "xhigh 2 → high 1", "coder": "xhigh", "tester": "medium", "my-coder": "low"})
+        rows = {a["agent"]: a for a in self.session()["agents"]}
+        self.assertEqual(rows["tester-T-1"]["effort_expected"], "high")
+        self.assertIsNone(rows["my-coder-1"]["effort_expected"])
+        self.assertEqual(rows["helper-x"]["efforts"], {})
+
+    def test_a_project_agent_named_like_a_plugin_role_is_not_held_to_the_plugins_frontmatter(self):
+        """Review 0.9.3: `.claude/agents/coder.md` (agentType `coder`) at low next to `omixflow:coder`
+        at xhigh flagged the role; two plugin agents of one role on two levels are named with counts;
+        a teammate is a plugin agent by its `spawnedAgentType`."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", effort="xhigh")])
+        self.agent("coder-T-1", [reply("2026-10-10T20:01:01Z", read=0, create=1000, rid="c1", effort="xhigh")])
+        self.agent("coder-proj", [reply("2026-10-10T20:02:01Z", read=0, create=1000, rid="c2", effort="low")],
+                   meta={"agentType": "coder"})
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
+        self.assertNotIn("не по фронтматтеру", out)
+        self.agent("reviewer-T-1", [reply("2026-10-10T20:03:01Z", read=0, create=1000, rid="r1", effort="xhigh")])
+        self.agent("reviewer-T-1-2", [reply("2026-10-10T20:04:01Z", read=0, create=1000, rid="r2", effort="high"),
+                                      reply("2026-10-10T20:04:02Z", read=1000, create=10, rid="r3", effort="high")],
+                   meta={"agentType": "reviewer-T-1-2", "taskKind": "in_process_teammate",
+                         "spawnedAgentType": "omixflow:reviewer"})
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
+        self.assertTrue(out.rstrip().endswith("; effort не по фронтматтеру: reviewer high 2, xhigh 1 (фронтматтер xhigh)"), out)
+        code, table = run("session", "--session", SESSION, "--projects", str(self.projects))
+        rows = {line.split()[0]: line.split() for line in table.splitlines() if line.startswith(("coder", "reviewer"))}
+        self.assertEqual((rows["coder-proj"][3], rows["reviewer-T-1-2"][3]), ("low", "high"))
+
+    def test_the_orchestrators_effort_switches_are_in_time_order(self):
+        """An `/effort` switch and a switch back read as such, not as two totals."""
+        self.main_log([reply("2026-10-10T20:00:01Z", read=0, create=1000, rid="o1", effort="xhigh"),
+                       reply("2026-10-10T20:00:02Z", read=1000, create=10, rid="o2", effort="high"),
+                       reply("2026-10-10T20:00:03Z", read=1000, create=10, rid="o3", effort="xhigh")])
+        code, out = run("session", "--session", SESSION, "--projects", str(self.projects), "--line")
+        self.assertTrue(out.rstrip().endswith("; оркестратор claude-opus-5-5, effort xhigh 1 → high 1 → xhigh 1"), out)
+        code, table = run("session", "--session", SESSION, "--projects", str(self.projects))
+        self.assertEqual(next(line for line in table.splitlines() if line.startswith("orchestrator")).split()[3], "xhigh+")
+
+    def test_every_plugin_agent_sets_its_effort(self):
+        """protocol/tiers.md, «Effort агентов»: the plugin, not the developer's settings, sets the level."""
+        expected = {"architect": "xhigh", "coder": "xhigh", "reviewer": "xhigh", "researcher": "high",
+                    "tester": "high", "web-fetcher": "medium"}
+        self.assertEqual({p.stem: cost.lib.agent_effort(p.stem) for p in (ROOT / "agents").glob("*.md")}, expected)
+        self.assertIsNone(cost.lib.agent_effort("my-coder"))
 
     def test_unknown_session_is_json_with_exit_3(self):
         code, out = run("session", "--session", "nope", "--projects", str(self.projects))

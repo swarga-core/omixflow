@@ -123,7 +123,7 @@ cost:                      # ведёт cost.py phase (runtime.md, «Стоим�
   session: 3f2a…                        # сессия, записавшая курсор: чужие курсоры частей не учитываются
   total_eq: 8400000
   phases:
-    - {phase: research, model: claude-opus-5-5, requests: 40, cost_eq: 1200000, avg_context: 90000, by_role: {orchestrator: 400000, researcher: 800000}}
+    - {phase: research, model: claude-opus-5-5, effort: {orchestrator: xhigh, researcher: high}, requests: 40, cost_eq: 1200000, avg_context: 90000, by_role: {orchestrator: 400000, researcher: 800000}}
 lead:                      # только у задачи, запущенной с лидом (lead.md)
   name: lead-omix          # имя сессии лида
   journal: /abs/…/_lead/journal.jsonl   # путь журнала лида из brief

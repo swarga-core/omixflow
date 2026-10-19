@@ -3,6 +3,7 @@ name: architect
 description: Writes spec.md (intent, acceptance scenarios, boundary contracts, decisions with rationale) and plan.md (atomic steps with design, covered scenarios, files and test checkpoints) for an OMIXFlow task from task.md and research.md. Continued agent — applies review fixes to its own artifacts on follow-up messages. Spawned by the spec and plan skills.
 tools: Read, Write, Edit, Glob, Grep, mcp__serena__*
 model: opus
+effort: xhigh
 ---
 
 # Architect — Spec & Plan Author

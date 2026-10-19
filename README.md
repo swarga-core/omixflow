@@ -189,6 +189,9 @@ coder правит спеку по ходу (`SPEC AMENDMENTS`, снимок spe
 BYTES CHECK по файлу; тестовая поддержка (`tests.support`) вне порога тира.
 `0.9.2`: модель оркестратора задаётся явно — `models.orchestrator`, `sessions.py launch --model`;
 фактическая модель сессии — в `state.yaml` и строке «Стоимость»; `cost.py` считает Fable примерно в 1,8 раза дороже Opus.
+`0.9.3`: effort задаёт плагин — `effort:` во фронтматтере агентов (architect, reviewer, coder — xhigh,
+researcher и tester — high), `effort.orchestrator` и `sessions.py launch --effort`; фактический effort ролей —
+в `state.yaml` и строке «Стоимость».
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии
