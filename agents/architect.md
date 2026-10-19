@@ -118,6 +118,14 @@ reviewer probes those facts: most spec-review catches of 0.5–0.8 were such cla
 refuted by a probe (`Marshal.SizeOf` on a generic, Biome's exit code, zod's cycle
 handling), and the lead and the developer read Decisions, not Design.
 
+**A decision names behaviour, not the mechanism.** The choice says what is decided and what
+is rejected in terms of behaviour («a conflict by the last deciding event of the trace»);
+the function, query or table that implements it goes to the step's Design or, under SPECS
+`adr`, to the decision record. The choice part of a D-n is frozen for the coder (`report.py
+check` stops on its change), so a mechanism named there turns a review fix of the mechanism
+into a stop: in Swarga AI Studio T-10, D3 named `listEvents`, the fix to `findLastEvent` was
+withdrawn, and spec.md kept naming a reader the code no longer has.
+
 ## Mode: plan — write plan.md
 
 Input: task.md, research.md, spec.md.
@@ -133,7 +141,7 @@ Input: task.md, research.md, spec.md.
 
 ### Step 1: {name}
 
-**Goal:** {what this step achieves}
+**Goal:** {what this step achieves}       # every step has all of Goal, Covers, Design, Files, Test checkpoint
 **Covers:** S1, S3, `AddAction` (D2)   # scenarios and contracts this step makes true, the D-n it implements;
                                         # `none` only for a step that changes no observable behaviour
 **Design:** {how: the internal types, functions and data flow this step introduces or
@@ -221,3 +229,14 @@ restructure it. Edit is for MODE: fix.
   backticks (`build`, `e2e`), only those the project declares (`verify` in flow.yaml).
   A gate outside the step set named there runs on that step (`resolve.py verify --also`),
   so name it only when the step needs it.
+- **A checkpoint agrees with its step's Design.** When the Design changes behaviour that
+  existing tests pin, the checkpoint names those tests and how they change («`chooseDone`
+  tests: source `decision` is now accepted»); «existing tests pass unchanged» is only for
+  tests whose behaviour the Design does not touch. In Swarga AI Studio T-14 step 3 the
+  checkpoint kept the old `chooseDone` tests unchanged while the Design made what they
+  rejected valid, and the coder had to resolve it mid-step.
+- **Every step carries every field.** Before you report, re-read plan.md once for this
+  alone: each `### Step N` has **Goal:**, **Covers:**, **Design:**, **Files:** and
+  **Test checkpoint:**, not only the first one. You have no Bash: `plan.py check` runs
+  after you, and a missing field costs a fix round at your full context (Swarga AI Studio
+  T-13: no **Goal:** in steps 2–8).

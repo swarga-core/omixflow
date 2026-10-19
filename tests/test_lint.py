@@ -1144,11 +1144,58 @@ class AgentRulesLint(unittest.TestCase):
                         self.assertIn("основного дерева", line)
         self.assertIn("ran: regex", self.flat("adapters/lang/PORT.md"))
 
+    def test_the_rules_of_0_9_5_from_swais_t10_to_t15(self):
+        """G-66 (T-10), G-70 (T-12), G-79 (T-13), G-86 (T-14): the agent rules and their review aspects."""
+        architect = self.flat("agents/architect.md")
+        reviewer = self.flat("agents/reviewer.md")
+        coder = self.flat("agents/coder.md")
+        implement = self.flat("skills/implement/SKILL.md")
+        # G-66: a decision names behaviour; the orchestrator's own fix of a mechanism is not a stop
+        self.assertIn("**A decision names behaviour, not the mechanism.**", architect)
+        self.assertIn("A decision whose choice names the mechanism", reviewer)
+        self.assertIn("`--amend-decision D{n}`", implement)
+        self.assertIn("`--amend-decision D{n}`", self.flat("skills/review/SKILL.md"))
+        self.assertIn("spec.md задачи — снимок намерения", self.flat("protocol/phases.md"))
+        # G-70: a note about behaviour outside the step carries its probe or `unverified`
+        self.assertIn("**A note about behaviour is a fact only with its probe.**", coder)
+        self.assertIn("`unverified: {why it cannot be checked in this step}`", coder)
+        self.assertIn("«проба: {команда → результат}» или «не проверено»", implement)
+        self.assertIn("лид суждением не решает", self.flat("protocol/lead.md"))
+        self.assertIn("суждением не решать — `ack` с просьбой пробы", self.flat("skills/lead/SKILL.md"))
+        self.assertIn("unless your assignment orders that very edit", coder)     # G-66: the ordered D-n edit is made, not a stop
+        # G-79, G-86: every step carries every field; a checkpoint agrees with its Design
+        self.assertIn("**Every step carries every field.**", architect)
+        self.assertIn("**A checkpoint agrees with its step's Design.**", architect)
+        self.assertIn("keeps existing tests «unchanged» while its own step's Design changes", reviewer)
+        # the lead's rename (mewria MEW-19): sanction, advisory, the session's check; the disk keeps the old name
+        lead_md = self.flat("protocol/lead.md")
+        self.assertIn("**Переименование лида.**", lead_md)
+        self.assertIn("lead.py approve --action \"переименование {старое} → {новое}\"", lead_md)
+        self.assertIn("Единственное исключение — `advisory` о переименовании лида", lead_md)
+        self.assertIn("до его ответа сообщения нового имени решениями не считаются", lead_md)
+        self.assertIn("`lead.yaml` с `name: {имя}`", self.flat("skills/lead/SKILL.md"))
+        self.assertIn("другое имя — СТОП, вопрос разработчику", self.flat("skills/lead/SKILL.md"))   # review: not someone's worktree
+        self.assertIn("шаги 1.1, 1.2 и 1.4 заново", self.flat("skills/lead/SKILL.md"))              # review: the restart finds it too
+        self.assertIn("перезапускает свою фоновую команду `watch` с `--owner {новое}`", lead_md)       # review: one watch per name
+        self.assertIn("а не что его велел разработчик", lead_md)                                       # the check's limit, said
+        self.assertIn("после переименования лида они не меняются", self.flat("protocol/worktree.md"))
+        # the researcher of M is on the light model explicitly (T-10 raised it to the strong one)
+        self.assertIn("| researcher | не спавнится | облегчённая | сильная |", self.flat("protocol/tiers.md"))
+        # one form of the phase summary lines, the one stats.py reads
+        self.assertIn("- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)", self.flat("skills/spec/SKILL.md"))
+        self.assertIn("`- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)`", self.flat("skills/plan/SKILL.md"))
+
     def test_a_failed_agent_gets_the_same_assignment_again(self):
         """T-7: the reviewer broke off on ENOTFOUND before writing FINDINGS_PATH."""
         runtime = self.flat("protocol/runtime.md")
         self.assertIn("**Обрыв сбоем.** Уведомление `failed` (сбой API, сеть) без файла отчёта", runtime)
-        self.assertIn("Второй `failed` на то же задание — СТОП", runtime)
+        self.assertIn("второй `failed` на то же задание не по причине хоста и не лимитом, или третий подряд с любыми причинами, кроме лимита", runtime)
+        self.assertIn("Обрыв по причине хоста — сон машины («Your computer went to sleep mid-response»)", runtime)  # T-15
+        self.assertIn("во второй `failed` не идёт", runtime)
+        self.assertIn("**Сон хоста.**", runtime)
+        self.assertIn("`caffeinate -is`", runtime)
+        self.assertIn("там команды `caffeinate` нет", runtime)      # review 0.9.5: not in a shared verify for Linux and CI
+        self.assertIn("обрыв во второй `failed` не идёт — только в третий подряд", self.flat("protocol/lead.md"))
         self.assertIn("задание, оборванное остановкой сессии", runtime)
         implement = self.flat("skills/implement/SKILL.md")
         self.assertIn("Уведомление `failed` без файла — повтор того же задания", implement)

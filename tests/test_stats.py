@@ -95,6 +95,58 @@ class StatsTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("no log.md", err)
 
+    def test_the_forms_of_the_0_9_logs(self):
+        """SwAIS T-10, T-12…T-14 (0.9.0–0.9.2): severities after the name and wrapped over a line,
+        a total without severities, a cost head with the phase pair, steps after Finalize."""
+        log = """# Log: T-12
+
+## Spec ✅
+- Ревью артефактов, проход 1: findings 11 —
+  critical 0, warning 4 (#1–#3 spec, #4 plan; blocking #1–#3), suggestion 7. Категорий нет.
+- Ревью, проход 2: все 11 findings fixed — approve.
+- Стоимость (Spec + Plan): 6.6M cost_eq, запросов 152
+
+## Plan ✅ (combined)
+- plan.md — 7 шагов; plan.py check: кругов 1, остаток 0 (нет **Goal:** у шагов 2–8).
+- После фиксов `plan.py check`: кругов 2, остаток 0; повторно `plan.py check`: ok, кругов 0.
+- Пасс 1 approve с findings 8–10 — номера, не итог; findings 8, 9 закрыты.
+
+## Implement ✅
+- Стоимость: 15.7M cost_eq, запросов 435
+
+## Review ✅
+- Проход 1: findings 4 — #1 warning [code] (чекпоинт), #2–#4 suggestion. Итого findings 4 (4 resolved), проходов 2.
+
+## Finalize ✅
+- Стоимость: 0.4M cost_eq, запросов 8
+- Стоимость задачи: 22.7M cost_eq, фазы по убыванию: implement 15.7M
+
+### Шаг 1: схемы ✅
+- Гейты: typecheck PASS, test FAIL → починка, test PASS
+- FIX ITERATIONS 1/7
+
+### Шаг 2: таблицы ✅
+- Гейты: typecheck PASS, test PASS
+
+### Шаг 2a: индексы ✅
+- Гейты: typecheck PASS, test PASS
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            task = Path(tmp) / "T-12"
+            task.mkdir()
+            (task / "log.md").write_text(log)
+            code, out, _ = run("task", str(task), "--json")
+            self.assertEqual(code, 0, out)
+            r = json.loads(out)[0]
+            self.assertEqual((r["steps"], r["steps_after_finalize"]), (3, 3))   # 2a is a step of its own
+            self.assertEqual(r["plan_check_rounds"], 3)     # with and without backticks, «ok, кругов 0»
+            self.assertEqual(r["rework"], {"step_returns": 0, "fix_iterations": 1, "red_gates": 1})
+            self.assertEqual(r["findings"], {"total": 15, "critical": 0, "warning": 4, "suggestion": 7})
+            self.assertEqual((r["cost_eq_m"], r["cost_lines"]), (22.7, 3))     # not the task total
+            code, out, _ = run("task", str(task))
+            self.assertIn("0/4/7+4", out)
+            self.assertIn("шагов после ## Finalize 3", out)
+
 
 if __name__ == "__main__":
     unittest.main()

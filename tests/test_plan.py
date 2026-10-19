@@ -94,6 +94,35 @@ class PlanFilesTests(unittest.TestCase):
         self.assertIn("supp packages/server/test/actions.ts", out)
         self.assertIn("non-test 4, tests 1, test support 1", out)
 
+    def test_adr_records_do_not_count_toward_the_threshold_and_are_reported_apart(self):
+        """SwAIS T-10/T-12 (`specs.mode: adr`): six or seven decision records took a quarter of
+        the threshold 30 — each decision adds a record, the threshold was calibrated on code."""
+        self.state("M")
+        (self.task / "plan.md").write_text(PLAN.replace(
+            "- DELETE: `packages/server/src/old.ts` — gone",
+            "- DELETE: `packages/server/src/old.ts` — gone\n- CREATE: `docs/decisions/T-1-action.md` — D1\n"
+            "- CREATE: `docs/decisions/T-1-route.md` — D2\n- CREATE: `docs/adr/0007-store.md` — D3"))
+        self.cfg(CFG + "tiers: {m_max_files: 5}\n")
+        code, r, _ = self.files()                  # descriptions: a record is a file like any other, as before
+        self.assertEqual((code, r["files"], r["non_test"], r["adr"], r["over"]), (1, 9, 7, None, True))
+        code, out, _ = run("files", "--task", str(self.task))
+        self.assertIn("(non-test 7, tests 1, test support 1)", out)
+        self.assertNotIn("adr  ", out)
+        self.cfg(CFG + "tiers: {m_max_files: 5}\nspecs: {mode: adr}\n")
+        code, r, _ = self.files()
+        self.assertEqual((code, r["files"], r["non_test"], r["tests"], r["support"], r["adr"], r["over"]),
+                         (0, 9, 5, 1, 1, 2, False))
+        self.assertIn("docs/decisions/T-1-route.md", r["paths"])
+        code, out, _ = run("files", "--task", str(self.task))
+        self.assertIn("non-test 5, tests 1, test support 1, adr 2 in docs/decisions/", out)
+        self.assertIn("adr  docs/decisions/T-1-action.md", out)
+        self.assertIn("     docs/adr/0007-store.md", out)
+        # the project's own adr_dir: only its records are apart
+        self.cfg(CFG + "tiers: {m_max_files: 5}\nspecs: {mode: adr, adr_dir: docs/adr/}\n")
+        code, r, _ = self.files()
+        self.assertEqual((code, r["non_test"], r["adr"], r["over"]), (1, 6, 1, True))
+        self.assertIn("adr 1 in docs/adr/)", run("files", "--task", str(self.task))[1])
+
     def test_a_test_file_under_a_support_directory_is_a_test(self):
         """`packages/server/test/x.test.ts` matches both globs: a test, not support (review F11)."""
         self.state("M")

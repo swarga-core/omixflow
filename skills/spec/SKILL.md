@@ -89,8 +89,9 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    решение строкой в log.md; код 2 — строки файлов не распознаны, поправить план. Затем
    снова `plan.py check`: фикс мог добавить сценарий или файл; код 1 — architect'у, как в
    шаге 1.
-5. Состояние: `state.py finish TASK_DIR spec`, затем `… plan`. log.md: обе секции с числом findings
-   и проходов. Фаза plan затем пропускается.
+5. Состояние: `state.py finish TASK_DIR spec`, затем `… plan`. log.md: `## Spec ✅` с итогом общего
+   ревью (форма ниже), `## Plan ✅ (combined)` — число шагов и «findings и проходы — в Spec». Фаза
+   plan затем пропускается.
 
 ### L: spec отдельно
 
@@ -108,10 +109,22 @@ log.md: `## Spec ✅ (inline, combined)`, `## Plan ✅ (combined)`.
    log.md. Не больше `limits.review_passes` (`review-cycle.md`, «Лимит проходов»).
    Перед каждым сообщением architect'у и reviewer'у — порог ротации (`tiers.md`, «Смена агента
    по ходу задачи»).
-5. Состояние: `state.py finish TASK_DIR spec`. log.md: `## Spec ✅`, findings, проходов.
+5. Состояние: `state.py finish TASK_DIR spec`. log.md: `## Spec ✅` с итогом ревью (форма ниже).
+
+Итог ревью в log.md — в одной форме с Review (`skills/review/SKILL.md`), её читает `stats.py`;
+ход проходов — строками выше итога:
+
+```markdown
+## Spec ✅
+- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)
+- Принято: {N}, отклонено: {N}
+- Проходов: {M}
+{строка `- Стоимость: …` из cost.py}
+```
 
 Во всех тирах перед `finish` — строка стоимости из `cost.py phase TASK_DIR spec` в секцию
-`## Spec ✅` (`runtime.md`, «Стоимость»; в S и M фаза plan идёт в ту же строку), затем коммит
+`## Spec ✅` (`runtime.md`, «Стоимость»; в S и M фаза plan идёт в ту же строку) — как скрипт её
+напечатал, без пометок в начале («Стоимость (Spec + Plan):» `stats.py` до 0.9.5 не читал), затем коммит
 артефактов после фазы (`artifacts.md`). Адрес каждого агента (`runtime.md`, «Спавн агентов»:
 имя, с суффиксом после ротации, или agentId) оркестратор записывает сразу после его спавна, во
 всех тирах: `state.py set TASK_DIR agents.architect={адрес}` и `agents.reviewer={адрес}` — FIX

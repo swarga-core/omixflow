@@ -72,7 +72,9 @@ description: Plan phase of the OMIXFlow pipeline — produces plan.md (ordered a
    мог добавить сценарий или файл; код 1 — architect'у, как в шаге 1.
 6. **Состояние.** Строка стоимости из `cost.py phase TASK_DIR plan` (`runtime.md`,
    «Стоимость»); `state.py finish TASK_DIR plan`; `state.py set TASK_DIR
-   steps_total={N}`. log.md: `## Plan ✅`, шагов, findings, проходов, стоимость. Коммит артефактов (`artifacts.md`).
+   steps_total={N}`. log.md: `## Plan ✅`, число шагов, итог ревью в форме Spec (`skills/spec/SKILL.md`:
+   `- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)`, `- Принято: …`, `- Проходов: {M}`)
+   и строка стоимости, как её напечатал cost.py. Коммит артефактов (`artifacts.md`).
 
 ## Итог (mode manual)
 

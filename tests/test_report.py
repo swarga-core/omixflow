@@ -715,6 +715,185 @@ class ReportCheckTests(unittest.TestCase):
         self.assertIn("правка в «Contracts»", out)
         self.assertNotIn("НЕ СВЕРЕНО", out)
 
+    def test_a_decision_text_the_orchestrator_ordered_changed_is_a_fact_and_any_other_change_is_a_stop(self):
+        """G-66, SwAIS T-10: a review fix replaced the reader a decision named (`listEvents` →
+        `findLastEvent`), the choice stayed; the orchestrator names the decision by
+        --amend-decision, every other changed decision still stops."""
+        spec = self.root / ".tasks" / "T-1" / "spec.md"
+        two = SPEC.replace("- D1: plain functions — simple; rests on: nothing",
+                           "- D1: plain functions — simple; rests on: nothing\n"
+                           "- D2: the event is found by the task (`listEvents`) — one query; rests on: the trace index")
+        spec.write_text(two)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "two decisions")
+        reworded = two.replace("(`listEvents`)", "(`findLastEvent`)")
+        spec.write_text(reworded)
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D2 names findLastEvent (review fix #3)"})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)                                     # without the flag: a stop, as before
+        self.assertIn("правка в «Decisions D2» — это смена объёма, решения или контракта", out)
+        self.assertNotIn("по заданию оркестратора", out)
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.startswith("VERDICT: ok"), out)
+        self.assertIn("- D2: правка текста по заданию оркестратора — было «…event is found by the task (`listEvents`) — one "
+                      "query;», стало «…event is found by the task (`findLastEvent`) — one query;»", out)
+        self.assertIn("SPEC AMENDMENTS: - spec.md «Decisions»: D2 names findLastEvent", out)
+        self.assertIn("изменён в «Decisions», правки названы", out)
+        self.assertNotIn("ПРЕДУПРЕЖДЕНИЕ", out)
+        # the flag names another decision: the changed one stops, the named one is a warning
+        code, out = self.check("--also", "build", "--amend-decision", "D1")
+        self.assertEqual(code, 1, out)
+        self.assertIn("правка в «Decisions D2»", out)
+        self.assertIn("ПРЕДУПРЕЖДЕНИЕ: --amend-decision D1: пункт D1 против HEAD не изменён", out)
+        # two changed, one named: only the other stops
+        spec.write_text(reworded.replace("plain functions", "classes"))
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("правка в «Decisions D1» — это смена", out)
+        self.assertIn("- D2: правка текста по заданию оркестратора", out)
+        code, out = self.check("--also", "build", "--amend-decision", "D2", "--amend-decision", "d1")   # repeatable
+        self.assertEqual(code, 0, out)
+        self.assertIn("- D1: правка текста по заданию оркестратора", out)
+        # a removed decision is no text edit: the flag does not cover it
+        spec.write_text(SPEC)
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("правка в «Decisions D2»", out)
+
+    def test_amend_decision_never_passes_silently(self):
+        """A flag that names no decision of the snapshot, a malformed id or a tester's report is
+        the call's error (exit 3); a named decision left unchanged is a warning."""
+        self.write()
+        code, out = self.check("--also", "build", "--amend-decision", "D9")
+        self.assertEqual(code, 3, out)
+        self.assertIn("--amend-decision D9: такого решения нет в «Decisions» spec.md (против HEAD)", out)
+        code, out = self.check("--also", "build", "--amend-decision", "3")
+        self.assertEqual(code, 3, out)
+        self.assertIn("не номер решения", out)
+        code, out = self.check("--also", "build", "--amend-decision", "D1", role="tester")
+        self.assertEqual(code, 3, out)
+        self.assertIn("только с --role coder", out)
+        code, out = self.check("--also", "build", "--amend-decision", "D1", "--json")
+        self.assertEqual(code, 0, out)
+        r = json.loads(out)
+        self.assertEqual(r["verdict"], "ok")
+        self.assertEqual(r["warnings"], ["--amend-decision D1: пункт D1 против HEAD не изменён — правки по заданию в spec.md нет"])
+        self.assertIn("SPEC AMENDMENTS: none, spec.md не менялся (против HEAD)", r["verified"])
+
+    def test_amend_decision_shows_what_changed_and_says_when_the_flag_was_not_needed(self):
+        """Review of 0.9.5: under the flag a reversed choice or another decision under the same
+        number would pass unseen — the fact carries the old and the new text; a change of
+        `rests on` alone needs no flag, and the warning says so."""
+        spec = self.root / ".tasks" / "T-1" / "spec.md"
+        two = SPEC.replace("- D1: plain functions — simple; rests on: nothing",
+                           "- D1: plain functions — simple; rests on: nothing\n"
+                           "- D2: the event is found by the task (`listEvents`) — one query; rests on: the trace index")
+        spec.write_text(two)
+        self.git("add", ".tasks/T-1/spec.md")
+        self.git("commit", "-qm", "two decisions")
+        self.write(**{"SPEC AMENDMENTS:\n  - none": "SPEC AMENDMENTS:\n  - spec.md «Decisions»: D2 reworded"})
+        # a reversed choice passes under the flag, and the fact shows the reversal
+        spec.write_text(two.replace("by the task (`listEvents`) — one query", "by a full scan — no index"))
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("было «…D2: the event is found by the task (`listEvents`) — one query;», "
+                      "стало «…D2: the event is found by a full scan — no index;»", out)
+        # renumbering: a new decision took D2, the old one is D3 now — the excerpt shows another text, D3 stops
+        spec.write_text(two.replace("- D2: the event", "- D2: cache results — faster; rests on: perf\n- D3: the event"))
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("- D2: правка текста по заданию оркестратора — было «- D2: the event is found by the task "
+                      "(`listEvents`) — one query;», стало «- D2: cache results — faster;»", out)
+        self.assertIn("правка в «Decisions D3» — это смена", out)
+        # only `rests on` changed: the choice stands, the flag was not needed
+        spec.write_text(two.replace("rests on: the trace index", "rests on: the trace index (idx_trace_task)"))
+        code, out = self.check("--also", "build", "--amend-decision", "D2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("ПРЕДУПРЕЖДЕНИЕ: --amend-decision D2: выбор D2 против HEAD не изменён, правка только в `rests on` — "
+                      "флаг не нужен", out)
+        self.assertNotIn("правки по заданию в spec.md нет", out)
+        self.assertNotIn("по заданию оркестратора —", out)
+
+    def test_a_notes_claim_about_behaviour_without_a_probe_is_a_warning_not_a_return(self):
+        """G-70, SwAIS T-12 step 5: «enterRunStep упадёт … 23505 и 500 на сдаче» had no probe,
+        became the premise of a lead's decision and did not hold (review F1)."""
+        claim = ("NOTES:\n  - переход done шага человека назад: сохранение принимает, а enterRunStep упадёт\n"
+                 "    на уникальном индексе run_step — 23505 и 500 на сдаче\n  - out of scope: y\n")
+        self.write(**{"NOTES:\n  - none\n": claim})
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out.startswith("VERDICT: ok"), out)
+        warnings = [l for l in out.splitlines() if l.startswith("- ПРЕДУПРЕЖДЕНИЕ: NOTES:")]
+        self.assertEqual(len(warnings), 1, out)                            # the item with its continuation, once
+        self.assertIn("enterRunStep упадёт на уникальном индексе run_step — 23505 и 500", warnings[0])
+        self.assertIn("нужна проба (`команда → результат`) или `unverified: {почему не проверить в шаге}`", warnings[0])
+        for note in ("POST /actions даёт 500 на пустом теле", "parse fails for an empty input",
+                     "the handler throws on null", "42P01 when the table is missing"):
+            with self.subTest(note=note):
+                self.write(**{"NOTES:\n  - none\n": f"NOTES:\n  - {note}\n"})
+                code, out = self.check("--also", "build")
+                self.assertEqual(code, 0, out)
+                self.assertIn("ПРЕДУПРЕЖДЕНИЕ: NOTES:", out)
+        # a probe, an `unverified` mark, or numbers that are no error code: no warning
+        for note in ("`curl -X POST /actions` → 500 on an empty body",
+                     "enterRunStep упадёт на 23505 — unverified: нужна база с прогоном",
+                     "a.ts grew to 400 lines; see a.ts:500, D-450, PR #412; the hit (попадает в кэш) takes 500 ms"):
+            with self.subTest(note=note):
+                self.write(**{"NOTES:\n  - none\n": f"NOTES:\n  - {note}\n"})
+                code, out = self.check("--also", "build", "--json")
+                self.assertEqual((code, json.loads(out)["warnings"]), (0, []), out)
+        # the exit code stays the verdict's: a returned report is 1 with the warning alongside
+        self.write(text=REPORT.format(tree="   M src/a.ts", mutations=MUTATION_LINES).replace("NOTES:\n  - none\n", claim))
+        code, out = self.check("--also", "build", "--json")
+        r = json.loads(out)
+        self.assertEqual((code, r["verdict"], len(r["warnings"])), (1, "return", 1), out)
+
+    def test_notes_heuristic_skips_code_numbers_probes_in_words_and_the_coder_s_own_checks(self):
+        """Review of 0.9.5 on 178 real NOTES (SwAIS, mewria): the first heuristic was right once in
+        five. Each class of its false warnings stays quiet; an arrow that is the claim itself, not
+        a probe, no longer hides it (T-6 step 2)."""
+        quiet = {
+            "code span (mewria, NUnit)": "PlayMode: `Throws.TypeOf<ArgumentException>().With.Matches<…>` и `Is.EqualTo`",
+            "numbers": "запас меньше 100 узлов, как D6 (401 из 500); счёт 550 > 500; getIntrospectionQuery() counts 453 "
+                       "merged fields; 501 ms with probeTimeoutMs 500; spec D7 (строка ~455); the query returns 400 rows",
+            "probe in words": "Проба V71 показала: без условия падают 44 теста",
+            "probe in words, passive": "Посторонний получает 404 `not_found` — закреплено пробой видимости",
+            "probe by id": "P10 shows the request fails if the path leaks into details",
+            "checked in words": "GET /logout проверен в обоих режимах: отвечает 404 без Set-Cookie",
+            "own gate": "после ./run.ts гейт lint падает — Biome сортирует блоки экспорта",
+            "own test": "if Hono changes it, the test fails openly, not falsely green",
+            "own test, a code": "проверка 23514 в тесте — сырой вставкой, как сказано в чекпоинте",
+            "probe arrow to an outcome": "add(1, 2) падает без фикса → RED",
+            "a probe in the sentence that refers back": "Посторонний получает 404 `not_found`. Это закреплено пробой видимости",
+            "`unverified` in backticks": "id не UUID дал бы ошибку 22P02 — `unverified: нет базы в шаге`",
+        }
+        for name, note in quiet.items():
+            with self.subTest(quiet=name):
+                self.write(**{"NOTES:\n  - none\n": f"NOTES:\n  - {note}\n"})
+                code, out = self.check("--also", "build", "--json")
+                self.assertEqual((code, json.loads(out)["warnings"]), (0, []), out)
+        loud = {
+            "an arrow in the claim": "чтение отдаёт [[\"member\"]] → разбор Zod падает → 500 — ровно то, от чего защищает D12",
+            "a code after a verb": "если COMMIT упадёт, клиент получит 500 без cookie",
+            "a framework default": "Ошибки БД в обработчиках (`/me`) отдают 500 по умолчанию Hono",
+            "a SQLSTATE after a verb": "canSee не проверяет формат: id не UUID дал бы ошибку PostgreSQL 22P02 (internal)",
+            "a library's behaviour": "NewTaskAssignment is standalone because zod 4 throws on .pick of refined objects",
+            # re-review: a run and a build are product terms in SwAIS, not the coder's own check
+            "a pipeline run": "прогон упадёт на уникальном индексе run_step",
+            "a run of the product": "the run fails when the hub is closed",
+            # re-review: a probe word elsewhere in the bullet, or a colour, says nothing of this claim
+            "a probe word in another sentence": "enterRunStep упадёт на уникальном индексе; тесты шага зелёные, проба V2 тоже",
+            "a colour": "отдаёт 500 на пустом теле, кнопка красная",
+            "checked something else": "the handler throws on null; checked the types only",
+        }
+        for name, note in loud.items():
+            with self.subTest(loud=name):
+                self.write(**{"NOTES:\n  - none\n": f"NOTES:\n  - {note}\n"})
+                code, out = self.check("--also", "build", "--json")
+                r = json.loads(out)
+                self.assertEqual((code, len(r["warnings"])), (0, 1), out)
+
     def test_a_project_root_nested_in_a_larger_repository_is_diffed_with_a_relative_head_path(self):
         outer = Path(self.tmp.name) / "outer"
         proj = outer / "proj"

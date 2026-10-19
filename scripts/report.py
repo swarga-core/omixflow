@@ -5,7 +5,7 @@ review 4): the orchestrator reads a verdict instead of the report.
     report.py baseline --out FILE [--root DIR] [--artifacts DIR]
     report.py check --role coder|tester --report REPORT_PATH [--root DIR] [--artifacts DIR]
                     [--baseline FILE] [--verify FILE | --also GATE ...] [--test-glob GLOB ...]
-                    [--declaration REGEX] [--conflicts FILE ...] [--json]
+                    [--declaration REGEX] [--conflicts FILE ...] [--amend-decision Dn ...] [--json]
 
 `baseline` records the uncommitted tree before an assignment (the paths of `git status` with
 the hash of each file's content) so that `check --baseline` charges the agent only with what
@@ -37,7 +37,15 @@ What `check` verifies, each against evidence the agent cannot write:
   Scope, and a changed, added or removed decision choice (a `- Dn …:` item without its
   `rests on:` part, however it wraps) are problems — the last two are a stop for the
   orchestrator's scope-change point, not the coder's amendment; without a snapshot and
-  untracked, the verdict says the section was not checked;
+  untracked, the verdict says the section was not checked. A decision named by
+  `--amend-decision` (repeatable; G-66: a review fix the orchestrator ordered changes the
+  mechanism a decision's text names, not the choice) may change its text: the fact
+  «Dn: правка текста по заданию оркестратора — было «…», стало «…»» (the changed part of
+  the choice with some words around it: a reversed choice or another decision under the
+  same number shows there) instead of the stop; an added or removed decision stays a stop;
+  a named decision whose choice did not change is a warning (with only its `rests on`
+  changed: the flag was not needed), one absent from the snapshot's Decisions is the
+  call's error (exit 3), and so is the flag with `--role tester`;
 - MUTATIONS: new test declarations (lang adapter `tests.declaration`, else --declaration)
   in the agent's changed test files (`tests.files` globs across the lang adapters, else
   --test-glob; a binary file is not a test) are counted as added minus removed; that many
@@ -54,16 +62,29 @@ What `check` verifies, each against evidence the agent cannot write:
   script runs no gate itself;
 - BYTES CHECK is not `n/a` when the agent's diff adds non-ASCII text lines, and names every
   such file (by its path, or by a tail of it from a `/` that no other such file shares);
-- SUPPRESSIONS CHECK is present; SCRATCH not `clean` becomes the log.md line.
+- SUPPRESSIONS CHECK is present; SCRATCH not `clean` becomes the log.md line;
+- NOTES (coder; G-70, a heuristic): an item that states behaviour is a warning — a claim
+  about behaviour outside the step carries a probe or `unverified: {why}` (agents/coder.md,
+  NOTES). Markers, outside code spans: a failure verb («падает», «упадёт», `fails`,
+  `throws`) whose subject is not a test, a gate or lint; an HTTP 4xx/5xx or SQLSTATE code
+  after a verb of response («даёт 500», «получит 500», `returns 503`, «дал бы ошибку
+  22P02»); a bare SQLSTATE (`23505`). No warning when the item is marked `unverified`, or
+  the claim's sentence (split on `.`/`;` outside code; with the next one when it refers
+  back, «Это закреплено пробой») says how it was probed — a probe word («проба»,
+  «проверен», «закреплено», «показала», `checked`, `P10 shows`, RED/GREEN; a colour is no
+  probe), an arrow after a command in backticks or before an outcome (`` `cmd` → 500 ``,
+  `→ RED`); another arrow may be the claim itself.
 
 The verdict always carries what the orchestrator acts on without reading the report: each
 gate with its outcome, NOTES (when not `none`), `not declared` gates, the tester's FAILURES
-and CODE BUGS FOUND, the untracked lines of TREE STATE.
+and CODE BUGS FOUND, the untracked lines of TREE STATE. A warning (`- ПРЕДУПРЕЖДЕНИЕ: …`,
+`warnings` in --json) is for the orchestrator alone: it neither returns the report nor
+stops, and leaves the exit code as it is.
 
 Exit 0 — ok, or a stop (`VERDICT: ok` / `VERDICT: stopped`); exit 1 — return the report to
 the agent: the output holds the message to send, point by point; exit 2 — the report is
 missing or broken; exit 3 — the orchestrator's own error (config, --also, --verify,
---baseline), nothing about the agent. --json prints one object. The script checks claims
+--baseline, --amend-decision), nothing about the agent. --json prints one object. The script checks claims
 against git and gate logs; it replaces neither `resolve.py verify` nor the orchestrator's
 checks.
 """
@@ -77,7 +98,7 @@ from collections import Counter
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
@@ -105,6 +126,40 @@ GATE_LINE_RE = re.compile(r"^\s*-?\s*([a-z0-9]+):\s*(PASS|FAIL|n/a|not declared)
 GATE_RUN_RE = re.compile(r"gate\.py\s+([A-Za-z0-9._-]+)(?:,?\s*EXIT\s+(\d+))?")
 BACKGROUND_RE = re.compile(r"^\s*-?\s*([a-z0-9]+):\s*gate\.py\s+([A-Za-z0-9._-]+)(?:,?\s*EXIT\s+(\d+))?", re.I)
 MUTATION_LINE_RE = re.compile(r"^\s*-\s+(.+)$")
+NOTE_ITEM_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+# A statement of behaviour in NOTES (G-70, T-12: «enterRunStep упадёт на уникальном индексе — 23505 и 500 на сдаче»),
+# matched outside code spans (NUnit's `Throws.TypeOf<…>` is code, not a claim): a failure verb; an HTTP 4xx/5xx or
+# SQLSTATE code after a verb of response — a bare three-digit number is a count, a limit or a line (550 > 500,
+# «401 из 500», «строка ~455»); a bare SQLSTATE. Calibrated on 178 coder reports with NOTES (SwAIS, mewria).
+CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+NOT_A_QUANTITY = (r"(?![\w:/%-]|\.\d|\s*(?i:ms\b|мс\b|[kmg]b\b|[кмг]б\b|lines?\b|rows?\b|bytes?\b|files?\b|tests?\b|nodes?\b"
+                  r"|fields?\b|строк|байт|файл|тест|шаг|узл|пол[еяй]))")
+SQLSTATE = r"(?:08|22|23|25|40|42|53|55|57)[\dA-Z]{3}"
+CLAIM_RE = re.compile(
+    r"(?i:(?<![а-яё])(?:пада(?:ет|ют|ть)|упад[её]т|упадут)(?![а-яё])"     # not «бросает»: T-5's API notes, 14 false
+    r"|\b(?:fails|throws|crashes|(?:will|would|may|might) (?:fail|throw|crash))\b)"
+    r"|(?i:\b(?:(?:от)?да(?:[её]т|ст|ют|дут)|дал[аио]?\s+бы|верн[её]т|вернут|вернул[аио]?\s+бы|возвраща(?:ет|ют)"
+    r"|получ(?:ит|ат|ает|ают)|отвеча(?:ет|ют)|ответ(?:ит|ят)|returns?|gives?|responds?|answers?|yields?)"
+    r"(?:\s+(?:with|an?|the|HTTP|status|code|error|с|статус\w*|код\w*|ошибк\w*|PostgreSQL|Postgres|pg|SQLSTATE)){0,3}\s+)"
+    r"(?:[45]\d\d|" + SQLSTATE + r")" + NOT_A_QUANTITY +
+    r"|(?<![\w:./#+=-])" + SQLSTATE + r"(?![\w:/%-]|\.\d)")
+# the subject of a failure that is the coder's own check, not the product: «гейт lint падает», «the test fails»,
+# «23514 в тесте» (two words either side); a run and a build are the product's in SwAIS (pipeline runs, the build step)
+OWN_CHECK_RE = re.compile(r"(?i:тест\w*|test\w*|гейт\w*|gates?|lint\w*)")
+# the sentence of the claim says how it was probed: a probe in words (SwAIS: «Проба V71 показала», «закреплено
+# пробой», «P10 shows», «проверен в обоих режимах») counts as one; a colour does not, only the outcome RED/GREEN
+PROBE_WORD_RE = re.compile(
+    r"(?i:(?<![а-яё])(?:проб(?:а|ой|ы|е|у|ам|ами|ах)?|мутант\w*|провер(?:ен|ена|ено|ены|ил|ила|или|ялось)|закрепл\w*"
+    r"|подтвержд\w*|показал\w*|измерен\w*|воспроизвед\w*)(?![а-яё])"
+    r"|(?<![-\w])(?:probes?|probed|checked|verified|measured|confirmed|reproduced|observed)\b"
+    r"|\b[A-Z]\d+\s+show(?:s|ed)\b)"
+    r"|\b(?:RED|GREEN)\b")
+UNVERIFIED_RE = re.compile(r"\bunverified\b", re.I)     # the item's own mark, in backticks or not
+SENTENCE_END_RE = re.compile(r"[.;!?](?=\s|$)")          # `index.ts`, `0.5`, `.orig` end nothing
+BACK_REFERENCE_RE = re.compile(r"\s*(?:Это|Так|This|That)\b")   # «Это закреплено пробой» is about the sentence before
+# `command → result` — the arrow of a probe follows a command in backticks or leads to an outcome; any other arrow
+# may be the claim itself (T-6 step 2: «чтение отдаёт [["member"]] → разбор Zod падает → 500»)
+PROBE_ARROW_RE = re.compile(r"`[^`\n]+`\s*(?:→|->)|(?:→|->)\s*(?:RED|GREEN|PASS|FAIL|EXIT\b|exit\s+\d)")
 
 
 # ------------------------------------------------------------------ report parsing
@@ -138,6 +193,56 @@ def section_text(sections: Dict[str, List[str]], name: str) -> str:
 def is_none(body: str) -> bool:
     """`none`, `- none`, `none: …` — an empty section in the agents' formats."""
     return body.lstrip("-* ").lower().startswith("none")
+
+
+def claim_marker(text: str) -> Optional["re.Match[str]"]:
+    """The first CLAIM_RE marker of TEXT outside its code spans whose subject is not the coder's
+    own check (OWN_CHECK_RE among the two words either side) and whose sentence — with the next
+    one when that refers back, «Это закреплено пробой» — says nothing of a probe (PROBE_WORD_RE
+    outside code, PROBE_ARROW_RE); None as well when the item is marked `unverified`. Positions
+    are TEXT's: a code span is blanked, not removed."""
+    if UNVERIFIED_RE.search(text):
+        return None
+    masked = CODE_SPAN_RE.sub(lambda c: " " * len(c.group(0)), text)
+    ends = [e.end() for e in SENTENCE_END_RE.finditer(masked)]
+    for m in CLAIM_RE.finditer(masked):
+        near = masked[:m.start()].split()[-2:] + masked[m.end():].split()[:2]
+        if any(OWN_CHECK_RE.fullmatch(w.strip(".,;:!?()«»\"'—")) for w in near):
+            continue
+        later = [e for e in ends if e > m.start()]
+        a = max([e for e in ends if e <= m.start()], default=0)
+        b = later[0] if later else len(text)
+        if later and BACK_REFERENCE_RE.match(masked, b):
+            b = later[1] if len(later) > 1 else len(text)
+        if not PROBE_WORD_RE.search(masked[a:b]) and not PROBE_ARROW_RE.search(text[a:b]):
+            return m
+    return None
+
+
+def unprobed_claims(lines: List[str]) -> List[str]:
+    """The NOTES items (a bullet with its continuation lines) that state behaviour with no word
+    of a probe — claim_marker — each named by an excerpt around the marker. A heuristic: the
+    orchestrator is warned before such a note becomes a question to the lead or the developer,
+    the report is not returned for it."""
+    items: List[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        if NOTE_ITEM_RE.match(line) or not items or not line[:1].isspace():
+            items.append(line.strip())
+        else:
+            items[-1] += " " + line.strip()
+    out = []
+    for item in items:
+        text = " ".join(NOTE_ITEM_RE.sub("", item, count=1).split())
+        m = None if is_none(text) else claim_marker(text)
+        if not m:
+            continue
+        start = max(0, m.start() - 25) if len(text) > 90 else 0
+        excerpt = ("…" if start else "") + text[start:start + 90] + ("…" if start + 90 < len(text) else "")
+        out.append(f"NOTES: «{excerpt}» — утверждение о поведении без пробы: нужна проба (`команда → результат`) "
+                   "или `unverified: {почему не проверить в шаге}`")
+    return out
 
 
 # ------------------------------------------------------------------ evidence
@@ -483,10 +588,9 @@ def spec_diff_sections(before_text: str, current_text: str) -> Dict[str, List[st
     return out
 
 
-def decision_choices(text: str) -> Dict[str, str]:
-    """Decision id → the text of its choice: the whole bullet (continuation lines included)
-    without its `rests on:` part, whitespace-normalised. A coder may correct the facts a
-    decision rests on; the choice, however it wraps, is the developer's."""
+def decision_items(text: str) -> Dict[str, str]:
+    """Decision id → its whole item (continuation lines and the `rests on:` part included),
+    whitespace-normalised."""
     found = lib.section_lines(text, "Decisions")
     if not found:
         return {}
@@ -501,18 +605,46 @@ def decision_choices(text: str) -> Dict[str, str]:
             items[current].append(line)
         elif current and line.startswith("## "):
             break
-    out: Dict[str, str] = {}
-    for key, lines in items.items():
-        joined = " ".join(" ".join(lines).split())
-        out[key] = RESTS_ON_RE.split(joined, maxsplit=1)[0].strip()
-    return out
+    return {key: " ".join(" ".join(lines).split()) for key, lines in items.items()}
+
+
+def decision_choices(text: str) -> Dict[str, str]:
+    """Decision id → the text of its choice: the whole bullet (continuation lines included)
+    without its `rests on:` part, whitespace-normalised. A coder may correct the facts a
+    decision rests on; the choice, however it wraps, is the developer's."""
+    return {key: RESTS_ON_RE.split(item, maxsplit=1)[0].strip() for key, item in decision_items(text).items()}
+
+
+def changed_excerpt(old: str, new: str, context: int = 25, width: int = 140) -> Tuple[str, str]:
+    """The part where OLD and NEW differ, with CONTEXT characters around it, each cut to WIDTH:
+    what the orchestrator reads before it writes «выбор не менялся» — a mechanism renamed, a
+    choice reversed, or another decision under the same number."""
+    start = 0
+    while start < min(len(old), len(new)) and old[start] == new[start]:
+        start += 1
+    tail = 0
+    while tail < min(len(old), len(new)) - start and old[-1 - tail] == new[-1 - tail]:
+        tail += 1
+
+    def cut(t: str) -> str:
+        a = max(0, start - context)
+        a = t.rfind(" ", 0, a) + 1 if a else 0                      # whole words at both ends
+        b = min(len(t), len(t) - tail + context, a + width)
+        b = next((i for i in range(b, min(len(t), a + width)) if t[i] == " "), b)
+        return ("…" if a else "") + t[a:b] + ("…" if b < len(t) else "")
+    return cut(old), cut(new)
 
 
 def check_spec_amendments(root: Path, report_path: Path, sections: Dict[str, List[str]], problems: List[str],
                           verified: List[str], facts: List[str], unchecked: List[str],
-                          baseline_spec: Optional[Dict[str, Any]] = None) -> None:
+                          baseline_spec: Optional[Dict[str, Any]] = None, amend: Sequence[str] = (),
+                          warnings: Optional[List[str]] = None) -> None:
     """The coder amends the spec and says so; a change to a contract, a decision's choice, the
-    intent or the scope is a stop, not an amendment (agents/coder.md, «The spec learns»)."""
+    intent or the scope is a stop, not an amendment (agents/coder.md, «The spec learns»).
+    AMEND — the decisions whose text the orchestrator ordered changed (--amend-decision):
+    their change is a fact; one not in the snapshot's Decisions raises OmixflowError (the
+    call's error), one left unchanged is a warning."""
+    warnings = warnings if warnings is not None else []
     claimed = section_text(sections, "SPEC AMENDMENTS")
     claimed_none = not claimed or is_none(claimed)
     spec = report_path.parent.parent / "spec.md"
@@ -530,6 +662,27 @@ def check_spec_amendments(root: Path, report_path: Path, sections: Dict[str, Lis
         return
     changed = spec_diff_sections(before, current)
     base_name = "снимка baseline" if baseline_spec and baseline_spec.get("blob") else "HEAD"
+    before_d, after_d = decision_choices(before), decision_choices(current)
+    unknown = [d for d in amend if d not in before_d]
+    if unknown:
+        raise lib.OmixflowError(f"--amend-decision {', '.join(unknown)}: такого решения нет в «Decisions» spec.md "
+                                f"(против {base_name}) — флаг разрешает правку текста существующего решения")
+    changed_choices = sorted(k for k in set(before_d) | set(after_d) if before_d.get(k) != after_d.get(k))
+    ordered = [k for k in changed_choices if k in amend and k in after_d]   # a text edit, not a removal
+    before_items, after_items = decision_items(before), decision_items(current)
+    for k in amend:
+        if k in changed_choices:
+            continue
+        if before_items.get(k) != after_items.get(k):
+            warnings.append(f"--amend-decision {k}: выбор {k} против {base_name} не изменён, правка только в `rests on` — "
+                            "флаг не нужен: факты, на которых стоит решение, coder правит сам")
+        else:
+            warnings.append(f"--amend-decision {k}: пункт {k} против {base_name} не изменён — правки по заданию "
+                            "в spec.md нет")
+    for k in ordered:
+        was, now = changed_excerpt(before_d[k], after_d[k])
+        facts.append(f"{k}: правка текста по заданию оркестратора — было «{was}», стало «{now}»")
+    changed_choices = [k for k in changed_choices if k not in ordered]
     if not changed and claimed_none:
         verified.append(f"SPEC AMENDMENTS: none, spec.md не менялся (против {base_name})")
         return
@@ -539,8 +692,6 @@ def check_spec_amendments(root: Path, report_path: Path, sections: Dict[str, Lis
     elif not changed:
         problems.append(f"SPEC AMENDMENTS называет правки, а spec.md против {base_name} не изменён")
     stop = [s for s in changed if s.lower() in {x.lower() for x in STOP_SECTIONS}]
-    before_d, after_d = decision_choices(before), decision_choices(current)
-    changed_choices = sorted(k for k in set(before_d) | set(after_d) if before_d.get(k) != after_d.get(k))
     if changed_choices:
         stop.append("Decisions " + ", ".join(changed_choices))
     elif "Decisions" in changed and not before_d and not after_d:
@@ -627,12 +778,15 @@ def check_project_specs(root: Path, report_path: Path, sections: Dict[str, List[
 def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Optional[Dict[str, Any]],
           langs: List[Tuple[List[str], Optional[str]]], criteria: Dict[str, str],
           baseline: Optional[Dict[str, Optional[str]]] = None,
-          baseline_spec: Optional[Dict[str, Any]] = None, conflicts: Optional[List[str]] = None) -> Dict[str, Any]:
+          baseline_spec: Optional[Dict[str, Any]] = None, conflicts: Optional[List[str]] = None,
+          amend: Sequence[str] = ()) -> Dict[str, Any]:
     result: Dict[str, Any] = {"role": role, "report": str(report_path), "verdict": "ok", "problems": [],
-                              "verified": [], "facts": [], "unchecked": [], "refused": False, "scratch_line": None}
+                              "verified": [], "facts": [], "warnings": [], "unchecked": [], "refused": False,
+                              "scratch_line": None}
     problems: List[str] = result["problems"]
     verified: List[str] = result["verified"]
     facts: List[str] = result["facts"]
+    warnings: List[str] = result["warnings"]
 
     try:
         text = report_path.read_text(encoding="utf-8")
@@ -708,7 +862,8 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
 
     # SPEC AMENDMENTS (coder): the diff of the task's spec.md against its committed state
     if role == "coder":
-        check_spec_amendments(root, report_path, sections, problems, verified, facts, result["unchecked"], baseline_spec)
+        check_spec_amendments(root, report_path, sections, problems, verified, facts, result["unchecked"], baseline_spec,
+                              amend, warnings)
         check_project_specs(root, report_path, sections, problems, verified, result["unchecked"])
 
     # MUTATIONS
@@ -835,6 +990,7 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
     notes = section_text(sections, "NOTES")
     if notes and not is_none(notes):
         facts.append("NOTES: " + " ".join(notes.split())[:400])
+        warnings += unprobed_claims(sections.get("NOTES", []))
     for name in ("FAILURES", "CODE BUGS FOUND"):
         body = section_text(sections, name)
         if body and not is_none(body):
@@ -861,6 +1017,8 @@ def render(result: Dict[str, Any]) -> str:
         out += [f"{i}. {p}" for i, p in enumerate(result["problems"], 1)]
     for f in result["facts"]:
         out.append(f"- {f}")
+    for w in result["warnings"]:
+        out.append(f"- ПРЕДУПРЕЖДЕНИЕ: {w}")
     for u in result["unchecked"]:
         out.append(f"- НЕ СВЕРЕНО: {u}")
     if result["scratch_line"]:
@@ -872,6 +1030,14 @@ class Parser(argparse.ArgumentParser):
     def error(self, message: str):   # a usage error is the orchestrator's, exit 3
         print(f"report.py: {message}", file=sys.stderr)
         sys.exit(USAGE)
+
+
+def decision_id(value: str) -> str:
+    """`D3` (or `d3`) of --amend-decision; anything else is a usage error."""
+    v = value.strip().upper()
+    if not re.fullmatch(r"D\d+", v):
+        raise argparse.ArgumentTypeError(f"не номер решения: {value!r} (ожидается D{{n}}, например D3)")
+    return v
 
 
 def cmd_baseline(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
@@ -912,13 +1078,22 @@ def cmd_check(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
         langs = [(list(ns.test_glob), ns.declaration)]
     elif ns.declaration:
         langs = [(g, ns.declaration) for g, _ in langs] or [([], ns.declaration)]
+    amend = sorted(set(ns.amend_decision))
+    if amend and ns.role != "coder":
+        print("report.py: --amend-decision — только с --role coder: правки spec.md сверяются в SPEC AMENDMENTS coder'а",
+              file=sys.stderr)
+        return USAGE
     try:
         plan = verify_plan(root, ns.verify, ns.also)
     except lib.OmixflowError as e:
         print(f"report.py: план гейтов не получен: {e}", file=sys.stderr)
         return USAGE
-    result = check(ns.role, Path(ns.report), root, artifacts.strip("/"), plan, langs, gate_criteria(root), baseline,
-                   baseline_spec, ns.conflicts)
+    try:
+        result = check(ns.role, Path(ns.report), root, artifacts.strip("/"), plan, langs, gate_criteria(root), baseline,
+                       baseline_spec, ns.conflicts, amend)
+    except lib.OmixflowError as e:      # the call's error (an --amend-decision of no decision of the spec): exit 3, not a return
+        print(f"report.py: {e}", file=sys.stderr)
+        return USAGE
     print(json.dumps(result, ensure_ascii=False, indent=2) if ns.json else render(result))
     return {"ok": OK, "stopped": OK, "return": RETURN, "broken": BROKEN}[result["verdict"]]
 
@@ -944,6 +1119,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--declaration", default=None, help="regex of a test declaration; default: adapters' `tests.declaration`")
     p.add_argument("--conflicts", nargs="+", default=None,
                    help="conflicted files of a base sync (the CONFLICTS of MODE: sync); default: MERGE_MSG")
+    p.add_argument("--amend-decision", nargs="+", action="extend", default=[], type=decision_id, metavar="Dn",
+                   help="a decision whose text the orchestrator ordered changed (a review fix of the mechanism, "
+                        "not the choice): a fact, not a stop; repeatable")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_check)
     ns = ap.parse_args(argv)

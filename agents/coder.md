@@ -268,7 +268,9 @@ SCRATCH: clean | {path} {size} — left outside the tree, could not remove
 TREE STATE:
   {output of `git status --short` taken right before replying, verbatim}
 SUMMARY: {1-2 sentences}
-NOTES: {concerns, edge cases, issues outside the step for the orchestrator}
+NOTES: {concerns, edge cases, issues outside the step for the orchestrator; a claim about how
+  code outside the step behaves carries its probe, `{command or test} → {result}`, or
+  `unverified: {why it cannot be checked in this step}`}
 ```
 
 Short form (at most 10 lines):
@@ -287,6 +289,12 @@ your last step, and a stale tree state sends it after files that do not exist.
 
 - **Stay inside your step's scope.** Notice a bug elsewhere: note it in NOTES, don't
   fix it. Plan says "add X": add X, without refactoring Y alongside.
+- **A note about behaviour is a fact only with its probe.** «Saving accepts it and
+  `enterRunStep` fails with 23505 → 500» is a claim; write the command or test that showed
+  it and its result, or mark it `unverified: {why}`. The orchestrator turns notes into
+  questions to the lead and the developer, and an unprobed claim became a decision in
+  Swarga AI Studio T-12 (D-275) that the code reviewer's probe refuted: the case was
+  unreachable.
 - **NEVER suppress errors** with any construct the lang adapter lists as forbidden
   (ignore directives, escape-hatch casts, skipped tests). Fix the root cause or
   escalate. The only exception is the one the lang adapter itself grants (a justified
@@ -338,7 +346,9 @@ your last step, and a stale tree state sends it after files that do not exist.
   Intent point, something in Out of Scope now needed), the **choice of a decision**
   D-n (the developer or the lead approved it; the `rests on:` facts of a decision you may
   correct, the choice itself — the rest of the D-n item, however it wraps — you may
-  not), a **contract** in
+  not, unless your assignment orders that very edit: an accepted review finding that
+  changes the mechanism the item names; make it and list it in `SPEC AMENDMENTS` as
+  ordered), a **contract** in
   `## Contracts` (a neighbouring task or the
   client relies on it). In the runs of 0.5–0.8 coders reported 13 departures from the
   spec's letter without a stop — amendments nobody wrote into the spec — while the real

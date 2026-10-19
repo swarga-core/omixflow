@@ -9,12 +9,16 @@ Reads the plan's file lines (plan.md; S tier: the `## Steps` section of spec.md)
 forms the architect and the orchestrator write — `- CREATE: `p``, `- MODIFY `p``,
 `- **CREATE:** `p``, `Файлы: `p` (MODIFY)`, several paths on one line — and the task's
 tier from state.yaml, counts the unique paths, test files apart (the `tests.files` globs
-of every lang adapter in the chain, project extensions included) and test support apart
-(`tests.support`: fixtures, mocks, helpers — neither counts), and compares the
-non-test count with the tier's threshold from the config (`tiers.s_max_files`,
+of every lang adapter in the chain, project extensions included), test support apart
+(`tests.support`: fixtures, mocks, helpers — neither counts) and, under `specs.mode: adr`,
+the decision records apart (files under `specs.adr_dir`, default docs/decisions: each
+decision adds a record, the threshold was calibrated on code — in SwAIS T-10 and T-12
+six or seven records took a quarter of the threshold 30), and compares the non-test
+count with the tier's threshold from the config (`tiers.s_max_files`,
 `tiers.m_max_files`; L has no file threshold) and the step count with MAX_STEPS.
 
-Prints `tier`, `files`, `non_test`, `tests`, `support`, `steps`, `threshold`, `over` and the paths;
+Prints `tier`, `files`, `non_test`, `tests`, `support`, `adr` (None unless `specs.mode`
+is adr), `steps`, `threshold`, `over` and the paths;
 exit 0 under the thresholds, 1 over either (the orchestrator opens the `scope-change`
 point), 2 when the plan or the state cannot be read or the plan has no recognisable
 file line (a form the script does not know is not «zero files»). The number is a signal
@@ -160,12 +164,17 @@ def cmd_files(ns: argparse.Namespace) -> int:
     tests = set(lib.area_files(globs, files)) if globs else set()
     support_globs = test_globs(root, "support")
     support = set(lib.area_files(support_globs, files)) - tests if support_globs else set()
-    non_test = [f for f in files if f not in tests and f not in support]
+    adr_mode = str(lib.config_value(cfg, "specs.mode") or "descriptions") == "adr"
+    adr_dir = str(lib.config_value(cfg, "specs.adr_dir") or "docs/decisions").strip("/")
+    rest = [f for f in files if f not in tests and f not in support]
+    adr = set(rest) - set(lib.outside_dir(rest, adr_dir)) if adr_mode else set()   # decision records: not code
+    non_test = [f for f in rest if f not in adr]
     tier = state.get("tier")
     over_files = threshold is not None and len(non_test) > threshold
     over_steps = steps > MAX_STEPS
     result = {"plan": str(source), "tier": tier, "files": len(files), "non_test": len(non_test),
-              "tests": len(tests) if globs else None, "support": len(support), "steps": steps, "max_steps": MAX_STEPS,
+              "tests": len(tests) if globs else None, "support": len(support),
+              "adr": len(adr) if adr_mode else None, "steps": steps, "max_steps": MAX_STEPS,
               "threshold": threshold, "over": over_files or over_steps, "over_files": over_files,
               "over_steps": over_steps, "paths": files}
     if ns.json:
@@ -175,11 +184,13 @@ def cmd_files(ns: argparse.Namespace) -> int:
         tests_note = f"tests {len(tests)}" if globs else "tests not told apart: no tests.files in the lang adapters"
         if support:
             tests_note += f", test support {len(support)}"
+        if adr_mode:
+            tests_note += f", adr {len(adr)} in {adr_dir}/"
         print(f"tier: {tier}, files: {len(files)} (non-test {len(non_test)}, {tests_note}), "
               f"threshold: {threshold if threshold is not None else 'none'}, steps: {steps}/{MAX_STEPS}, "
               f"over: {'yes' if result['over'] else 'no'}")
         for f in files:
-            print(f"  {'test ' if f in tests else 'supp ' if f in support else '     '}{f}")
+            print(f"  {'test ' if f in tests else 'supp ' if f in support else 'adr  ' if f in adr else '     '}{f}")
     return OVER if result["over"] else OK
 
 

@@ -139,7 +139,10 @@ below is the default.
   in any phase unless RULES ask); decisions with a rationale, and every claim a
   decision rests on probed (a library's behaviour, a runtime's, the code's); out of
   scope explicit. Design that no caller and no project spec states is a `spec` finding:
-  it belongs to the plan's `Design`. Not an aspect: wording, section order, style.
+  it belongs to the plan's `Design`. A decision whose choice names the mechanism (a
+  function, a query, a table) instead of the behaviour is a `spec` finding: the choice is
+  frozen for the coder, so fixing the mechanism later stops the step (architect.md, «A
+  decision names behaviour, not the mechanism»). Not an aspect: wording, section order, style.
 - **Plan review** (plan, architecture, spec). The mechanical part ran before you
   (`plan.py check`: step fields present, checkpoint gates named and declared in `verify`,
   no manual check, no read-only path, paths exist, every scenario and contract in some
@@ -154,7 +157,9 @@ below is the default.
   the result into the finding: the next pass only verifies fixes and probes nothing,
   so a D-n added by a fix would otherwise carry an unprobed `rests on`; dependency ordering; step
   atomicity and verifiability; `Design` consistent with the spec's contracts and
-  decisions; an external resource (a stand behind a VPN, someone else's merge, a device)
+  decisions; a test checkpoint that keeps existing tests «unchanged» while its own step's
+  Design changes the behaviour those tests pin is a `plan` finding (Swarga AI Studio T-14
+  step 3: the coder resolved it mid-step); an external resource (a stand behind a VPN, someone else's merge, a device)
   only in a step of its own that functional steps do not depend on; seams with branches
   in flight (the orchestrator's PARALLEL_BRANCHES or PARTS_IN_FLIGHT, when given) named
   by the steps that touch them; a step that switches code while a later step removes the

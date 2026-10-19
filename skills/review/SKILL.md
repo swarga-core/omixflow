@@ -116,7 +116,8 @@ coder, tester и coder снова делят один незакоммиченн
 Вид ответа (`failed`, `refused`, без файла) — как в implement 2.2; затем отчёт сверяет
 скрипт: `python3 {корень плагина}/scripts/report.py check --role coder|tester --report
 {REPORT_PATH} --root {PROJECT_ROOT} --baseline {файл}` без `--also` (у пакета фиксов
-гейтов checkpoint нет); код 0 — вердикт с исходами гейтов и NOTES, код 1 — текст
+гейтов checkpoint нет) [у coder'а `--amend-decision D{n}` — когда принятый finding меняет
+механизм, названный в тексте пункта D-n, а не выбор: implement 2.2]; код 0 — вердикт с исходами гейтов и NOTES, код 1 — текст
 вывода исполнителю как есть, код 2 — «дождись гейтов и отчитайся» (`runtime.md`, «Отчёт
 агента»), код 3 — ошибка вызова, поправить. Перед
 каждым пакетом — порог ротации (`tiers.md`). Re-review: SendMessage ревьюеру кода из
