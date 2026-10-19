@@ -327,6 +327,48 @@ class ProbeTests(unittest.TestCase):
             self.assertEqual((plain / "mod.py").read_text(), SOURCE)
             self.assertFalse((plain / ".omixflow-probes").exists())     # re-review: nothing stays in the project
 
+    def test_a_run_in_which_no_test_ran_is_never_a_green(self):
+        """G-85, SwAIS T-14: a vitest filter that matches nothing — «92 skipped», exit 0 — made the
+        baseline green and twelve mutants GREEN. With `tests.ran` in the lang adapter neither counts."""
+        (self.root / ".claude" / "omixflow").mkdir(parents=True)
+        (self.root / ".claude" / "omixflow" / "flow.yaml").write_text("version: 1\nlang: [ts]\n")
+        probe.ran_patterns.cache_clear()
+        skipped = f"{sys.executable} -c \"print(' Tests  92 skipped (92)')\""
+        code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py", "--cmd", skipped,
+                           "--replace", "return a + b", "--with", "return a - b")
+        self.assertEqual(code, 2, out)
+        self.assertIn("no test ran without the mutant", out)
+        code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py", "--cmd", skipped,
+                           "--no-baseline", "--replace", "return a + b", "--with", "return a - b")
+        self.assertEqual(code, 2, out)                 # the mutant's exit 0 is no GREEN either
+        self.assertIn("no test ran under the mutant", out)
+        self.assert_clean()
+        passing = f"{sys.executable} test_add.py {self.root} && echo ' Tests  1 passed (1)'"
+        code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py", "--cmd", passing,
+                           "--replace", "return a + b", "--with", "return a - b")
+        self.assertEqual(code, 0, out)
+        self.assertIn("→ RED", out)
+        # a project whose runner prints no «N passed»: its extension of the adapter turns the check off
+        ext = self.root / ".claude" / "omixflow" / "lang" / "ts.md"
+        ext.parent.mkdir(parents=True)
+        ext.write_text("---\nport: lang\nname: ts\nextends: omixflow:ts\ntests:\n  ran: ''\n---\n")
+        probe.ran_patterns.cache_clear()
+        code, out, _ = run("run", "--root", str(self.root), "--test", "t", "--file", "mod.py",
+                           "--cmd", f"{sys.executable} test_add.py {self.root}",
+                           "--replace", "return a + b", "--with", "return a - b")
+        self.assertEqual(code, 0, out)
+        pkg = self.root / "pkg"                      # review F2: a package probe finds the project's extension
+        pkg.mkdir()
+        probe.ran_patterns.cache_clear()
+        self.assertEqual(probe.ran_patterns(pkg), ())
+        ext.unlink()
+        probe.ran_patterns.cache_clear()
+        self.assertEqual(probe.ran_patterns(pkg), ("\\b[1-9]\\d* passed\\b",))
+        for text, ran in ((" Tests  0 passed | 92 skipped (92)", False), ("\x1b[32m 7 passed\x1b[39m", True)):
+            with self.subTest(text=text):
+                self.assertEqual(probe.tests_ran(text, probe.ran_patterns(pkg)), ran)
+        probe.ran_patterns.cache_clear()
+
     def test_restore_without_a_file_puts_back_every_copy_left(self):
         for name, mutant in (("mod.py", "mutant"), ("other.py", "Y = 2\n")):
             original = (self.root / name).read_text()

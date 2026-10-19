@@ -5,9 +5,11 @@ Run: python3 -m unittest discover tests
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -215,6 +217,45 @@ class AdapterTests(unittest.TestCase):
     def test_plugin_agents_exist_for_all_roles(self):
         for role in lib.ROLES:
             self.assertTrue((lib.PLUGIN_ROOT / "agents" / f"{role}.md").exists(), role)
+
+
+class WtSetupTests(unittest.TestCase):
+    """G-76, SwAIS T-13: the hook's `pnpm install` failed, the session learned it from a missing
+    node_modules. The outcome now reaches the session and Start."""
+
+    def hook(self, setup: str) -> tuple:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        wt = Path(tmp.name) / "wt"
+        (wt / ".claude" / "omixflow").mkdir(parents=True)
+        subprocess.run(["git", "-C", str(wt), "init", "-q"], check=True)
+        (wt / ".claude" / "omixflow" / "flow.yaml").write_text(f"version: 1\nworkspace: {{setup: {json.dumps(setup)}}}\n")
+        env = {**os.environ, "OMIXFLOW_WT_SETUP_LOG": str(Path(tmp.name) / "log")}
+        proc = subprocess.run(["bash", str(SCRIPTS / "wt-setup.sh")], input=json.dumps({"cwd": str(wt)}),
+                              capture_output=True, text=True, env=env)
+        status = (wt / ".git" / "omixflow-wt-setup.status").read_text()
+        return proc, status
+
+    def test_a_failed_setup_is_in_the_status_file_and_the_sessions_context(self):
+        proc, status = self.hook("echo 'ERR_PNPM_UNSUPPORTED_ENGINE wanted node >=24' >&2; exit 1")
+        self.assertEqual(proc.returncode, 0)                # a PostToolUse hook never blocks
+        self.assertTrue(status.startswith("FAILED\n"), status)
+        self.assertIn("ERR_PNPM_UNSUPPORTED_ENGINE", status)
+        context = json.loads(proc.stdout)["hookSpecificOutput"]
+        self.assertEqual(context["hookEventName"], "PostToolUse")
+        self.assertIn("wt-setup FAILED", context["additionalContext"])
+        self.assertIn("ERR_PNPM_UNSUPPORTED_ENGINE", context["additionalContext"])
+
+    def test_a_process_the_setup_leaves_running_does_not_hold_the_hook(self):
+        """Review F12: with `$(…)` a background child holding stdout kept the hook until it exited."""
+        started = time.time()
+        proc, status = self.hook("sleep 30 & echo started")
+        self.assertLess(time.time() - started, 15)
+        self.assertEqual((proc.returncode, status.splitlines()[0]), (0, "done"))
+
+    def test_a_good_setup_writes_done_and_says_nothing(self):
+        proc, status = self.hook("echo installed")
+        self.assertEqual((proc.returncode, proc.stdout, status.splitlines()[0]), (0, "", "done"))
 
 
 class ScriptTests(unittest.TestCase):

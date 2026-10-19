@@ -16,7 +16,10 @@ MUTATIONS line. The recipe is the one of the runs of 0.4–0.7:
 
 1. baseline: `--cmd` runs once on the unmutated tree; a test that is not green there
    proves nothing (a typo in the command, a filter that matches nothing, exit 127) — the
-   probe is not run (`--no-baseline` skips this when the same command was just green);
+   probe is not run (`--no-baseline` skips this when the same command was just green). A
+   green run in which no test ran — the output has no line of the lang adapter's `tests.ran`
+   (vitest prints «92 skipped» and exits 0 for a filter that matches nothing, SwAIS T-14) —
+   is not run either, and so is a mutant run that exits 0 without one: never a GREEN;
 2. copy PATH into the tree's git directory, `{git-dir}/omixflow-probes/{PATH relative to
    the worktree's top level}.orig` — the same place whatever DIR inside the worktree is
    given (outside git: `{DIR}/.omixflow-probes/`) — never next to the file: a loader that
@@ -93,6 +96,7 @@ import signal
 import subprocess
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -111,7 +115,7 @@ _child: Optional[subprocess.Popen] = None   # the command running now, killed wi
 NOT_RUN_PHRASES = ("OLD occurs ", "needs exactly 1", "patch does not apply", "the patch touches",
                    "left unfinished", "is not green without the mutant", "differs from before the probe",
                    "--rebuild after the restore failed", "file not found: ", "no mutation: give",
-                   "nothing to restore")
+                   "nothing to restore", "no test ran ")
 
 
 def unescape(text: str) -> str:
@@ -164,8 +168,40 @@ def run_cmd(cmd: str, root: Path, tail: int, timeout: float) -> Dict[str, Any]:
         _child = None
     text = (out or b"").decode("utf-8", errors="replace")
     lines = text.splitlines()
-    return {"exit": proc.returncode, "timed_out": timed_out,
+    return {"exit": proc.returncode, "timed_out": timed_out, "text": text,
             "tail": "\n".join(lines[-tail:]) if tail > 0 else ""}
+
+
+@lru_cache(maxsize=None)
+def ran_patterns(root: Path) -> Tuple[str, ...]:
+    """`tests.ran` of the project's lang adapters: a line of output that proves tests were run.
+    A filter that matches no test exits 0 too (vitest: «92 skipped», SwAIS T-14 — twelve false
+    GREEN probes); without the key in the adapter nothing is checked."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import omixflow_lib as lib
+        project = lib.find_project_root(root)      # a package probe runs with `--root {package}`
+        cfg = lib.load_config(project)
+        out: List[str] = []
+        for name in lib.adapters_for(cfg, "lang"):
+            value = None        # the leaf's `ran` wins within a chain; `ran: ''` in a project's extension turns it off
+            for adapter in lib.resolve_adapter("lang", name, project):
+                tests = adapter.meta.get("tests") or {}
+                if isinstance(tests, dict) and "ran" in tests:
+                    value = tests["ran"]
+            if value and str(value) not in out:
+                out.append(str(value))
+        return tuple(out)
+    except Exception:       # no config, no PyYAML, a broken adapter: no check, as before 0.9.4
+        return ()
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def tests_ran(text: str, patterns: Tuple[str, ...]) -> bool:
+    plain = ANSI.sub("", text)
+    return not patterns or any(re.search(p, plain, re.M) for p in patterns)
 
 
 def resolve(root: Path, given: str) -> Path:
@@ -362,6 +398,10 @@ def probe(root: Path, name: str, file: str, cmd: str, replace: Optional[str] = N
         if base["timed_out"] or base["exit"] != 0:
             return not_run("the test is not green without the mutant (wrong command, filter or a failing test)",
                            base["tail"])
+        if not tests_ran(base.get("text", ""), ran_patterns(root)):
+            return not_run("no test ran without the mutant: exit 0, but no line of `tests.ran` (lang adapter) — "
+                           "a filter that matches nothing? filter by the test's name, not the describe's",
+                           base["tail"])
     before_diff = git(root, "diff", "--", str(path))
     original = path.read_bytes()
     original_mtime = os.stat(path).st_mtime    # may already be ahead of now after an earlier restore
@@ -385,6 +425,9 @@ def probe(root: Path, name: str, file: str, cmd: str, replace: Optional[str] = N
         test = run_cmd(cmd, root, tail, timeout)
         result.update(test_exit=test["exit"], tail=test["tail"],
                       outcome="RED" if (test["exit"] != 0 or test["timed_out"]) else "GREEN")
+        if result["outcome"] == "GREEN" and not tests_ran(test.get("text", ""), ran_patterns(root)):
+            return not_run("no test ran under the mutant: exit 0, but no line of `tests.ran` (lang adapter) — "
+                           "not a GREEN; a filter that matches nothing?", test["tail"])
         if test["timed_out"]:
             result["mutation"] += f" (timed out after {timeout:.0f} s)"
         return result

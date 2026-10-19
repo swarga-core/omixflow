@@ -19,7 +19,11 @@
 - Установка зависимостей: хук `PostToolUse[EnterWorktree]` выполняет
   `workspace.setup` из конфига внутри нового worktree; при непустом
   `workspace.submodules` перед этим инициализирует submodule'ы. Лог:
-  `~/.claude/omixflow-wt-setup.log`.
+  `~/.claude/omixflow-wt-setup.log`; итог — `{git-dir}/omixflow-wt-setup.status` (`running` на
+  время работы, затем `done` или `FAILED` с хвостом ошибки; `running` после хука — он оборван), сбой хук сообщает и в контекст сессии (`additionalContext`), и Start
+  останавливается на нём (в Swarga AI Studio T-13 установка зависимостей упала на версии
+  рантайма, и сессия узнала об этом только по пустому каталогу зависимостей). Фоновая сессия
+  берёт PATH процесса `claude`, а не интерактивной оболочки: версия инструментов может не совпасть.
 - Артефакты, коммиты и спавн агентов cwd-relative, в worktree изолируются сами.
 
 ## Research-worktree

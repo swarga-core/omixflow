@@ -1117,6 +1117,33 @@ class AgentRulesLint(unittest.TestCase):
                 self.assertNotIn("`.orig` copy next to the file is the exception", text)
         self.assertIn("{SCRATCH_DIR}/{label}/{name}.orig", self.flat("agents/coder.md"))
 
+    def test_release_0_9_4_rules_are_written_where_the_agents_and_skills_read_them(self):
+        """0.9.4, SwAIS T-13…T-16: the account limit, the worktree hook, the sync report, the
+        lead's file map, `it.each`, `git -C` in kanban, a probe with no test run."""
+        lead_md, lead_skill = self.flat("protocol/lead.md"), self.flat("skills/lead/SKILL.md")
+        self.assertIn("**Лимит аккаунта.**", lead_md)
+        self.assertIn("`limited` (лимит аккаунта сброшен, `resets_at`)", lead_skill)
+        self.assertIn("Обрыв лимитом аккаунта", self.flat("protocol/runtime.md"))
+        self.assertIn("omixflow-wt-setup.status", self.flat("skills/start/SKILL.md"))
+        self.assertIn("omixflow-wt-setup.status", self.flat("protocol/worktree.md"))
+        self.assertIn("--conflicts {CONFLICTS}", self.flat("skills/implement/SKILL.md"))
+        self.assertIn("`RESOLUTIONS:` section", self.flat("agents/coder.md"))
+        self.assertIn("`--add-file …` (дополняет", lead_skill)
+        self.assertNotIn("или `git -C .tasks/board` только для чтения", self.flat("adapters/tracker/kanban.md"))
+        meta, _ = lib.parse_frontmatter(ROOT / "adapters" / "lang" / "ts.md")
+        rx = re.compile(meta["tests"]["declaration"])
+        for line in ("it.each([1])('n', () => {})", "test.each`a`('t', () => {})", "it.only('o')", "test.concurrent('c')"):
+            self.assertTrue(rx.match(line), line)
+        for line in ("test.describe('d', () => {})", "test.beforeEach(() => {})", "test.step('s')", "test.use({})"):
+            self.assertFalse(rx.match(line), line)                 # review F13: Playwright's hooks are not tests
+        self.assertTrue(meta["tests"]["ran"])
+        for path in sorted((ROOT / "adapters" / "tracker").glob("*.md")):   # G-80: no `git -C` advice for a worktree session
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if "git -C" in line:
+                    with self.subTest(file=path.name, line=line):
+                        self.assertIn("основного дерева", line)
+        self.assertIn("ran: regex", self.flat("adapters/lang/PORT.md"))
+
     def test_a_failed_agent_gets_the_same_assignment_again(self):
         """T-7: the reviewer broke off on ENOTFOUND before writing FINDINGS_PATH."""
         runtime = self.flat("protocol/runtime.md")

@@ -15,8 +15,10 @@
     lead.py [--journal PATH] gotcha --text TEXT --task T [--route R] [--by S]
     lead.py [--journal PATH] gotcha-link G-n --task T
     lead.py [--journal PATH] gotcha-route G-n --route plugin|project|memory|reject --where TEXT
-    lead.py [--journal PATH] register NAME [--task T] [--dir D] [--phase P] [--branch B]
-                                           [--base B] [--worktree W] [--asked N] [--file F ...]
+    lead.py [--journal PATH] register NAME [--task T] [--dir D] [--phase P] [--progress TEXT] [--branch B]
+                                           [--base B] [--worktree W] [--asked N]
+                                           [--file F ...]       # the whole file map: replaces it
+                                           [--add-file F ...]   # files added to the map
     lead.py [--journal PATH] list [--type decision|escalation|rule|obligation|approval|merge|gotcha|session]
                                   [--task T] [--open] [--trigger TEXT]
     lead.py [--journal PATH] show [--task T]
@@ -41,7 +43,7 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import omixflow_lib as lib  # noqa: E402
@@ -129,7 +131,9 @@ def fold(events: List[Dict[str, Any]]) -> Dict[str, Dict[str, Dict[str, Any]]]:
             out["gotcha"][e["ref"]]["routed"] = {"route": e["route"], "where": e["where"], "ts": e["ts"]}
         elif t == "session":
             cur = out[t].setdefault(e["name"], {"type": "session", "name": e["name"]})
-            cur.update({k: v for k, v in e.items() if v is not None and k != "type"})
+            cur.update({k: v for k, v in e.items() if v is not None and k not in ("type", "add_files")})
+            if e.get("add_files"):      # `--add-file`: the map grows, never shrinks (G-89)
+                cur["files"] = list(dict.fromkeys([*(cur.get("files") or []), *e["add_files"]]))
         elif t == "resolve":
             out["escalation"][e["ref"]]["resolved"] = {"ts": e["ts"], "answer": e["answer"],
                                                        "decision": e.get("decision")}
@@ -327,12 +331,42 @@ def cmd_gotcha_route(ns: argparse.Namespace) -> int:
     return write(ns, build)
 
 
+REGISTER_PHASES = ("done", "retired")   # besides the pipeline's phases (state.py PHASES)
+
+
+def pipeline_phases() -> Tuple[str, ...]:
+    try:
+        import state as st      # PyYAML only when a state is read
+        return tuple(st.PHASES) + REGISTER_PHASES
+    except Exception:
+        return ()
+
+
 def cmd_register(ns: argparse.Namespace) -> int:
+    phases = pipeline_phases()
+    if ns.phase is not None and phases and ns.phase not in phases:
+        raise lib.OmixflowError(f"--phase {ns.phase!r}: одна из {', '.join(phases)}; шаг, коммит, пауза — "
+                                "в --progress (SwAIS T-15: «implement (шаг 2/7 74d1e05)» в фазе)")
+    dropped: List[str] = []
+
     def build(events, records):
+        current = records["session"].get(ns.name) or {}
+        before = current.get("files") or []
+        if ns.file:
+            dropped.extend(f for f in before if f not in ns.file and f not in ns.add_file)
+        # a phase change without --progress clears the old progress («шаг 2/7» is not the progress of
+        # `done`); the same phase again (a register after a restart, `undelivered`) keeps it — a pause too
+        changed = ns.phase is not None and ns.phase != current.get("phase")
+        progress = ns.progress if ns.progress is not None else ("" if changed else None)
         return ({"type": "session", "name": ns.name, "task": ns.task, "dir": ns.dir,
-                 "phase": ns.phase, "branch": ns.branch, "base": ns.base,
-                 "worktree": ns.worktree, "asked": ns.asked, "files": ns.file or None}, ns.name)
-    return write(ns, build)
+                 "phase": ns.phase, "progress": progress, "branch": ns.branch, "base": ns.base,
+                 "worktree": ns.worktree, "asked": ns.asked, "files": ns.file or None,
+                 "add_files": ns.add_file or None}, ns.name)
+    code = write(ns, build)
+    if dropped:     # `--file` is the whole map (SwAIS T-15, T-16: «дополнения» стёрли карты из 25 и 21)
+        print(f"карта {ns.name}: --file заменил её, выпали {len(dropped)}: {', '.join(dropped[:5])}"
+              f"{' …' if len(dropped) > 5 else ''}; дополнять — --add-file", file=sys.stderr)
+    return code
 
 
 def select(ns: argparse.Namespace) -> List[Dict[str, Any]]:
@@ -381,7 +415,7 @@ def describe(rec: Dict[str, Any]) -> str:
         return f"{rec['id']} [{', '.join(rec['tasks'])}] {rec['text']} — {state}"
     if t == "merge":
         return f"{rec['id']} {rec['task']}: {rec['branch']} → {rec['into']} @ {rec['commit']} ({rec['approval']})"
-    fields = ", ".join(f"{k}={rec[k]}" for k in ("task", "phase", "branch", "worktree") if rec.get(k))
+    fields = ", ".join(f"{k}={rec[k]}" for k in ("task", "phase", "progress", "branch", "worktree") if rec.get(k))
     return f"{rec['name']}: {fields}"
 
 
@@ -478,7 +512,8 @@ def board_body(records: Dict[str, Dict[str, Dict[str, Any]]], tasks: Optional[Li
         task = s.get("task") or "—"
         m = merges.get(task)
         merged = f"{m['id']} {m['commit']} → {m['into']}" if m else "—"
-        rows.append(f"| {task} | {s['name']} | {s.get('phase') or '—'} | {s.get('branch') or '—'} "
+        phase = (s.get('phase') or '—') + (f" ({s['progress']})" if s.get('progress') else "")
+        rows.append(f"| {task} | {s['name']} | {phase} | {s.get('branch') or '—'} "
                     f"| {merged} | {open_esc.get(task, 0) or '—'} |")
     return "\n".join(rows)
 
@@ -580,10 +615,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     p = sub.add_parser("register")
     p.add_argument("name")
-    for flag in ("--task", "--dir", "--phase", "--branch", "--base", "--worktree"):
+    for flag in ("--task", "--dir", "--phase", "--progress", "--branch", "--base", "--worktree"):
         p.add_argument(flag, default=None)
     p.add_argument("--asked", type=int, default=None)
-    p.add_argument("--file", action="append", default=[])
+    p.add_argument("--file", action="append", default=[], help="the whole file map: replaces the previous one")
+    p.add_argument("--add-file", action="append", default=[], help="files added to the map")
     p.set_defaults(fn=cmd_register)
 
     p = sub.add_parser("precedents")

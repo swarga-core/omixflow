@@ -119,7 +119,7 @@ tests» — one call per probe with `{PLUGIN_ROOT}/scripts/probe.py run` (or `ba
 step's probes, the JSON spec in SCRATCH_DIR), which runs the test green first, mutates, runs
 it again, restores with `cp` and prints the MUTATIONS line to copy as is; `--check` and
 `--rebuild` from the lang adapter; exit 2 (`PROBE NOT RUN`) means fix the call, never a
-MUTATIONS line; the Bash tool's timeout at 600000 ms, a call expected to run past nine minutes
+MUTATIONS line («no test ran»: the filter matches no test — filter by the test's own name); the Bash tool's timeout at 600000 ms, a call expected to run past nine minutes
 through `gate.py start {label}-probes --root {PROJECT_ROOT} -- 'python3 {PLUGIN_ROOT}/scripts/probe.py
 batch …'` and `gate.py poll {label}-probes --root {PROJECT_ROOT} --timeout 540 --tail 200`;
 MUTATIONS has a line for every new test, as that section says. Every new test and every

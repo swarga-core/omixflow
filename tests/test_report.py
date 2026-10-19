@@ -203,6 +203,124 @@ class ReportCheckTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("MUTATIONS: none, но новых тестов 2", out)
 
+    def test_each_only_and_concurrent_declarations_are_counted(self):
+        """G-78, SwAIS T-13: «новых тестов 5» at 7 — the ts adapter's regex missed `it.each(…)(…)`."""
+        (self.root / "src" / "a.test.ts").write_text(
+            TEST_FILE + "it.each([1, 2])('n %s', (n) => {})\ntest.each`a`('t', () => {})\n"
+                        "it.only('o', () => {})\ntest.concurrent('c', () => {})\nconst item = list.items(1)\n"
+                        "test.describe('group', () => {})\ntest.beforeEach(() => {})\n")
+        self.write(mutations=MUTATION_LINES)
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("новых тестов 6 (src/a.test.ts: новых тестов 6), строк с исходом 2", out)
+
+    def sync_in_progress(self) -> None:
+        """A task branch and a moved base, both adding tests to one file; the merge stops on the
+        conflict and the coder resolves it keeping both sides plus one test of his own (SwAIS T-14:
+        the base brought 93 tests of T-13)."""
+        self.git("checkout", "-q", "--", "src/a.ts", ".tasks/T-1/state.yaml")
+        (self.root / "src" / "a.test.ts").unlink()
+        common = "import { it } from 'vitest'\nit('base', () => {})\n"
+        (self.root / "src" / "b.test.ts").write_text(common)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "shared")
+        self.git("checkout", "-q", "-b", "task/T-1")
+        (self.root / "src" / "b.test.ts").write_text(common + "it('task', () => {})\n")
+        self.git("commit", "-q", "-am", "task step")
+        self.git("checkout", "-q", "main")
+        (self.root / "src" / "b.test.ts").write_text(common + "it('neighbour', () => {})\n")
+        (self.root / "src" / "c.test.ts").write_text("import { it } from 'vitest'\n"
+                                                     + "".join(f"it('n{i}', () => {{}})\n" for i in range(5)))
+        (self.root / "docs.md").write_text("# Заметка соседа\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "neighbour")
+        self.git("checkout", "-q", "task/T-1")
+        subprocess.run(["git", "-C", str(self.root), "merge", "main"], capture_output=True)   # stops on the conflict
+        (self.root / "src" / "b.test.ts").write_text(
+            common + "it('task', () => {})\nit('neighbour', () => {})\nit('both — сшивка', () => {})\n")
+        self.git("add", "src/b.test.ts")
+
+    def sync_report(self, **changes: str) -> str:
+        body = REPORT.format(tree=self.real_tree(), mutations="  - b.test.ts: both ← M1 b.ts → RED\n")
+        body = body.replace("STEP: 1 — add\nFILES CREATED:\n  - src/a.test.ts (2 tests)\nFILES MODIFIED:\n  - src/a.ts (add, sub)\n",
+                            "STEP: sync1 — merge main into task/T-1\nRESOLUTIONS:\n  - src/b.test.ts — both sides kept, a seam test added\n")
+        body = body.replace("BYTES CHECK: n/a: ASCII only", "BYTES CHECK:\n  - src/b.test.ts: Cyrillic; invisible and escapes: none")
+        for old, new in changes.items():
+            self.assertIn(old, body)
+            body = body.replace(old, new)
+        return body
+
+    def test_a_sync_report_counts_only_what_neither_side_had(self):
+        """G-88: the sync report has RESOLUTIONS instead of FILES, and the tests the base brought
+        are not the coder's: 1 new test, not 7; the neighbour's Cyrillic file is not his either."""
+        self.sync_in_progress()
+        self.write(text=self.sync_report())
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("RESOLUTIONS: все 1 конфликтных файлов названы", out)
+        self.assertIn("MUTATIONS: новых тестов 1", out)
+        self.assertIn("синхронизация: идёт слияние с MERGE_HEAD", out)  # three-way
+        self.write(text=self.sync_report(**{"  - b.test.ts: both ← M1 b.ts → RED\n": ""}).replace(
+            "MUTATIONS:\n  Probes by a script in SCRATCH_DIR; checksums matched afterwards, no .orig left.\n",
+            "MUTATIONS: none: no new tests\n"))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("MUTATIONS: none, но новых тестов 1 (src/b.test.ts: новых тестов 1)", out)
+        self.write(text=self.sync_report(**{"  - src/b.test.ts — both sides kept, a seam test added\n": "  - all merged\n"}))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("RESOLUTIONS не называет конфликтные файлы: ['src/b.test.ts']", out)
+        code, out = self.check("--also", "build", "--conflicts", "src/x.ts")     # the orchestrator's list wins
+        self.assertIn("['src/x.ts']", out)
+
+    def test_a_line_both_sides_added_and_the_merge_keeps_twice_is_not_new(self):
+        """Review F1, SwAIS T-16: `it.each([` — base 6, HEAD 7, MERGE_HEAD 7, merged 8: the larger
+        side gave 7 and one false new test in an auto-merged file the coder never touched."""
+        self.git("checkout", "-q", "--", "src/a.ts", ".tasks/T-1/state.yaml")
+        (self.root / "src" / "a.test.ts").unlink()
+        head = "import { it } from 'vitest'\nit.each([1])('a %s', () => {})\n"
+        (self.root / "src" / "d.test.ts").write_text(head + "// middle\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "shared")
+        self.git("checkout", "-q", "-b", "task/T-1")
+        # a multi-line `it.each([` — the same line on both sides, as in T-16's props.test.ts
+        (self.root / "src" / "d.test.ts").write_text("it.each([\n  2,\n])('t %s', () => {})\n" + head + "// middle\n")
+        self.git("commit", "-q", "-am", "task adds an each at the top")
+        self.git("checkout", "-q", "main")
+        (self.root / "src" / "d.test.ts").write_text(head + "// middle\nit.each([\n  3,\n])('n %s', () => {})\n")
+        (self.root / "src" / "e.ts").write_text("export const e = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "neighbour adds an each at the bottom")
+        self.git("checkout", "-q", "task/T-1")
+        subprocess.run(["git", "-C", str(self.root), "merge", "--no-ff", "--no-commit", "main"], capture_output=True)
+        merged = (self.root / "src" / "d.test.ts").read_text()
+        self.assertEqual(merged.count("it.each(["), 3)         # clean auto-merge: both added an `it.each([` line
+        body = REPORT.format(tree=self.real_tree(), mutations="")
+        body = body.replace("STEP: 1 — add\nFILES CREATED:\n  - src/a.test.ts (2 tests)\nFILES MODIFIED:\n  - src/a.ts (add, sub)\n",
+                            "STEP: sync1 — merge main into task/T-1\nRESOLUTIONS:\n  - none: no conflicts\n")
+        body = body.replace("MUTATIONS:\n  Probes by a script in SCRATCH_DIR; checksums matched afterwards, no .orig left.\n",
+                            "MUTATIONS: none: no new tests\n")
+        self.write(text=body)
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("новых тестов 1", out)
+        self.assertEqual(report.sync_new_lines(self.root, "src/d.test.ts", "MERGE_HEAD",
+                                               report.sync_base(self.root, "MERGE_HEAD")), [])
+        self.assertEqual(report.sync_new_lines(self.root / "src", "d.test.ts", "MERGE_HEAD",   # review F10: a nested
+                                               report.sync_base(self.root, "MERGE_HEAD")), [])  # root reads `./{path}`
+
+    def test_conflicts_after_the_merge_is_committed_say_so(self):
+        self.write()
+        code, out = self.check("--also", "build", "--conflicts", "src/a.ts")
+        self.assertIn("--conflicts без идущего слияния", out)
+
+    def test_a_step_report_outside_a_merge_still_needs_files(self):
+        self.write(text=REPORT.format(tree=self.tree(), mutations=MUTATION_LINES).replace(
+            "FILES CREATED:\n  - src/a.test.ts (2 tests)\nFILES MODIFIED:\n  - src/a.ts (add, sub)\n", ""))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("нет разделов: FILES", out)
+
     def test_a_changed_test_file_without_new_tests_needs_no_line_but_a_replaced_test_does(self):
         self.git("add", "src/a.test.ts")
         self.git("commit", "-q", "-m", "tests")
@@ -224,7 +342,9 @@ class ReportCheckTests(unittest.TestCase):
 
     def test_probe_py_batch_output_is_accepted_as_the_mutations_block(self):
         (self.root / "mod.py").write_text("def add(a, b):\n    return a + b\n")
-        (self.root / "t.py").write_text("import sys\nsys.path.insert(0, sys.argv[1])\nfrom mod import add\nassert add(2, 3) == 5\n")
+        # a run prints the runner's summary: the ts adapter's `tests.ran` wants a «N passed» line (G-85)
+        (self.root / "t.py").write_text("import sys\nsys.path.insert(0, sys.argv[1])\nfrom mod import add\n"
+                                        "assert add(2, 3) == 5\nprint(' Tests  1 passed (1)')\n")
         (self.root / "probes.json").write_text(json.dumps([
             {"test": "a.test.ts: adds", "file": "mod.py", "cmd": f"{sys.executable} -B t.py {self.root}",
              "replace": "return a + b", "with": "return a - b"},

@@ -139,6 +139,37 @@ class JournalTests(unittest.TestCase):
         self.assertEqual((s["task"], s["phase"], s["branch"]), ("AL-1", "start", "task/AL-1"))
         self.assertEqual(s["files"], ["src/a.ts", "src/b.ts"])
 
+    def test_add_file_grows_the_map_and_file_warns_when_it_shrinks(self):
+        """G-89, SwAIS T-15, T-16: «дополнения» `--file` из 1–3 файлов стёрли карты из 25 и 21,
+        `overlaps` дал [] при 15 общих файлах."""
+        self.ok("register", "T-15", "--task", "T-15", "--phase", "spec", "--file", "a.ts", "--file", "b.ts")
+        self.ok("register", "T-16", "--task", "T-16", "--phase", "spec", "--file", "b.ts", "--file", "c.ts")
+        self.assertEqual(json.loads(self.ok("overlaps")), [{"a": "T-15", "b": "T-16", "files": ["b.ts"]}])
+        self.ok("register", "T-15", "--phase", "implement", "--progress", "шаг 2/7 74d1e05", "--add-file", "d.ts")
+        self.ok("register", "T-16", "--add-file", "d.ts", "--add-file", "b.ts")
+        files = {s["name"]: s["files"] for s in self.records("--type", "session")}
+        self.assertEqual(files, {"T-15": ["a.ts", "b.ts", "d.ts"], "T-16": ["b.ts", "c.ts", "d.ts"]})
+        self.assertEqual(json.loads(self.ok("overlaps")), [{"a": "T-15", "b": "T-16", "files": ["b.ts", "d.ts"]}])
+        self.assertIn("progress=шаг 2/7 74d1e05", self.ok("show"))
+        self.ok("register", "T-15", "--phase", "implement", "--dir", "x")    # re-review N2: the same phase keeps it
+        self.assertIn("progress=шаг 2/7 74d1e05", self.ok("show"))
+        self.ok("register", "T-15", "--phase", "review")           # review F5: a new phase drops the old progress
+        self.assertNotIn("progress=", self.ok("show"))
+        code, _, err = self.call("register", "T-16", "--file", "b.ts", "--add-file", "c.ts", "--add-file", "d.ts")
+        self.assertEqual((code, err), (0, ""))                       # review F11: nothing dropped
+        code, _, err = self.call("register", "T-15", "--file", "e.ts")     # a whole new map: allowed, but said
+        self.assertEqual(code, 0, err)
+        self.assertIn("выпали 3: a.ts, b.ts, d.ts", err)
+        self.assertIn("--add-file", err)
+
+    def test_phase_is_a_pipeline_phase_not_free_text(self):
+        code, _, err = self.call("register", "T-15", "--phase", "implement (шаг 2/7 74d1e05)")
+        self.assertEqual(code, 2)
+        self.assertIn("--progress", err)
+        for phase in ("refine", "implement", "finalize", "done", "retired"):
+            with self.subTest(phase=phase):
+                self.assertEqual(self.call("register", "T-15", "--phase", phase)[0], 0)
+
     def test_bad_references_are_rejected_and_not_written(self):
         self.decide()
         before = self.journal.read_text(encoding="utf-8")

@@ -46,14 +46,22 @@ taken name (`T-18 (2)`): exit 3 with the `id` and `actual_name` it got. Terminal
 Terminal window with `cd DIR && claude -n NAME … PROMPT`, exit 0; no osascript, or it
 failed or timed out: the command for the developer, exit 4 (check whether a window opened).
 
-`status`: `{name, id, kind, status, state, cwd}` of the project's sessions, oldest first.
+`status`: `{name, id, kind, status, state, cwd, limited, limited_until}` of the project's sessions,
+oldest first; `limited` — the session's last model reply is the account's usage limit,
+`limited_until` — its reset (UTC; null without one or without a limit). A reset in the past with
+`limited: true` — the session has not answered since: it waits for an `advisory`.
 
 `watch`: polls until a named session needs attention, then prints `{"events": [{"name",
 "state", "id"}], "known": {NAME: STATE}}`, exit 0. A permission dialog or a question to the
 developer gives no idle notice, only the session status `waiting`. Not `state: blocked`:
 the harness sets it on a session that ended its turn waiting for a message too (T-18:
 «Жду decision» — `idle`, `blocked`). A session that left the active list is `stopped`
-(`status: null`) or `absent` (not listed). An event is a change into one of these, against
+(`status: null`) or `absent` (not listed). A session whose last model reply is the account's
+usage limit is `limited` (with `resets_at`; `known` keeps it as `limited@{resetsAt}`, so a new
+limit after the advisory is a new event), an event only after its reset plus a minute; while the
+lead itself is limited — its own transcript ends with a limit not yet reset, or a watched session
+is in one and none has replied since — no event comes out at all: the lead an event wakes then is
+limited too. An event is a change into one of these, against
 --known and the previous poll; pass `known` of the output to the next watch. One watch per
 LEAD and project: a new one ends the previous (its pid in the git directory of DIR,
 `omixflow-sessions/watch-{LEAD}.pid`), which prints `{"superseded": true}` and exits 5.
@@ -94,7 +102,9 @@ SUPERSEDED = 5
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]+$")
 BACKGROUNDED_RE = re.compile(r"backgrounded\s*·\s*(\S+)\s*·\s*(.+?)\s*$", re.M)
-ATTENTION = ("waiting", "stopped", "absent")
+ATTENTION = ("waiting", "stopped", "absent", "limited")
+LIMIT_GRACE = 60      # seconds after `resetsAt` before a limited session counts as an event
+TAIL_BYTES = 262144   # the end of a transcript read for its last model reply
 FAILED_POLLS = 3
 MIN_INTERVAL = 1.0
 
@@ -161,12 +171,107 @@ def project(entries: List[Dict[str, Any]], root: Path) -> List[Dict[str, Any]]:
     return [e for e in entries if under(e, root)]
 
 
+def last_reply(log: Path) -> Optional[Dict[str, Any]]:
+    """The last assistant record of a transcript (its end only: transcripts run to megabytes)."""
+    try:
+        with log.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - TAIL_BYTES))
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and rec.get("type") == "assistant":
+            message = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+            if message.get("model") == "<synthetic>" and not rec.get("isApiErrorMessage"):
+                continue    # «No response requested.» after an interruption: no reply of the model
+            return rec
+    return None
+
+
+NO_RESET = -1         # a limit record without `resetsAt`: the event comes at once, `resets_at: null`
+
+
+def reply_state(session: Any) -> Optional[Dict[str, Any]]:
+    """The last model reply of SESSION's transcript: `{"kind": "limit", "resets", "at"}` for the
+    account's usage limit — the harness writes it as an API-error record with `error:
+    rate_limit`, `apiError: usage_limit_reached` and `quotaLimits` (`status: rejected`,
+    `resetsAt`; NO_RESET when it names none; a plain 429 without them is no account limit) —
+    `{"kind": "error", "at"}` for another API error, `{"kind": "ok", "at"}` for a real reply;
+    None without a transcript. SwAIS 2026-10-17: the weekly limit stopped the lead and every task
+    session at once, and after the reset nobody woke them for ~16 h."""
+    if not isinstance(session, str) or not SESSION_RE.match(session):
+        return None
+    for log in config_dir().joinpath("projects").glob(f"*/{session}.jsonl"):
+        rec = last_reply(log)
+        if not rec:
+            return None
+        at = str(rec.get("timestamp") or "")
+        if not rec.get("isApiErrorMessage"):
+            return {"kind": "ok", "at": at}
+        quota = rec.get("quotaLimits") if isinstance(rec.get("quotaLimits"), dict) else {}
+        if rec.get("apiError") != "usage_limit_reached" and quota.get("status") != "rejected":
+            return {"kind": "error", "at": at}
+        for holder in (quota, (rec.get("apiErrorParams") or {}).get("rate_limit_info")):
+            if isinstance(holder, dict) and isinstance(holder.get("resetsAt"), (int, float)):
+                return {"kind": "limit", "resets": int(holder["resetsAt"]), "at": at}
+        return {"kind": "limit", "resets": NO_RESET, "at": at}
+    return None
+
+
+def limit_of(entry: Dict[str, Any]) -> Optional[int]:
+    """`resetsAt` (or NO_RESET) when the session's last model reply is the account's usage limit."""
+    state = reply_state(entry.get("sessionId"))
+    return state["resets"] if state and state["kind"] == "limit" else None
+
+
+def pending(resets: Optional[int]) -> bool:
+    """A limit not yet reset (plus the grace minute)."""
+    return resets is not None and resets != NO_RESET and time.time() < resets + LIMIT_GRACE
+
+
+def account_limited(entries: List[Dict[str, Any]], names: List[str]) -> bool:
+    """Is the lead limited now? Its own transcript (the owner's session, $CLAUDE_CODE_SESSION_ID)
+    ends with a limit not yet reset; or, without that, a watched session is in such a limit and
+    none of the watched sessions has replied since — the limit is the account's, and the lead an
+    event wakes would hit it too. A session that replied after the limit record (a per-model limit,
+    extra usage, a session the developer continues by hand) lifts the hold: one limited session
+    must not silence the others' events for days. `busy` is no evidence: a session runs a long
+    command under the limit too."""
+    own = reply_state(os.environ.get("CLAUDE_CODE_SESSION_ID"))
+    if own and own["kind"] == "limit":
+        return pending(own["resets"])
+    states = [reply_state(e.get("sessionId")) for e in entries if e.get("name") in names and active(e)]
+    states.append(own)          # the lead's own reply after the limit records: it can act (a per-model limit)
+    limits = [s for s in states if s and s["kind"] == "limit" and pending(s["resets"])]
+    if not limits:
+        return False
+    newest = max(s["at"] for s in limits)
+    return not any(s and s["kind"] == "ok" and s["at"] > newest for s in states)
+
+
+def iso(epoch: Optional[int]) -> Optional[str]:
+    if epoch is None or epoch == NO_RESET:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
 def condition(entries: List[Dict[str, Any]], name: str) -> Dict[str, Any]:
     """The state the lead acts on for NAME, with the entry it comes from."""
     named = sorted((e for e in entries if e.get("name") == name), key=started, reverse=True)
     live = [e for e in named if active(e)]
     if live:
-        return {"name": name, "state": str(live[0].get("status")), "id": live[0].get("id")}
+        status = str(live[0].get("status"))
+        # a working session is past the limit; a waiting one (a dialog, a question) needs the developer
+        resets = limit_of(live[0]) if status not in ("busy", "waiting") else None
+        if resets is not None:
+            return {"name": name, "state": "limited", "id": live[0].get("id"), "resets_at": iso(resets),
+                    "resets": resets}
+        return {"name": name, "state": status, "id": live[0].get("id")}
     if named:
         return {"name": name, "state": "stopped", "id": named[0].get("id")}
     return {"name": name, "state": "absent", "id": None}
@@ -320,10 +425,24 @@ def cmd_launch(ns: argparse.Namespace) -> Dict[str, Any]:
     return out
 
 
+def known_state(c: Dict[str, Any]) -> str:
+    """The state as `known` keeps it: a limit with its reset (`limited@{resetsAt}`), so a new limit
+    after the advisory is a new event, not a repeat of the old one."""
+    return f"limited@{c['resets']}" if c["state"] == "limited" else c["state"]
+
+
 def cmd_status(ns: argparse.Namespace) -> List[Dict[str, Any]]:
     keys = ("name", "id", "kind", "status", "state", "cwd")
-    return [{k: e.get(k) for k in keys} for e in sorted(project(agents(), project_root(ns.root)), key=started)
-            if not ns.names or e.get("name") in ns.names]
+    rows = []
+    for e in sorted(project(agents(), project_root(ns.root)), key=started):
+        if ns.names and e.get("name") not in ns.names:
+            continue
+        row = {k: e.get(k) for k in keys}
+        resets = limit_of(e) if active(e) and e.get("status") not in ("busy", "waiting") else None
+        row["limited"] = resets is not None
+        row["limited_until"] = iso(resets)
+        rows.append(row)
+    return rows
 
 
 def lock_path(root: Path, owner: str) -> Optional[Path]:
@@ -356,6 +475,7 @@ def notify(events: List[Dict[str, Any]]) -> None:
         return
     for e in events:
         text = (f"{e['name']} ждёт тебя: claude attach {e['name']}" if e["state"] == "waiting"
+                else f"{e['name']}: лимит сброшен, продолжить" if e["state"] == "limited"
                 else f"{e['name']}: сессия {e['state']}")
         try:
             subprocess.run([tool, "-e", f"display notification {applescript_string(text)} "
@@ -400,8 +520,14 @@ def cmd_watch(ns: argparse.Namespace) -> Dict[str, Any]:
                 entries = None
             if entries is not None:
                 now = [condition(entries, name) for name in ns.names]
-                events = [c for c in now if c["state"] in ATTENTION and seen.get(c["name"]) != c["state"]]
-                seen.update({c["name"]: c["state"] for c in now})
+                # a limited session is an event only after its reset: a lead woken before it hits the
+                # same limit and the event is lost; while the lead itself is limited, no event at all
+                hold = account_limited(entries, ns.names)
+                now = [c for c in now if not (c["state"] == "limited" and pending(c["resets"]))]
+                events = [] if hold else [{k: v for k, v in c.items() if k != "resets"} for c in now
+                                          if c["state"] in ATTENTION and seen.get(c["name"]) != known_state(c)]
+                if not hold:
+                    seen.update({c["name"]: known_state(c) for c in now})
                 if events:
                     if ns.notify:
                         notify(events)

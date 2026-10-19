@@ -192,6 +192,9 @@ BYTES CHECK по файлу; тестовая поддержка (`tests.support
 `0.9.3`: effort задаёт плагин — `effort:` во фронтматтере агентов (architect, reviewer, coder — xhigh,
 researcher и tester — high), `effort.orchestrator` и `sessions.py launch --effort`; фактический effort ролей —
 в `state.yaml` и строке «Стоимость».
+`0.9.4`: исправления по T-13…T-16 — событие `limited` после сброса лимита аккаунта, сбой хука
+worktree виден Start, отчёт синхронизации (`RESOLUTIONS`, новое — чего нет ни в одной стороне), `register --add-file`,
+`tests.ran` против ложно зелёных проб, `it.each` в счёте тестов.
 
 `0.3.0`: профили пайплайна и research-мультизадачи с кросс-репо ресёрчем; точки
 решения с маршрутом вопроса; лид (`/omixflow:lead`), который координирует сессии

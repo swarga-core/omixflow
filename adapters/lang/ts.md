@@ -8,8 +8,11 @@ requires:
 scripts: {}
 tests:                                   # test_conventions machine-readable (report.py check)
   files: ["**/*.test.ts", "**/*.test.tsx", "**/*.a11y.test.tsx", "**/*.variants.test.tsx", "**/*.visual.test.tsx"]
-  declaration: '^\s*(it|test)\s*\('
+  # it(…), it.each(…)(…), test.each`…`, it.only, test.concurrent — declarations; Playwright's test.describe,
+  # test.beforeEach/afterAll, test.step, test.use, test.extend are not tests
+  declaration: '^\s*(it|test)(\.(?!(?:describe|beforeEach|afterEach|beforeAll|afterAll|step|use|extend|info|slow|setTimeout|configure|expect)\b)\w+)*\s*[(`]'
   support: ["**/__mocks__/**", "**/fixtures/**", "**/test/**", "**/test-utils/**"]   # test_conventions, «Тестовая поддержка»: plan.py files
+  ran: '\b[1-9]\d* passed\b'   # vitest «Tests  7 passed (7)», jest «7 passed, 7 total», playwright «7 passed (3s)»; not «92 skipped» (probe.py)
 ---
 
 # Адаптер lang: TypeScript / JavaScript

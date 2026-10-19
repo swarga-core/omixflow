@@ -370,7 +370,7 @@ class SessionsTests(unittest.TestCase):
         code, out = self.run_script("status", "--root", str(self.root))
         self.assertEqual(code, 0)
         self.assertEqual([(x["name"], x["id"]) for x in out], [("T-18", "aaaa1111"), ("T-8", "b")])
-        self.assertEqual(sorted(out[0]), ["cwd", "id", "kind", "name", "state", "status"])
+        self.assertEqual(sorted(out[0]), ["cwd", "id", "kind", "limited", "limited_until", "name", "state", "status"])
         self.assertEqual([x["name"] for x in self.run_script("status", "T-8", "--root", str(self.root))[1]],
                          ["T-8"])
 
@@ -380,6 +380,135 @@ class SessionsTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out["events"], [{"name": "T-18", "state": "waiting", "id": "aaaa1111"}])
         self.assertEqual(out["known"], {"T-18": "waiting"})
+
+    def limited_transcript(self, sid: str, resets, where: str = "quotaLimits") -> None:
+        """The record the harness writes when the account's usage limit rejects a request
+        (SwAIS T-13, 2026-10-17: `error: rate_limit`, `apiError: usage_limit_reached`)."""
+        d = self.config / "projects" / "-wt"
+        d.mkdir(parents=True, exist_ok=True)
+        rows = [{"type": "assistant", "message": {"model": "claude-opus-5-5", "content": [{"type": "text", "text": "ok"}]}},
+                {"type": "user", "message": {"content": "notice"}},
+                {"type": "assistant", "isApiErrorMessage": True, "error": "rate_limit", "apiError": "usage_limit_reached",
+                 "timestamp": "2026-10-17T11:41:56Z",
+                 "message": {"model": "<synthetic>", "content": [{"type": "text", "text": "You've hit your weekly limit"}]}}]
+        info = {"status": "rejected", "rateLimitType": "seven_day", **({"resetsAt": resets} if resets is not None else {})}
+        if where == "quotaLimits":
+            rows[-1]["quotaLimits"] = info
+        else:
+            rows[-1]["apiErrorParams"] = {"rate_limit_info": info}
+        (d / f"{sid}-x.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    def test_a_limited_session_is_an_event_only_after_the_reset(self):
+        """G-75: the weekly limit stopped the lead and T-13, T-14 at once; after the reset nobody
+        woke them for ~16 h. A lead woken before the reset would hit the same limit."""
+        self.polls([[self.entry("T-13", "idle", sid="t13")]])
+        self.limited_transcript("t13", int(time.time()) + 3600)
+        self.assertEqual(self.watch("T-13", polls=2), (1, {"events": [], "known": {}}))
+        rows = self.run_script("status", "--root", str(self.root))[1]
+        self.assertTrue(rows[0]["limited_until"].endswith("Z"))
+        reset = int(time.time()) - 120
+        self.limited_transcript("t13", reset)
+        code, out = self.watch("T-13", polls=2)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["events"], [{"name": "T-13", "state": "limited", "id": "t13",
+                                          "resets_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(reset))}])
+        self.assertEqual(out["known"], {"T-13": f"limited@{reset}"})
+        self.assertEqual(self.watch("T-13", known=(f"T-13=limited@{reset}",), polls=2)[0], 1)   # no repeat
+        # review F3: limited again right after the advisory — a new reset is a new event
+        later = int(time.time()) - 61
+        self.limited_transcript("t13", later)
+        code, out = self.watch("T-13", known=(f"T-13=limited@{reset}",), polls=1)
+        self.assertEqual((code, out["events"][0]["state"]), (0, "limited"))
+        self.polls([[self.entry("T-13", "busy", sid="t13")]])        # working again: not limited
+        self.assertEqual(self.watch("T-13", polls=1)[1]["known"], {"T-13": "busy"})
+
+    def test_while_the_account_is_limited_no_event_wakes_the_lead(self):
+        """Review F4: another session's `stopped` during the window would wake a lead that is limited
+        too (its turns failed at 11:41:58 and 11:42:22), and the watch would not be restarted."""
+        self.polls([[self.entry("T-13", "idle", sid="t13"), self.entry("T-14", None, state="stopped", sid="t14")]])
+        self.limited_transcript("t13", int(time.time()) + 3600)
+        self.assertEqual(self.watch("T-13", "T-14", polls=2), (1, {"events": [], "known": {}}))
+        self.limited_transcript("t13", int(time.time()) - 120)
+        code, out = self.watch("T-13", "T-14", polls=1)
+        self.assertEqual((code, sorted(e["state"] for e in out["events"])), (0, ["limited", "stopped"]))
+
+    def replied(self, sid: str, at: str) -> None:
+        d = self.config / "projects" / "-wt"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{sid}-x.jsonl").write_text(json.dumps({"type": "assistant", "timestamp": at,
+                                                       "message": {"model": "claude-opus-5-5", "content": []}}) + "\n")
+
+    def test_one_limited_session_does_not_silence_the_others_once_the_account_works(self):
+        """Re-review N1: a per-model limit or extra usage — another session replied after the limit
+        record, so the lead is not limited and T-14's dialog must reach the developer now."""
+        self.polls([[self.entry("T-13", "idle", sid="t13"), self.entry("T-14", "waiting", sid="t14")]])
+        self.limited_transcript("t13", int(time.time()) + 86400)
+        self.replied("t14", "2026-10-17T12:30:00Z")
+        code, out = self.watch("T-13", "T-14", polls=1)
+        self.assertEqual((code, [e["state"] for e in out["events"]]), (0, ["waiting"]))
+        self.assertNotIn("T-13", out["known"])               # its event waits for its own reset
+
+    def test_a_synthetic_record_is_no_reply(self):
+        """Re-review S1: «No response requested.» after an interruption is written as a synthetic
+        assistant record; it neither lifts the hold nor hides the session's own limit."""
+        self.limited_transcript("t13", int(time.time()) - 120)
+        log = self.config / "projects" / "-wt" / "t13-x.jsonl"
+        with log.open("a") as f:
+            f.write(json.dumps({"type": "assistant", "timestamp": "2026-10-17T12:00:00Z",
+                                "message": {"model": "<synthetic>", "content": [{"type": "text", "text": "No response requested."}]}}) + "\n")
+        self.polls([[self.entry("T-13", "idle", sid="t13")]])
+        code, out = self.watch("T-13", polls=1)
+        self.assertEqual((code, out["events"][0]["state"]), (0, "limited"))
+
+    def test_the_leads_own_reply_after_the_limit_lifts_the_hold(self):
+        """Re-review S2: a per-model limit — the watched sessions are limited, the lead replied since."""
+        lead_dir = self.config / "projects" / "-lead"
+        lead_dir.mkdir(parents=True, exist_ok=True)
+        (lead_dir / f"{SESSION}.jsonl").write_text(json.dumps(
+            {"type": "assistant", "timestamp": "2026-10-17T12:30:00Z", "message": {"model": "claude-fable-5-1", "content": []}}) + "\n")
+        self.polls([[self.entry("T-13", "idle", sid="t13"), self.entry("T-14", "waiting", sid="t14")]])
+        self.limited_transcript("t13", int(time.time()) + 3600)
+        code, out = self.watch("T-13", "T-14", polls=1, session=SESSION)
+        self.assertEqual((code, [e["state"] for e in out["events"]]), (0, ["waiting"]))
+
+    def test_the_leads_own_limit_holds_every_event(self):
+        lead_dir = self.config / "projects" / "-lead"
+        lead_dir.mkdir(parents=True, exist_ok=True)
+        (lead_dir / f"{SESSION}.jsonl").write_text(json.dumps(
+            {"type": "assistant", "isApiErrorMessage": True, "error": "rate_limit", "apiError": "usage_limit_reached",
+             "timestamp": "2026-10-17T11:41:58Z", "quotaLimits": {"status": "rejected", "resetsAt": int(time.time()) + 3600},
+             "message": {"content": []}}) + "\n")
+        self.polls([[self.entry("T-14", "waiting", sid="t14")]])
+        self.replied("t14", "2026-10-17T12:30:00Z")
+        self.assertEqual(self.watch("T-14", polls=1, session=SESSION), (1, {"events": [], "known": {}}))
+
+    def test_the_reset_may_come_in_rate_limit_info_or_not_at_all(self):
+        self.polls([[self.entry("T-13", "idle", sid="t13")]])
+        reset = int(time.time()) - 300
+        self.limited_transcript("t13", reset, where="apiErrorParams")
+        out = self.watch("T-13", polls=1)[1]
+        self.assertEqual(out["events"][0]["resets_at"], time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(reset)))
+        self.limited_transcript("t13", None)                  # review F9: no reset time — at once, `null`
+        code, out = self.watch("T-13", polls=1)
+        self.assertEqual((code, out["events"][0]["resets_at"]), (0, None))
+        rows = self.run_script("status", "--root", str(self.root))[1]
+        self.assertEqual((rows[0]["limited"], rows[0]["limited_until"]), (True, None))
+
+    def test_a_waiting_session_stays_waiting_under_a_limit_record(self):
+        """Review F7: a dialog needs the developer, an advisory cannot dismiss it."""
+        self.polls([[self.entry("T-13", "waiting", sid="t13")]])
+        self.limited_transcript("t13", int(time.time()) - 120)
+        code, out = self.watch("T-13", polls=1)
+        self.assertEqual((code, out["events"][0]["state"]), (0, "waiting"))
+
+    def test_an_ordinary_api_error_is_not_the_limit(self):
+        d = self.config / "projects" / "-wt"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "t13-x.jsonl").write_text(json.dumps({"type": "assistant", "isApiErrorMessage": True,
+                                                   "error": "server_error", "message": {"content": []}}) + "\n")
+        self.polls([[self.entry("T-13", "idle", sid="t13")]])
+        self.assertEqual(self.watch("T-13", polls=1)[1]["known"], {"T-13": "idle"})
+        self.assertIsNone(self.run_script("status", "--root", str(self.root))[1][0]["limited_until"])
 
     def test_session_waiting_for_the_lead_is_not_an_event(self):
         """T-18 ended its turn with «Жду decision»: status idle, state blocked."""

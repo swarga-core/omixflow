@@ -118,8 +118,10 @@ branch and stopped on conflicts; CONFLICTS lists the files.
    (a new port method that this task's mocks don't implement). Fix only what the
    merge itself broke in conflicted files; breakage in files without conflicts is
    reported for a separate follow-up commit, not folded into the merge.
-4. Report per file: `{file} — {how resolved}`, then gate results and the breakage
-   outside conflicts, if any.
+4. Report per file in a `RESOLUTIONS:` section, one line per conflicted file: `{file} — {how
+   resolved}`; `STEP: sync{K} — …`; then gate results and the breakage outside conflicts, if
+   any. MUTATIONS and BYTES CHECK cover only what neither side had — a test or a line you wrote
+   while resolving, not the base's tests (report.py checks it so).
 
 ## Mutation-check your tests
 
@@ -169,7 +171,8 @@ its log. Copy the `- {test} ← … → RED` lines of the output into
 MUTATIONS as they are (the summary and the test output tails are not report lines). Exit
 codes: 0 — RED; 1 — GREEN: strengthen the test and probe again; 3 — `no probe possible`:
 the mutant fails `--check`, the line goes into MUTATIONS with that reason; 2 — the probe
-was not run (`PROBE NOT RUN: …`): the test is not green without the mutant, OLD is
+was not run (`PROBE NOT RUN: …`): the test is not green without the mutant or no test ran
+(a filter by a describe's name matches no test — filter by the test's own name), OLD is
 missing or ambiguous, the patch does not apply or touches another file, a copy is left
 from a killed probe (`probe.py restore --root … --file …` puts it back): fix the call and
 run again, such a line never goes into MUTATIONS. `PROBE COPY KEPT` from `probe.py restore`
@@ -231,7 +234,7 @@ your Write to REPORT_PATH itself, do not retry under another name or through the
 reply with the full report instead, its first line `REPORT_PATH refused by the harness:
 {the harness message}`; the orchestrator writes the file from your reply.
 
-Full report (REPORT_PATH; in sync mode the per-file resolutions replace FILES):
+Full report (REPORT_PATH; in sync mode a `RESOLUTIONS:` section replaces FILES):
 
 ```
 STEP: {N} — {name}

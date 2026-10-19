@@ -68,7 +68,12 @@ SDD-флоу, гейты, формат коммитов, мутационную 
 workspace (`PORT.md`, «sync»; команды в адаптере). Конфликты разрешает coder
 в `MODE: sync` с `CONFLICTS` и `REPORT_PATH: {TASK_DIR}/reports/{phase}-sync{K}.md`
 (фаза скила, K — номер синхронизации; `runtime.md`, «Отчёт агента»); живой агент из
-`agents.coder` получает сообщение, иначе спавн по шаблону шага. Поломки вне конфликтных файлов после
+`agents.coder` получает сообщение, иначе спавн по шаблону шага. Его отчёт сверяет `report.py
+check --role coder --report {REPORT_PATH} --root {PROJECT_ROOT} --conflicts {CONFLICTS}` без
+`--baseline`, пока слияние не закоммичено: скрипт видит `MERGE_HEAD` (у rebase — `REBASE_HEAD`),
+ждёт `RESOLUTIONS` вместо FILES с каждым конфликтным файлом, а новым в MUTATIONS и BYTES CHECK
+считает только то, чего нет ни в HEAD, ни во второй стороне (в Swarga AI Studio T-14 тесты T-13
+из базы шли как 93 новых теста coder'а). Поломки вне конфликтных файлов после
 коммита слияния чинит coder отдельным коммитом (`STEP: sync-fix`, `REPORT_PATH:
 {TASK_DIR}/reports/{phase}-sync-fix{K}.md`, вне `steps_total`; сообщение
 `fix[({область})]: repair sync breakage for {id} (sync {K})`, область — как в 2.5).

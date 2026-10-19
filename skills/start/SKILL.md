@@ -65,9 +65,16 @@ git rev-parse --path-format=absolute --git-dir --git-common-dir   # два пу�
 ```
 
 - Уже в worktree (enter-first): не ветвиться, подтвердить «работаем в `{path}`
-  на `{branch}`».
+  на `{branch}`»; итог хука — как ниже (`omixflow-wt-setup.status` git-каталога этого worktree,
+  `FAILED` — `deadlock`).
 - `--worktree` или `workspace.worktree: always`: worktree от base по адаптеру
-  workspace (`worktree`), вход по `path`; хук поставит зависимости.
+  workspace (`worktree`), вход по `path`; хук поставит зависимости. Итог хука — в
+  `{git-dir}/omixflow-wt-setup.status` (`git -C {worktree} rev-parse --absolute-git-dir`, затем
+  Read): `FAILED` — точка `deadlock` с причиной из второй строки файла (зависимости не
+  поставлены, гейты будут красными; разработчик чинит окружение, затем `workspace.setup`
+  повторяется в worktree); `running` — хук оборван (таймаут харнесса), установка не завершена:
+  повторить `workspace.setup` в worktree одной командой, упадёт — тот же `deadlock`; файла нет —
+  хук не сработал, как при ручном worktree.
 - Иначе: текущая ветка это base → предложить `{workspace.branch}` с `{id}`;
   ветка задачи уже есть → «переключиться?»; другая ветка → спросить. Защищённые
   ветки из `workspace.protected` для коммитов запрещены.
@@ -169,7 +176,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cost.py" phase "{TASK_DIR}" start
 3. `part_isolation: worktree`: worktree части от ветки мультизадачи по адаптеру
    workspace: явный
    `git worktree add {root}/.claude/worktrees/{id}-{part} -b {branch}-{part} {branch}`,
-   идемпотентно (существующий worktree или ветка переиспользуются), вход по `path`.
+   идемпотентно (существующий worktree или ветка переиспользуются), вход по `path`;
+   итог хука — как у задачи (`omixflow-wt-setup.status`, `FAILED` — `deadlock`).
    При `multitask.push: true` ветка части пушится при первом коммите.
    `part_isolation: shared`: ни ветки, ни worktree; каталог части в основном дереве
    на `task/{id}`.
