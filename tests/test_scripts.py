@@ -599,22 +599,26 @@ class LeadConfigTests(unittest.TestCase):
     def test_lead_settings(self):
         bare = lib.normalize_config(lib.yaml.safe_load(HOME_CFG))
         actions = {"backlog": "lead", "memory": "lead"}
-        self.assertEqual(lib.lead_settings(bare), {"default": "developer", "timeout": 600, "stall": 900,
+        self.assertEqual(lib.lead_settings(bare), {"default": "developer", "timeout": 600, "stall": 900, "rotate_context": 300000,
                                                    "actions": actions, "notify": [], "delivery": "lead",
                                                    "plugin_session": None})
-        cfg = self.cfg({"default": "lead", "timeout": "1m", "stall": "30m", "actions": {"memory": "developer"},
+        cfg = self.cfg({"default": "lead", "timeout": "1m", "stall": "30m", "rotate_context": 0, "actions": {"memory": "developer"},
                         "delivery": "pr", "plugin_session": "omixflow-lead"})
-        self.assertEqual(lib.lead_settings(cfg), {"default": "lead", "timeout": 60, "stall": 1800,
+        self.assertEqual(lib.lead_settings(cfg), {"default": "lead", "timeout": 60, "stall": 1800, "rotate_context": 0,
                                                   "actions": {"backlog": "lead", "memory": "developer"},
                                                   "notify": [], "delivery": "pr", "plugin_session": "omixflow-lead"})
         self.assertTrue(any("lead.delivery" in e for e in lib.validate_config(self.cfg({"delivery": "merge"}))))
         self.assertTrue(any("lead.actions" in e for e in lib.validate_config(self.cfg({"actions": {"tracker": "lead"}}))))
         self.assertTrue(any("lead.stall" in e for e in lib.validate_config(self.cfg({"stall": "soon"}))))
+        self.assertTrue(any("lead.rotate_context" in e for e in lib.validate_config(self.cfg({"rotate_context": -1}))))
+        for bad in ("300k", True, -5, 3.5):      # resolve.py lead runs without the schema check
+            with self.subTest(rotate_context=bad), self.assertRaises(lib.OmixflowError):
+                lib.lead_settings(self.cfg({"rotate_context": bad}))
         with tempfile.TemporaryDirectory() as tmp:
             write_cfg(Path(tmp), HOME_CFG + "lead:\n  stall: 20m\n")
             proc = run("resolve.py", "lead", "--project", tmp)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(json.loads(proc.stdout), {"default": "developer", "timeout": 600, "stall": 1200,
+            self.assertEqual(json.loads(proc.stdout), {"default": "developer", "timeout": 600, "stall": 1200, "rotate_context": 300000,
                                                        "actions": {"backlog": "lead", "memory": "lead"},
                                                        "notify": [], "delivery": "lead", "plugin_session": None})
 

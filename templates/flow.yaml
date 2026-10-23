@@ -133,6 +133,7 @@ multitask:
 #   default: developer                 # для точек, не перечисленных в policy
 #   timeout: 10m                       # ожидание ack лида, затем вопрос задаётся в сессии
 #   stall: 15m                         # простой сессии без вопроса дольше этого лид сообщает разработчику
+#   rotate_context: 300000             # контекст лида, выше которого — смена: /clear и /omixflow:lead; 0 — без сигнала
 #   delivery: lead                     # способ сдачи под лидом; lead — без вопроса в точке delivery
 #   plugin_session: omixflow-lead      # сессия, ведущая плагин: лид шлёт ей гочи плагина
 #   notify: [visible-behaviour]        # решение лида, меняющее видимое поведение, сразу показывается (lead-notify)

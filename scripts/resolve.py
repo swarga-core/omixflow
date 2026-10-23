@@ -15,7 +15,7 @@
         shell still works; a heading inside a ``` block is not a boundary. Unknown title: exit 2
         with the file's titles.
     resolve.py route POINT             [--project DIR]            # lead route: JSON {point, kind, mode, timeout}
-    resolve.py lead                    [--project DIR]            # lead settings: JSON {default, timeout, stall, actions, notify}
+    resolve.py lead                    [--project DIR]            # lead settings: JSON {default, timeout, stall, rotate_context, actions, notify, …}
     resolve.py verify --at MOMENT      [--project DIR] [--task DIR | --base B] [--since REF] [--paths P...]
                                        [--also GATE...]
         gates and orchestrator checks due at MOMENT (step | review | delivery | accept):

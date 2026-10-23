@@ -1420,6 +1420,7 @@ class DecisionPointsLint(unittest.TestCase):
         self.assertEqual(lead["default"]["default"], lib.LEAD_DEFAULT_MODE)
         self.assertEqual(lead["timeout"]["default"], lib.LEAD_DEFAULT_TIMEOUT)
         self.assertEqual(lead["stall"]["default"], lib.LEAD_DEFAULT_STALL)
+        self.assertEqual(lead["rotate_context"]["default"], lib.LEAD_DEFAULT_ROTATE_CONTEXT)
         self.assertEqual(lead["delivery"]["default"], lib.LEAD_DEFAULT_DELIVERY)
         self.assertEqual({k: v["default"] for k, v in lead["actions"]["properties"].items()},
                          lib.LEAD_DEFAULT_ACTIONS)
@@ -1465,6 +1466,77 @@ class DecisionPointsLint(unittest.TestCase):
                 hits += [f"{rel}:{n}: {m.group(1)}" for m in self.REF_RE.finditer(line)
                          if m.group(1) not in ids]
         self.assertEqual(hits, [], "ссылки на неизвестные точки решения:\n" + "\n".join(hits))
+
+
+class LeadJournalNumbersLint(unittest.TestCase):
+    """G-103 (Swarga AI Studio T-17): the project may keep a decision journal of the same number
+    form as the lead's; a brief named «D-271» bare, the session matched it against the concept
+    journal and the coder «fixed» the reference. A lead's message names its journal."""
+
+    LEAD_TYPES = ("brief", "ack", "decision", "directive", "advisory")
+    # a number or its placeholder; E-n stays bare: an item's status in ack and open
+    NUMBER = re.compile(r"(?<![\w-])([DROAMG]-(?:\d+|\{[a-z]\}))")
+
+    def flat(self, rel: str) -> str:
+        return " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+
+    def test_the_rule_is_written(self):
+        lead_md = self.flat("protocol/lead.md")
+        self.assertIn("**Номера журнала лида.**", lead_md)
+        self.assertIn("`lead D-{n}`, `lead R-{n}`, `lead O-{n}`", lead_md)
+        self.assertIn("`concept/decisions.md D-{n}`", lead_md)
+        self.assertIn("Голый `D-{n}` от лида вне цитаты сессия читает как номер журнала лида", lead_md)
+        self.assertIn("Дословную цитату разработчика лид не правит", lead_md)     # review 0.9.7: a quoted D-370
+        self.assertIn("`лид, D-{n}`, номер журнала проекта — с файлом", self.flat("protocol/artifacts.md"))
+        self.assertIn("«Номера журнала лида»", self.flat("skills/lead/SKILL.md"))
+
+    def bare(self, rel: str, text: str) -> list:
+        return [f"{rel}: {text.strip()}" for m in self.NUMBER.finditer(text)
+                if not text[: m.start()].endswith("lead ")]
+
+    def test_lead_message_examples_name_the_journal(self):
+        bare = []
+        head = re.compile(r"\[omixflow\] (%s) " % "|".join(self.LEAD_TYPES))
+        inline = re.compile(r"`(?:%s)`\s*«([^»]*)»" % "|".join(self.LEAD_TYPES))
+        for rel in ("protocol/lead.md", "skills/lead/SKILL.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S):     # message examples
+                if not head.match(block.lstrip()):
+                    continue
+                for line in block.splitlines():
+                    if line.startswith("[omixflow]"):
+                        line = line.partition(":")[2]           # the heading names the task (M-12#2)
+                    bare += self.bare(rel, line.split("basis:")[0])   # a basis names its namespace itself
+            for m in inline.finditer(" ".join(text.split())):          # `advisory` «…» in the text
+                bare += self.bare(rel, m.group(1))
+        self.assertEqual(bare, [], "номер журнала лида без пространства в сообщении лида:\n" + "\n".join(bare))
+
+    def test_the_lint_sees_numbers_placeholders_and_inline_texts(self):
+        head = "[omixflow] decision M-12#2: Q1 b\n"
+        self.assertEqual(self.bare("x", "Q1: b по D-370"), ["x: Q1: b по D-370"])
+        self.assertEqual(self.bare("x", "санкция A-{n} в журнале"), ["x: санкция A-{n} в журнале"])
+        self.assertEqual(self.bare("x", "санкция lead A-{n}; F3 E-7"), [])
+        self.assertEqual(self.bare("x", head.partition(":")[2]), [])          # M-12 is the task, not a record
+
+
+class LeadRotationLint(unittest.TestCase):
+    """0.9.7: the lead is changed in its own session by /clear on the `rotate` event of `watch`
+    (a replay of 13 leads' transcripts: −42…−57 % of the lead's cost at 300k)."""
+
+    def flat(self, rel: str) -> str:
+        return " ".join((ROOT / rel).read_text(encoding="utf-8").split())
+
+    def test_protocol_skill_and_watch_agree(self):
+        lead_md, skill = self.flat("protocol/lead.md"), self.flat("skills/lead/SKILL.md")
+        self.assertIn("**Смена лида.**", lead_md)
+        self.assertIn("`/clear` сохраняет имя, адрес сообщений, процесс и фоновые задачи", lead_md)
+        self.assertIn("`/clear` вводит разработчик: себе его лид не введёт.", lead_md)
+        self.assertIn("держит её `$CLAUDE_CODE_SESSION_ID`", lead_md)          # the old watch reads the old transcript
+        self.assertIn("--rotate-context {rotate_context}", skill)
+        self.assertIn("`rotate` (свой контекст выше `rotate_context`", skill)
+        self.assertIn("_lead/handoff.md`, если он есть", skill)
+        self.assertIn("смена лида (`/clear`, затем `/omixflow:lead`", skill)
+        self.assertIn("--rotate-context N", self.flat("scripts/sessions.py"))
 
 
 if __name__ == "__main__":

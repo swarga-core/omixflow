@@ -211,6 +211,7 @@
           }
         },
         "stall": { "type": "string", "pattern": "^[1-9][0-9]*[smh]$", "default": "15m", "description": "простой сессии без открытого вопроса дольше этого лид сообщает разработчику как подозрение на зависание" },
+        "rotate_context": { "type": "integer", "minimum": 0, "default": 300000, "description": "контекст сессии лида в токенах, выше которого watch даёт событие rotate: лид передаёт дела, разработчик делает /clear и /omixflow:lead (protocol/lead.md, «Смена лида»); 0 — без сигнала" },
         "delivery": { "type": "string", "enum": ["pr", "integrate", "lead"], "default": "lead", "description": "способ сдачи у сессии под лидом; при lead точка delivery не задаётся (workspace.delivery — для сессий без лида)" },
         "plugin_session": { "type": "string", "description": "имя сессии, ведущей плагин OMIXFlow: лид шлёт ей гочи плагина сообщением (protocol/lead.md, «Гочи, бэклог и память»)" },
         "policy": {

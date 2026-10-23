@@ -457,7 +457,8 @@ class Doctor:
         default = lead.get("default", lib.LEAD_DEFAULT_MODE)
         self.add("lead", "policy", OK,
                  f"default {default}, timeout {lead.get('timeout', lib.LEAD_DEFAULT_TIMEOUT)}, "
-                 f"stall {lead.get('stall', lib.LEAD_DEFAULT_STALL)}, сдача под лидом "
+                 f"stall {lead.get('stall', lib.LEAD_DEFAULT_STALL)}, смена лида на контексте "
+                 f"{lead.get('rotate_context', lib.LEAD_DEFAULT_ROTATE_CONTEXT)}, сдача под лидом "
                  f"{lead.get('delivery', lib.LEAD_DEFAULT_DELIVERY)}, точек в policy: {len(policy)}")
         by_lead = [point for point, kind in lib.decision_points()
                    if kind == "внешнее" and policy.get(point, default) == "lead"]

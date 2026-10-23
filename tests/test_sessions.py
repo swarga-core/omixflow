@@ -471,6 +471,70 @@ class SessionsTests(unittest.TestCase):
         code, out = self.watch("T-13", "T-14", polls=1, session=SESSION)
         self.assertEqual((code, [e["state"] for e in out["events"]]), (0, ["waiting"]))
 
+    def lead_context(self, size: int, at: str = "2026-10-20T10:00:00Z") -> None:
+        """The lead's own transcript ending with a reply whose request held SIZE tokens."""
+        lead_dir = self.config / "projects" / "-lead"
+        lead_dir.mkdir(parents=True, exist_ok=True)
+        usage = {"input_tokens": 3, "cache_creation_input_tokens": 1000, "cache_read_input_tokens": size - 1003,
+                 "output_tokens": 500}
+        (lead_dir / f"{SESSION}.jsonl").write_text(json.dumps(
+            {"type": "assistant", "timestamp": at, "message": {"model": "claude-opus-5-5", "content": [], "usage": usage}}) + "\n")
+
+    def test_the_leads_context_over_the_threshold_is_one_rotate_event(self):
+        """Lead rotation (0.9.7): 13 leads ran at 365–550k on average up to the 1M auto-compact;
+        changing the lead at 300k by /clear cuts its cost by 42–57 % in a replay of the transcripts."""
+        self.polls([[self.entry("T-14", "busy", sid="t14")]])
+        self.lead_context(350_000)
+        code, out = self.watch("T-14", "--rotate-context", "300000", polls=2, session=SESSION)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["events"], [{"name": "swais-lead", "state": "rotate", "context": 350_000}])
+        self.assertEqual(out["known"], {"T-14": "busy", "swais-lead": f"rotate@{SESSION}"})
+        # once per lead session: the known state from the output stops a repeat
+        self.assertEqual(self.watch("T-14", "--rotate-context", "300000", known=(f"swais-lead=rotate@{SESSION}",),
+                                    polls=2, session=SESSION)[0], 1)
+        # review 0.9.7: the known state is per lead session — the lead after /clear is signalled again
+        code, out = self.watch("T-14", "--rotate-context", "300000", known=("swais-lead=rotate@old-session",),
+                               polls=1, session=SESSION)
+        self.assertEqual((code, out["known"]["swais-lead"]), (0, f"rotate@{SESSION}"))
+        self.assertEqual(self.watch("T-14", "--rotate-context", "350000", polls=1, session=SESSION)[0], 1)  # above, not at
+        # under the threshold, without the option, without the lead's session id: no event
+        self.lead_context(250_000)
+        self.assertEqual(self.watch("T-14", "--rotate-context", "300000", polls=1, session=SESSION)[0], 1)
+        self.lead_context(350_000)
+        self.assertEqual(self.watch("T-14", polls=1, session=SESSION)[0], 1)
+        self.assertEqual(self.watch("T-14", "--rotate-context", "300000", polls=1)[0], 1)
+        self.assertEqual(self.watch("T-14", "--rotate-context", "-1", polls=1, session=SESSION)[0], 2)
+
+    def test_the_rotate_event_notifies_with_the_steps(self):
+        self.polls([[self.entry("T-14", "busy", sid="t14")]])
+        self.lead_context(420_000)
+        code, _ = self.watch("T-14", "--rotate-context", "300000", "--notify", polls=1, session=SESSION)
+        self.assertEqual(code, 0)
+        script = " ".join(" ".join(r["argv"]) for r in self.log("osascript"))
+        self.assertIn("контекст 420k — смена лида: /clear, затем /omixflow:lead (фоновый лид — claude attach swais-lead)",
+                      script)
+
+    def test_a_lead_without_background_sessions_watches_for_rotate_alone(self):
+        """Review 0.9.7, finding 9: a lead in terminal mode, or with all its sessions done, held no
+        watch and got no signal; without names watch keeps the rotate event and polls no sessions."""
+        self.lead_context(350_000)
+        code, out = self.watch("--rotate-context", "300000", polls=2, session=SESSION)
+        self.assertEqual((code, out), (0, {"events": [{"name": "swais-lead", "state": "rotate", "context": 350_000}],
+                                           "known": {"swais-lead": f"rotate@{SESSION}"}}))
+        self.assertEqual(self.watch("--rotate-context", "300000", known=(f"swais-lead=rotate@{SESSION}",),
+                                    polls=2, session=SESSION)[0], 1)
+        self.assertEqual(self.log("claude"), [])                   # no `claude agents` polls
+        code, out = self.watch(polls=1, session=SESSION)          # nothing else to watch for
+        self.assertEqual(code, 2)
+        self.assertIn("--rotate-context", out["error"])
+
+    def test_no_rotate_event_while_the_lead_is_limited(self):
+        """A lead woken under the account's limit could not act on it either."""
+        self.polls([[self.entry("T-13", "idle", sid="t13")]])
+        self.limited_transcript("t13", int(time.time()) + 3600)
+        self.lead_context(350_000, at="2026-10-17T11:00:00Z")      # its reply is older than the limit
+        self.assertEqual(self.watch("T-13", "--rotate-context", "300000", polls=1, session=SESSION)[0], 1)
+
     def test_the_leads_own_limit_holds_every_event(self):
         lead_dir = self.config / "projects" / "-lead"
         lead_dir.mkdir(parents=True, exist_ok=True)

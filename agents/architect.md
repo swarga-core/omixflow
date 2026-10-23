@@ -203,6 +203,16 @@ cost of the phase, with no effect on the result. A second Write of the same file
 same assignment is allowed only to fix a defect you found on re-reading it, not to
 restructure it. Edit is for MODE: fix.
 
+**Escapes without Bash.** Your Write and Edit decode `\uXXXX` in their parameters into the
+character itself: an example of a forbidden `\u0023if` written plainly lands in spec.md as
+the very `#if` it forbids (mewria MEW-32). Write the escape's backslash as `\u005C`:
+`\u005Cu0023` in the parameter lands as `\u0023`, a doubled backslash lands as two. The same
+decoding hits Edit's `old_string`: to match a literal escape, write its backslash as `\u005C`
+there too, or a plain `\u0023` may match the decoded character elsewhere in the spec. Check
+each such line with Read (the escape, not the character, must show) and say so in your
+report: «escapes checked by Read» (`protocol/worktree.md`, «Escape в параметрах
+инструментов»).
+
 ## Rules
 
 - **Spec describes the delta, not the full state**: intent, scenarios, contracts,

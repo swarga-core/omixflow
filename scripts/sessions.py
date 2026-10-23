@@ -5,8 +5,8 @@
     sessions.py launch NAME --root DIR --mode background|terminal [--permission-mode MODE] [--model M]
                        [--effort E] -- PROMPT
     sessions.py status --root DIR [NAME ...]
-    sessions.py watch NAME ... --root DIR --owner LEAD [--known NAME=STATE ...] [--notify]
-                      [--interval SEC] [--max-polls N]
+    sessions.py watch [NAME ...] --root DIR --owner LEAD [--known NAME=STATE ...] [--notify]
+                      [--interval SEC] [--max-polls N] [--rotate-context N]
     sessions.py respawn NAME --root DIR
 
 protocol/lead.md, «Запуск сессий». DIR is the project root, the main checkout with
@@ -67,6 +67,15 @@ LEAD and project: a new one ends the previous (its pid in the git directory of D
 `omixflow-sessions/watch-{LEAD}.pid`), which prints `{"superseded": true}` and exits 5.
 --notify: a macOS notification per event when osascript is present. --max-polls reached
 without an event: exit 1. `claude agents` failing three polls in a row: exit 3.
+--rotate-context N: the lead's own context — its last model request (input, cache write and
+cache read) in its transcript ($CLAUDE_CODE_SESSION_ID) — above N is the event `{"name": LEAD,
+"state": "rotate", "context"}`, once per lead session (`known` keeps `LEAD=rotate@{session}`;
+`/clear` gives the lead a new one) and not while the lead is limited: every request of the lead
+re-reads that context, a lead after `/clear` starts at ~100k (protocol/lead.md, «Смена лида»).
+0, the default: no such event; without $CLAUDE_CODE_SESSION_ID or the lead's transcript there is
+none either, silently. Without NAME (a lead with no background sessions: terminal mode, or all
+of them done) the watch is for this event alone: --rotate-context above 0 is required, and
+`claude agents` is not polled.
 
 `respawn`: `claude respawn` of the latest stopped project session named NAME: the
 conversation is kept, the name stays, the socket is new. A name any active session holds is
@@ -220,6 +229,21 @@ def reply_state(session: Any) -> Optional[Dict[str, Any]]:
             if isinstance(holder, dict) and isinstance(holder.get("resetsAt"), (int, float)):
                 return {"kind": "limit", "resets": int(holder["resetsAt"]), "at": at}
         return {"kind": "limit", "resets": NO_RESET, "at": at}
+    return None
+
+
+def session_context(session: Any) -> Optional[int]:
+    """The context of SESSION's last model request (input, cache write and cache read): what each
+    of its next requests re-reads. None without a transcript or without usage (an API error)."""
+    if not isinstance(session, str) or not SESSION_RE.match(session):
+        return None
+    for log in config_dir().joinpath("projects").glob(f"*/{session}.jsonl"):
+        rec = last_reply(log) or {}
+        message = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+        usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
+        size = sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                      "cache_read_input_tokens"))
+        return size or None
     return None
 
 
@@ -476,6 +500,8 @@ def notify(events: List[Dict[str, Any]]) -> None:
     for e in events:
         text = (f"{e['name']} ждёт тебя: claude attach {e['name']}" if e["state"] == "waiting"
                 else f"{e['name']}: лимит сброшен, продолжить" if e["state"] == "limited"
+                else f"{e['name']}: контекст {e['context'] // 1000}k — смена лида: /clear, затем "
+                     f"/omixflow:lead (фоновый лид — claude attach {e['name']})" if e["state"] == "rotate"
                 else f"{e['name']}: сессия {e['state']}")
         try:
             subprocess.run([tool, "-e", f"display notification {applescript_string(text)} "
@@ -492,8 +518,10 @@ def cmd_watch(ns: argparse.Namespace) -> Dict[str, Any]:
         if not sep or not NAME_RE.match(name) or not state:
             raise UsageError(f"--known {item!r}: нужно ИМЯ=СОСТОЯНИЕ")
         seen[name] = state
-    if ns.interval < 0 or not NAME_RE.match(ns.owner):
-        raise UsageError("--interval не меньше 0, --owner — имя лида")
+    if ns.interval < 0 or ns.rotate_context < 0 or not NAME_RE.match(ns.owner):
+        raise UsageError("--interval и --rotate-context не меньше 0, --owner — имя лида")
+    if not ns.names and not ns.rotate_context:
+        raise UsageError("watch без имён — только сигнал смены лида: нужен --rotate-context больше 0")
     interval = ns.interval if ns.max_polls else max(ns.interval, MIN_INTERVAL)
     root = project_root(ns.root)
 
@@ -511,7 +539,7 @@ def cmd_watch(ns: argparse.Namespace) -> Dict[str, Any]:
         polls = failures = 0
         while True:
             try:
-                entries = project(agents(), root)
+                entries = project(agents(), root) if ns.names else []
                 failures = 0
             except SessionsError:
                 failures += 1
@@ -528,6 +556,12 @@ def cmd_watch(ns: argparse.Namespace) -> Dict[str, Any]:
                                           if c["state"] in ATTENTION and seen.get(c["name"]) != known_state(c)]
                 if not hold:
                     seen.update({c["name"]: known_state(c) for c in now})
+                own = os.environ.get("CLAUDE_CODE_SESSION_ID")
+                if not hold and ns.rotate_context and seen.get(ns.owner) != f"rotate@{own}":
+                    size = session_context(own)
+                    if size and size > ns.rotate_context:
+                        events.append({"name": ns.owner, "state": "rotate", "context": size})
+                        seen[ns.owner] = f"rotate@{own}"
                 if events:
                     if ns.notify:
                         notify(events)
@@ -587,13 +621,14 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("names", nargs="*")
     p.add_argument("--root", required=True)
     p = sub.add_parser("watch")
-    p.add_argument("names", nargs="+")
+    p.add_argument("names", nargs="*")
     p.add_argument("--root", required=True)
     p.add_argument("--owner", required=True)
     p.add_argument("--known", nargs="+", action="extend")
     p.add_argument("--notify", action="store_true")
     p.add_argument("--interval", type=float, default=20.0)
     p.add_argument("--max-polls", type=int, default=0)
+    p.add_argument("--rotate-context", type=int, default=0)
     p = sub.add_parser("respawn")
     p.add_argument("name")
     p.add_argument("--root", required=True)

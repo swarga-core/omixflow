@@ -390,6 +390,7 @@ POINT_KINDS = ("содержание", "маршрут", "внешнее")
 LEAD_DEFAULT_MODE = "developer"   # mirrors lead.default in the schema (tests/test_lint.py)
 LEAD_DEFAULT_TIMEOUT = "10m"      # mirrors lead.timeout in the schema
 LEAD_DEFAULT_STALL = "15m"        # mirrors lead.stall in the schema
+LEAD_DEFAULT_ROTATE_CONTEXT = 300000  # mirrors lead.rotate_context in the schema
 LEAD_DEFAULT_ACTIONS = {"backlog": "lead", "memory": "lead"}  # mirrors lead.actions in the schema
 LEAD_DEFAULT_DELIVERY = "lead"    # mirrors lead.delivery in the schema
 _DURATION_RE = re.compile(r"^([1-9][0-9]*)([smh])$")
@@ -467,12 +468,17 @@ def agent_effort(role: str) -> Optional[str]:
 
 
 def lead_settings(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """lead.default, lead.timeout, lead.stall, lead.actions, lead.notify, lead.delivery and
-    lead.plugin_session with defaults; durations in seconds."""
+    """lead.default, lead.timeout, lead.stall, lead.rotate_context, lead.actions, lead.notify,
+    lead.delivery and lead.plugin_session with defaults; durations in seconds."""
     lead = cfg.get("lead") or {}
+    rotate = lead.get("rotate_context", LEAD_DEFAULT_ROTATE_CONTEXT)
+    if isinstance(rotate, bool) or not isinstance(rotate, int) or rotate < 0:   # `true` would be 1: a rotate on every lead
+        raise OmixflowError(f"lead.rotate_context: целое число токенов не меньше 0 (0 — без сигнала), "
+                            f"получено {rotate!r}")
     return {"default": lead.get("default") or LEAD_DEFAULT_MODE,
             "timeout": duration_seconds(str(lead.get("timeout") or LEAD_DEFAULT_TIMEOUT)),
             "stall": duration_seconds(str(lead.get("stall") or LEAD_DEFAULT_STALL)),
+            "rotate_context": rotate,
             "actions": {**LEAD_DEFAULT_ACTIONS, **(lead.get("actions") or {})},
             "notify": list(lead.get("notify") or []),
             "delivery": lead.get("delivery") or LEAD_DEFAULT_DELIVERY,
