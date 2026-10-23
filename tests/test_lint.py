@@ -1185,6 +1185,23 @@ class AgentRulesLint(unittest.TestCase):
         self.assertIn("- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)", self.flat("skills/spec/SKILL.md"))
         self.assertIn("`- Findings: {N} total ({C} critical, {W} warning, {S} suggestion)`", self.flat("skills/plan/SKILL.md"))
 
+    def test_the_rules_of_0_9_6_from_swais_t16_and_mewria_mew28_mew34(self):
+        """G-72 (MEW-34): the unit of MUTATIONS; G-101 (T-16): a tool's report file in SCRATCH_DIR;
+        G-5 (MEW-28): `--conflicts none` and a baseline over a dirty tree in implement 1a."""
+        coder, tester = self.flat("agents/coder.md"), self.flat("agents/tester.md")
+        self.assertIn("A test is a line the lang adapter's `tests.declaration` matches", coder)
+        self.assertIn("each case gets its own line", coder)
+        self.assertIn("every `[TestCase(…)]` case where the adapter counts cases", tester)
+        self.assertIn("A tool's report file (json, junit, coverage) gets an explicit path there", coder)
+        self.assertIn("a tool's report file (json, junit, coverage) gets an explicit path there", tester)
+        self.assertIn("`--outputFile={SCRATCH_DIR}/{метка}/vitest.json`", self.flat("adapters/lang/ts.md"))
+        implement = self.flat("skills/implement/SKILL.md")
+        self.assertIn("(`--conflicts none`, когда их нет)", implement)
+        self.assertIn("Перед заданием, когда слияние уже остановилось, — базовая линия `report.py baseline", implement)
+        self.assertIn("--baseline {файл} --conflicts {CONFLICTS}", implement)          # review 0.9.6 F1: always
+        self.assertIn("one probe of the method serves the cases its run shows red", coder)   # review F11
+        self.assertIn("`--outputFile.json=…/vitest.json --outputFile.junit=…/junit.xml`", self.flat("adapters/lang/ts.md"))
+
     def test_a_failed_agent_gets_the_same_assignment_again(self):
         """T-7: the reviewer broke off on ENOTFOUND before writing FINDINGS_PATH."""
         runtime = self.flat("protocol/runtime.md")

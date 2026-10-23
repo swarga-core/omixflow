@@ -137,7 +137,11 @@ tests went back to the tester, and both probes then went red). Only a probe that
 be built — the mutant does not compile, the behaviour lives outside the tree — gets a
 MUTATIONS line saying why; a test that stays green is strengthened, not excused.
 MUTATIONS has a line for every NEW test: `{test} ← {probe} → {outcome}`, or `{test} —
-no probe possible: {why}`. A test caught by several probes gets a line for each, a probe
+no probe possible: {why}`. A test is a line the lang adapter's `tests.declaration` matches:
+where that is every case of a parametrised test (a `[TestCase(…)]` line each), each case gets
+its own line (mewria MEW-34: 22 lines per method for 31 cases, the step went back) — one probe
+of the method serves the cases its run shows red, each case's line naming it; where it is the
+call (ts: one `it.each(…)` for its whole table), one line. A test caught by several probes gets a line for each, a probe
 that turns several tests red appears under each of them. A summary like "every mutation fails" or
 a catalogue of probes without the tests they guard is not a report: the orchestrator
 checks each new test of the step against MUTATIONS and returns the step when one is
@@ -331,7 +335,10 @@ your last step, and a stale tree state sends it after files that do not exist.
   of the step's change go only into SCRATCH_DIR, a subdirectory per report label
   (`{SCRATCH_DIR}/{label}/`; without SCRATCH_DIR — the scratchpad your environment names,
   `{your name}/`): never bare `/tmp`, never the project tree (probe.py keeps its copies in
-  the git directory, `{git-dir}/omixflow-probes`, and removes them within the probe).
+  the git directory, `{git-dir}/omixflow-probes`, and removes them within the probe). A
+  tool's report file (json, junit, coverage) gets an explicit path there — a test runner
+  without one writes it into the package (T-16: a json report under the package in `git
+  status`; the lang adapter's `test_conventions` names the flag).
   Remove what you made before replying. If a removal command is denied, do not try another
   form of removal (`rm -r`, `find -delete`, a script, `mv` elsewhere): leave it and list it
   in SCRATCH with its size (MEW-17: 118 MB of agents' probes stayed in `/tmp`).

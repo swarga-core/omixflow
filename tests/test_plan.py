@@ -351,6 +351,28 @@ class PlanCheckTests(unittest.TestCase):
         code, out, _ = run("files", "--task", str(self.task), "--json")
         self.assertEqual(json.loads(out)["steps"], 2)             # the `### Шаг 1` under the specs list is not a step
 
+    def test_a_committed_step_is_not_checked_against_the_tree(self):
+        """G-97, SwAIS T-16: in the middle of Implement the files steps 1–3 created are there,
+        and `check` gave 9 (then 17) false «CREATE … already exists»."""
+        (self.root / "packages" / "schemas" / "src" / "action.ts").write_text("export const add = 1\n")   # step 1 made it
+        code, problems = self.check(GOOD_PLAN)
+        self.assertTrue(any("CREATE `packages/schemas/src/action.ts` — the file already exists" in p for p in problems), problems)
+        (self.task / "state.yaml").write_text("id: T-1\nkind: task\ntier: M\nsteps_done: [1, 7]\n")   # 7: no such step
+        code, problems = self.check(GOOD_PLAN)
+        self.assertEqual((code, problems), (0, []))
+        code, out, _ = run("check", "--task", str(self.task), "--json")
+        self.assertEqual(json.loads(out)["done_steps"], [1])          # the plan's steps, as numbers
+        code, out, _ = run("check", "--task", str(self.task))
+        self.assertIn("(steps 1 are done: their paths were not checked against the tree)", out)
+        # a step not done yet is still checked against the tree
+        code, problems = self.check(GOOD_PLAN.replace("- MODIFY: `packages/schemas/src/action.ts` — created by step 1",
+                                                      "- CREATE: `packages/schemas/src/index.ts` — created by step 1"))
+        self.assertIn("step 2: CREATE `packages/schemas/src/index.ts` — the file already exists (MODIFY?)", problems)
+        # review 0.9.6 F6: the later steps see the tree, not the done step's Files — step 1's file is not there
+        (self.root / "packages" / "schemas" / "src" / "action.ts").unlink()
+        code, problems = self.check(GOOD_PLAN)
+        self.assertEqual(problems, ["step 2: `packages/schemas/src/action.ts` is not in the tree (a wrong path, or CREATE?)"])
+
     def test_each_mechanical_defect_is_a_line_for_the_architect(self):
         cases = [
             ("**Design:** `add` in action.ts; `OldThing` deleted. Unlike the `address` field, nothing else moves.\n", "",

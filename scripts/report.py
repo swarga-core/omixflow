@@ -5,13 +5,15 @@ review 4): the orchestrator reads a verdict instead of the report.
     report.py baseline --out FILE [--root DIR] [--artifacts DIR]
     report.py check --role coder|tester --report REPORT_PATH [--root DIR] [--artifacts DIR]
                     [--baseline FILE] [--verify FILE | --also GATE ...] [--test-glob GLOB ...]
-                    [--declaration REGEX] [--conflicts FILE ...] [--amend-decision Dn ...] [--json]
+                    [--declaration REGEX] [--conflicts FILE ... | --conflicts none] [--amend-decision Dn ...]
+                    [--json]
 
 `baseline` records the uncommitted tree before an assignment (the paths of `git status` with
 the hash of each file's content) so that `check --baseline` charges the agent only with what
 changed since: in implement the tester works on top of the coder's uncommitted step, in
-review the coder, the tester and the coder again share one uncommitted fix pass. Without a
-baseline the whole uncommitted tree is the agent's.
+review the coder, the tester and the coder again share one uncommitted fix pass, in a base sync
+the coder resolves a merge that already stopped. Without a baseline the whole uncommitted tree is
+the agent's — in a sync, all of it but the files outside the merge (below).
 
 What `check` verifies, each against evidence the agent cannot write:
 - the file exists and ends with its last section (coder: NOTES, tester: SUMMARY); a reply
@@ -25,9 +27,17 @@ What `check` verifies, each against evidence the agent cannot write:
   problem, and so is a copy probe.py left unrestored in `{git-dir}/omixflow-probes`;
 - a base sync (coder `MODE: sync`, the merge or rebase still in progress — MERGE_HEAD or
   REBASE_HEAD — and STEP `sync…`, a RESOLUTIONS section or --conflicts): RESOLUTIONS replaces
-  FILES and names every conflicted file (--conflicts, else MERGE_MSG); MUTATIONS and BYTES CHECK
-  count only the lines a three-way merge would not have produced — current minus (HEAD + the
-  other side − the merge base) (SwAIS T-14: 93 tests of T-13 from the base). A known limit:
+  FILES and names every conflicted file (--conflicts, else MERGE_MSG; `--conflicts none`, alone —
+  no conflicts, unless MERGE_MSG names some; an empty value is the call's error); MUTATIONS and
+  BYTES CHECK count, in the files either side changes since the base or a conflict names, only
+  the lines a three-way merge would not have produced — current minus (HEAD + the other side −
+  the merge base) (SwAIS T-14: 93 tests of T-13 from the base), in any other file the lines
+  added against the baseline's blob or HEAD (a dirty file of the developer's the coder added a
+  line to: only that line). Without --baseline
+  a file HEAD has that neither side changes since the base and no conflict names is left out,
+  with a warning: a dirty file of the developer's (G-5 mewria MEW-28), or the coder's edit that
+  only a baseline taken once the merge stopped tells apart; a file HEAD has not (a seam test the
+  coder made) stays the agent's. A known limit:
   a test file the task renamed while the base added tests to the old path — the base's tests
   count as the coder's (`git show {ref}:./{new path}` has no such file on the other side);
 - SPEC AMENDMENTS (coder): the task's spec.md diffed against the baseline's snapshot of it
@@ -97,6 +107,7 @@ import re
 from collections import Counter
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
@@ -355,6 +366,18 @@ def sync_base(root: Path, other: str) -> Optional[str]:
     return lib.git(root, "merge-base", "HEAD", other)
 
 
+def sync_files(root: Path, other: str, base: Optional[str]) -> Set[str]:
+    """The files a sync touches: those either side changed since the merge base (`diff {base} HEAD`
+    and `diff {base} {other}`; without a base, HEAD against OTHER). A dirty file neither side
+    changes is no work of the sync (G-5 mewria MEW-28: the founder's edit in `knowledge/` charged
+    to the coder's BYTES CHECK)."""
+    pairs = [(base, "HEAD"), (base, other)] if base else [("HEAD", other)]
+    out: Set[str] = set()
+    for a, b in pairs:
+        out.update(lib.git_paths(root, "diff", "--name-only", "--no-renames", "-z", a, b) or [])
+    return out
+
+
 def sync_new_lines(root: Path, path: str, other: str, base: Optional[str] = None) -> List[str]:
     """The lines of PATH a three-way merge would not have produced: current minus (HEAD + OTHER −
     BASE), as multisets of whitespace-normalised lines — the agent's own in a sync. A test both
@@ -460,11 +483,12 @@ def diff_lines(root: Path, path: str, baseline: Optional[Dict[str, Optional[str]
     return added, removed
 
 
-def new_declarations_in(added: List[str], removed: List[str], rx: "re.Pattern[str]") -> int:
+def new_declarations_in(added: List[str], removed: List[str], rx: "re.Pattern[str]") -> List[str]:
     """Added declaration lines without an identical (whitespace-normalised) removed one: a
-    moved test is not new, a renamed or replaced one is (its body deserves a probe)."""
+    moved test is not new, a renamed or replaced one is (its body deserves a probe). Each line
+    the adapter's `tests.declaration` matches is one test — every `[TestCase(…)]` of a method."""
     gone = Counter(" ".join(l.split()) for l in removed if rx.search(l))
-    n = 0
+    new = []
     for l in added:
         if not rx.search(l):
             continue
@@ -472,8 +496,22 @@ def new_declarations_in(added: List[str], removed: List[str], rx: "re.Pattern[st
         if gone[key] > 0:
             gone[key] -= 1
         else:
-            n += 1
-    return n
+            new.append(key)
+    return new
+
+
+SHOWN_DECLARATIONS = 5
+
+
+def declarations_shown(lines: List[str]) -> str:
+    """The first new declarations of a file for an error (G-72 mewria MEW-34: 22 lines for 31
+    `[TestCase]`s — the count alone did not show what is counted)."""
+    def span(l: str) -> str:    # a template literal's backticks inside: a double-backtick span
+        cut = l[:80] + ("…" if len(l) > 80 else "")
+        return f"`` {cut} ``" if "`" in cut else f"`{cut}`"
+    shown = "; ".join(span(l) for l in lines[:SHOWN_DECLARATIONS])
+    more = len(lines) - SHOWN_DECLARATIONS
+    return shown + (f"; ещё {more}" if more > 0 else "")
 
 
 def lang_tests(root: Path) -> List[Tuple[List[str], Optional[str]]]:
@@ -818,17 +856,24 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
         problems.append("нет разделов: " + ", ".join(missing))
     else:
         verified.append("разделы формата на месте")
+    listed: List[str] = []
     if sync:
-        listed = conflicts if conflicts is not None else merge_conflicts(root)
+        # `--conflicts none` (an empty list) is «no conflicts»; git's own record in MERGE_MSG still wins
+        listed = conflicts or merge_conflicts(root)
+        if conflicts == [] and listed:
+            facts.append(f"--conflicts none, а MERGE_MSG называет конфликты: {', '.join(listed)} — сверены они")
         unnamed = uncovered(listed, section_text(sections, "RESOLUTIONS"), root) if listed else []
         if unnamed:
             problems.append(f"RESOLUTIONS не называет конфликтные файлы: {unnamed} — строка `{{file}} — {{как разрешён}}` на каждый")
         elif listed:
             verified.append(f"RESOLUTIONS: все {len(listed)} конфликтных файлов названы")
+        elif conflicts == []:
+            verified.append("RESOLUTIONS: конфликтов нет (--conflicts none, в MERGE_MSG их тоже нет)")
         else:
             result["unchecked"].append("RESOLUTIONS не сверены: список конфликтов не передан (--conflicts) и нет в MERGE_MSG")
-        facts.append(f"синхронизация: идёт слияние с {other}; новое в MUTATIONS и BYTES CHECK — то, чего не дало бы "
-                     f"трёхстороннее слияние HEAD и {other} от их общей базы")
+        facts.append(f"синхронизация: идёт слияние с {other}; новое в MUTATIONS и BYTES CHECK — "
+                     + (f"то, чего не дало бы трёхстороннее слияние HEAD и {other} от их общей базы" if base else
+                        f"то, чего нет ни в HEAD, ни в {other} (общей базы нет)"))
 
     # a stop is not a failed report
     status = section_text(sections, "STATUS").lower()
@@ -853,9 +898,11 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
             hint = (f" (если это копия probe.py до 0.9.1, а не остаток слияния или patch: `probe.py restore "
                     f"--root {root} --file {l[3:-len('.orig')]}`)" if l.endswith(".orig") else "")
             problems.append(f"TREE STATE: остаток пробы в дереве — {l}{hint}")
-    base, left = probe_copies_left(root)   # probe.py keeps its copies in the git directory, out of `git status`
+    # probe.py keeps its copies in the git directory, out of `git status`; not `base`, the merge base of a sync
+    # (0.9.4 shadowed it: three-way counting fell back to HEAD + the other side)
+    probes_dir, left = probe_copies_left(root)
     if left:
-        problems.append(f"TREE STATE: пробы не восстановлены, копии в {base}: {', '.join(left[:5])} — "
+        problems.append(f"TREE STATE: пробы не восстановлены, копии в {probes_dir}: {', '.join(left[:5])} — "
                         f"`python3 {{корень плагина}}/scripts/probe.py restore --root {root}`")
     if untracked:
         facts.append("неотслеживаемые по TREE STATE: " + ", ".join(l[3:] for l in untracked))
@@ -868,6 +915,26 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
 
     # MUTATIONS
     delta = agent_delta(root, artifacts, baseline)
+    touched: Set[str] = (sync_files(root, other, base) | set(listed)) if sync else set()
+
+    def lines_of(path: str) -> Tuple[List[str], List[str]]:
+        """(added, removed) of PATH: a file of the merge against what the three-way merge gives, any other
+        against the baseline's blob or HEAD (review 0.9.6 R2-1: with a baseline, a line the coder added to
+        the developer's dirty file charged him with all the developer's lines)."""
+        if sync and path in touched:
+            return sync_new_lines(root, path, other, base), []
+        return diff_lines(root, path, baseline)
+
+    if sync and baseline is None:   # with a baseline taken once the merge started, the delta is the agent's already
+        # a file neither side changes is no work of the merge — unless HEAD has no such file: one the coder made
+        # during the sync (a seam test) is his, a dirty file of the developer's (mewria R-2) is not
+        outside = [p for p in delta if p not in touched
+                   and lib.git(root, "cat-file", "-e", f"HEAD:./{p}") is not None]
+        delta = [p for p in delta if p not in outside]
+        if outside:
+            warnings.append(f"вне слияния (их не меняет ни одна сторона; MUTATIONS и BYTES CHECK по ним не сверены): "
+                            f"{', '.join(outside[:10])}{' …' if len(outside) > 10 else ''} — правку coder'а в таких "
+                            f"файлах сверяет только `--baseline`, снятый после начала слияния (implement 1a)")
     mutation_lines = [l for l in sections.get("MUTATIONS", []) if MUTATION_LINE_RE.match(l)
                       and (OUTCOME_RE.search(l) or "no probe possible" in l.lower())]
     mutations = section_text(sections, "MUTATIONS")
@@ -877,6 +944,7 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
     else:
         new_declarations = 0
         per_file: List[str] = []
+        shown: List[str] = []       # the same, with the declarations themselves: an error shows what is counted
         for globs, declaration in langs:
             rx = re.compile(declaration) if declaration else None
             for path in lib.area_files(globs, delta):
@@ -884,17 +952,21 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
                     continue
                 if rx is None:
                     per_file.append(f"{path}: тестовый файл изменён (объявления не считаются: у адаптера нет tests.declaration)")
+                    shown.append(per_file[-1])
                     continue
-                added, removed = (sync_new_lines(root, path, other, base), []) if sync else diff_lines(root, path, baseline)
-                n = new_declarations_in(added, removed, rx)
-                if n > 0:
-                    new_declarations += n
-                    per_file.append(f"{path}: новых тестов {n}")
+                added, removed = lines_of(path)
+                found = new_declarations_in(added, removed, rx)
+                if found:
+                    new_declarations += len(found)
+                    per_file.append(f"{path}: новых тестов {len(found)}")
+                    shown.append(f"{per_file[-1]} — {declarations_shown(found)}")
+        unit = ("строка MUTATIONS на каждую строку, которую находит tests.declaration адаптера lang: где он считает "
+                "случаи параметризованного теста ([TestCase]), — на случай")
         if is_none(mutations) and new_declarations:
-            problems.append(f"MUTATIONS: none, но новых тестов {new_declarations} ({'; '.join(per_file)})")
+            problems.append(f"MUTATIONS: none, но новых тестов {new_declarations} ({'; '.join(shown)}); {unit}")
         elif new_declarations > len(mutation_lines):
-            problems.append(f"MUTATIONS: новых тестов {new_declarations} ({'; '.join(per_file)}), строк с исходом "
-                            f"{len(mutation_lines)}: проба на каждый новый тест и утверждение")
+            problems.append(f"MUTATIONS: новых тестов {new_declarations} ({'; '.join(shown)}), строк с исходом "
+                            f"{len(mutation_lines)}: проба на каждый новый тест и утверждение; {unit}")
         for l in mutation_lines:
             low = l.lower()
             if "no probe possible" in low:
@@ -970,7 +1042,7 @@ def check(role: str, report_path: Path, root: Path, artifacts: str, plan: Option
     # BYTES CHECK
     non_ascii = [p for p in delta if not is_binary(root, p)
                  and any(any(ord(ch) > 127 for ch in l)
-                         for l in (sync_new_lines(root, p, other, base) if sync else diff_lines(root, p, baseline)[0]))]
+                         for l in lines_of(p)[0])]
     bytes_check = section_text(sections, "BYTES CHECK")
     if non_ascii and (not bytes_check or bytes_check.lstrip("-* ").lower().startswith("n/a")):
         problems.append(f"BYTES CHECK: n/a, а в диффе не-ASCII строки: {non_ascii} — `n/a` только при "
@@ -1088,9 +1160,18 @@ def cmd_check(ns: argparse.Namespace, root: Path, artifacts: str) -> int:
     except lib.OmixflowError as e:
         print(f"report.py: план гейтов не получен: {e}", file=sys.stderr)
         return USAGE
+    conflicts = None if ns.conflicts is None else [c.strip() for c in ns.conflicts]
+    if conflicts is not None and "" in conflicts:      # an empty substitution of {CONFLICTS}, not «none»
+        print("report.py: --conflicts: пустое значение — файлы или `none`, когда конфликтов нет", file=sys.stderr)
+        return USAGE
+    if conflicts and any(c.lower() == "none" for c in conflicts):
+        if len(conflicts) > 1:
+            print(f"report.py: --conflicts: `none` — только одно, без файлов (передано: {' '.join(conflicts)})", file=sys.stderr)
+            return USAGE
+        conflicts = []
     try:
         result = check(ns.role, Path(ns.report), root, artifacts.strip("/"), plan, langs, gate_criteria(root), baseline,
-                       baseline_spec, ns.conflicts, amend)
+                       baseline_spec, conflicts, amend)
     except lib.OmixflowError as e:      # the call's error (an --amend-decision of no decision of the spec): exit 3, not a return
         print(f"report.py: {e}", file=sys.stderr)
         return USAGE
@@ -1118,7 +1199,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--test-glob", nargs="+", action="extend", default=[], help="test file globs; default: lang adapters' `tests.files`")
     p.add_argument("--declaration", default=None, help="regex of a test declaration; default: adapters' `tests.declaration`")
     p.add_argument("--conflicts", nargs="+", default=None,
-                   help="conflicted files of a base sync (the CONFLICTS of MODE: sync); default: MERGE_MSG")
+                   help="conflicted files of a base sync (the CONFLICTS of MODE: sync), `none` alone for none; "
+                        "default: MERGE_MSG")
     p.add_argument("--amend-decision", nargs="+", action="extend", default=[], type=decision_id, metavar="Dn",
                    help="a decision whose text the orchestrator ordered changed (a review fix of the mechanism, "
                         "not the choice): a fact, not a stop; repeatable")
@@ -1134,4 +1216,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:       # a crash is the call's error: exit 1 would read as «return the report»
+        traceback.print_exc()
+        sys.exit(USAGE)

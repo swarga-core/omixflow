@@ -94,7 +94,8 @@ project does not declare: `{gate}: not declared` there, as the coder does.
 Scratch outside the task (probes, experiments, builds; probe.py keeps its copies in the git
 directory) goes only into SCRATCH_DIR, a subdirectory per report label (without SCRATCH_DIR —
 the scratchpad your environment names, `{your name}/`): never bare `/tmp`, never the project
-tree. Remove it before replying. If a removal command is denied, do not try another form of
+tree; a tool's report file (json, junit, coverage) gets an explicit path there (the lang
+adapter's `test_conventions` names the flag). Remove it before replying. If a removal command is denied, do not try another form of
 removal: leave it and list it in SCRATCH with its size.
 
 Git is read-only for you (`status`, `diff`, `show`, `log`); never `stash`, `checkout`,
@@ -122,7 +123,8 @@ it again, restores with `cp` and prints the MUTATIONS line to copy as is; `--che
 MUTATIONS line («no test ran»: the filter matches no test — filter by the test's own name); the Bash tool's timeout at 600000 ms, a call expected to run past nine minutes
 through `gate.py start {label}-probes --root {PROJECT_ROOT} -- 'python3 {PLUGIN_ROOT}/scripts/probe.py
 batch …'` and `gate.py poll {label}-probes --root {PROJECT_ROOT} --timeout 540 --tail 200`;
-MUTATIONS has a line for every new test, as that section says. Every new test and every
+MUTATIONS has a line for every new test, as that section says — a test is a line of the lang
+adapter's `tests.declaration`, every `[TestCase(…)]` case where the adapter counts cases. Every new test and every
 new assertion in an existing test is probed, whether or not the assignment names a probe,
 and also when it pins behaviour that already existed: break that behaviour. "The schema is
 unchanged", "it checks existing behaviour" and "no probe was requested" are not reasons.

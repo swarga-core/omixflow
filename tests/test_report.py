@@ -182,7 +182,8 @@ class ReportCheckTests(unittest.TestCase):
         self.write(mutations=MUTATION_LINES.splitlines(keepends=True)[0])
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
-        self.assertIn("новых тестов 2 (src/a.test.ts: новых тестов 2), строк с исходом 1", out)
+        self.assertIn("новых тестов 2 (src/a.test.ts: новых тестов 2 — `it('adds', () => {})`; "
+                      "`it('subtracts', () => {})`), строк с исходом 1", out)
         self.write(**{"`a - b` → `a + b` → RED": "no probe possible: it checks existing behaviour"})
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
@@ -212,7 +213,9 @@ class ReportCheckTests(unittest.TestCase):
         self.write(mutations=MUTATION_LINES)
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
-        self.assertIn("новых тестов 6 (src/a.test.ts: новых тестов 6), строк с исходом 2", out)
+        self.assertIn("новых тестов 6 (src/a.test.ts: новых тестов 6 — ", out)
+        self.assertIn("`it.only('o', () => {})`; ещё 1), строк с исходом 2", out)   # G-72: the first 5 shown
+        self.assertIn("; `` test.each`a`('t', () => {}) ``;", out)        # review F10: its own backticks inside
 
     def sync_in_progress(self) -> None:
         """A task branch and a moved base, both adding tests to one file; the merge stops on the
@@ -226,12 +229,16 @@ class ReportCheckTests(unittest.TestCase):
         self.git("commit", "-q", "-m", "shared")
         self.git("checkout", "-q", "-b", "task/T-1")
         (self.root / "src" / "b.test.ts").write_text(common + "it('task', () => {})\n")
-        self.git("commit", "-q", "-am", "task step")
+        (self.root / "src" / "t.ts").write_text("export const t = 1\n")    # the task's own file, the base has none
+        (self.root / "src" / "same.ts").write_text("export const same = 1\n")   # both sides alike (a cherry-pick)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "task step")
         self.git("checkout", "-q", "main")
         (self.root / "src" / "b.test.ts").write_text(common + "it('neighbour', () => {})\n")
         (self.root / "src" / "c.test.ts").write_text("import { it } from 'vitest'\n"
                                                      + "".join(f"it('n{i}', () => {{}})\n" for i in range(5)))
         (self.root / "docs.md").write_text("# Заметка соседа\n")
+        (self.root / "src" / "same.ts").write_text("export const same = 1\n")
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "neighbour")
         self.git("checkout", "-q", "task/T-1")
@@ -265,7 +272,7 @@ class ReportCheckTests(unittest.TestCase):
             "MUTATIONS: none: no new tests\n"))
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
-        self.assertIn("MUTATIONS: none, но новых тестов 1 (src/b.test.ts: новых тестов 1)", out)
+        self.assertIn("MUTATIONS: none, но новых тестов 1 (src/b.test.ts: новых тестов 1 — `it('both — сшивка', () => {})`)", out)
         self.write(text=self.sync_report(**{"  - src/b.test.ts — both sides kept, a seam test added\n": "  - all merged\n"}))
         code, out = self.check("--also", "build")
         self.assertEqual(code, 1, out)
@@ -308,6 +315,119 @@ class ReportCheckTests(unittest.TestCase):
                                                report.sync_base(self.root, "MERGE_HEAD")), [])
         self.assertEqual(report.sync_new_lines(self.root / "src", "d.test.ts", "MERGE_HEAD",   # review F10: a nested
                                                report.sync_base(self.root, "MERGE_HEAD")), [])  # root reads `./{path}`
+        code, out = self.check("--also", "build", "--conflicts", "none")     # G-5: `none` — no conflicts
+        self.assertEqual(code, 0, out)
+        self.assertIn("RESOLUTIONS: конфликтов нет", out)
+        code, out = self.check("--also", "build", "--conflicts", "none", "src/x.ts")    # review F9: not with files
+        self.assertEqual(code, 3, out)
+        self.assertIn("`none` — только одно, без файлов", out)
+        code, out = self.check("--also", "build", "--conflicts", "")      # review R2-3: an empty {CONFLICTS}
+        self.assertEqual(code, 3, out)
+        self.assertIn("--conflicts: пустое значение", out)
+
+    def test_a_sync_counts_against_the_merge_base_not_the_sum_of_the_sides(self):
+        """0.9.6: check() shadowed the merge base with the probe directory (0.9.4), and the count fell
+        back to HEAD + MERGE_HEAD — a line of the base both sides kept counted twice, so a repeat of
+        it by the coder was no new test."""
+        self.sync_in_progress()
+        with (self.root / "src" / "b.test.ts").open("a") as f:
+            f.write("it('base', () => {})\n")
+        self.git("add", "src/b.test.ts")
+        self.write(text=self.sync_report())
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("новых тестов 2 (src/b.test.ts: новых тестов 2 — `it('both — сшивка', () => {})`; "
+                      "`it('base', () => {})`)", out)
+
+    def test_a_dirty_file_outside_the_merge_is_not_the_coders(self):
+        """G-5 mewria MEW-28: the founder's Cyrillic edit in a file neither side changes (project rule R-2)
+        went to the coder's BYTES CHECK; a non-ASCII line of the resolution is still his."""
+        self.sync_in_progress()
+        (self.root / "src" / "a.ts").write_text("export const add = (a, b) => a + b  // заметка фаундера\n")
+        self.write(text=self.sync_report())
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 0, out)
+        self.assertIn("ПРЕДУПРЕЖДЕНИЕ: вне слияния (их не меняет ни одна сторона", out)
+        self.assertIn("): src/a.ts — правку coder'а", out)
+        self.assertEqual(report.sync_files(self.root, "MERGE_HEAD", report.sync_base(self.root, "MERGE_HEAD")),
+                         {"src/b.test.ts", "src/c.test.ts", "docs.md", "src/t.ts", "src/same.ts"})    # either side's files
+        self.write(text=self.sync_report(**{"BYTES CHECK:\n  - src/b.test.ts: Cyrillic; invisible and escapes: none":
+                                            "BYTES CHECK: n/a: ASCII only"}))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)
+        self.assertIn("BYTES CHECK: n/a, а в диффе не-ASCII строки: ['src/b.test.ts']", out)
+        # `--conflicts none` while git's MERGE_MSG names the conflict: git's record is checked
+        self.write(text=self.sync_report(**{"  - src/b.test.ts — both sides kept, a seam test added\n": "  - none\n"}))
+        code, out = self.check("--also", "build", "--conflicts", "none")
+        self.assertEqual(code, 1, out)
+        self.assertIn("--conflicts none, а MERGE_MSG называет конфликты: src/b.test.ts", out)
+        self.assertIn("RESOLUTIONS не называет конфликтные файлы: ['src/b.test.ts']", out)
+
+    def test_with_a_baseline_a_dirty_file_outside_the_merge_counts_from_the_baseline(self):
+        """Review 0.9.6 R2-1: with a baseline taken once the merge stopped, a line the coder added to the
+        developer's dirty file was counted three-way — the developer's Cyrillic line went to BYTES CHECK."""
+        self.sync_in_progress()
+        (self.root / "src" / "a.ts").write_text("export const add = (a, b) => a + b  // заметка фаундера\n")
+        snap = self.root / ".git" / "sync-baseline.json"
+        code, out, _ = run("baseline", "--out", str(snap), "--root", str(self.root))
+        self.assertEqual(code, 0, out)
+        with (self.root / "src" / "a.ts").open("a") as f:
+            f.write("export const coder = 1\n")
+        self.write(text=self.sync_report())
+        code, out = self.check("--also", "build", "--baseline", str(snap))
+        self.assertEqual(code, 0, out)
+        self.assertIn("BYTES CHECK соответствует диффу", out)       # the developer's line is not the coder's
+        with (self.root / "src" / "a.ts").open("a") as f:
+            f.write("// и строка coder'а\n")
+        code, out = self.check("--also", "build", "--baseline", str(snap))
+        self.assertEqual(code, 1, out)          # his own Cyrillic line is still his
+        self.assertIn("BYTES CHECK не называет файлы диффа с не-ASCII строками: ['src/a.ts']", out)
+
+    def test_a_file_the_coder_makes_during_the_sync_is_his(self):
+        """Review 0.9.6 F1: a file neither side has (a seam test the coder made, untracked or added)
+        left the delta with the dirty files outside the merge — MUTATIONS and BYTES CHECK unchecked."""
+        self.sync_in_progress()
+        (self.root / "src" / "seam.test.ts").write_text("import { it } from 'vitest'\nit('сшивка', () => {})\n")
+        for staged in (False, True):
+            if staged:
+                self.git("add", "src/seam.test.ts")
+            self.write(text=self.sync_report())
+            code, out = self.check("--also", "build")
+            self.assertEqual(code, 1, out)
+            self.assertIn("src/seam.test.ts: новых тестов 1 — `it('сшивка', () => {})`", out)
+            self.assertIn("BYTES CHECK не называет файлы диффа с не-ASCII строками: ['src/seam.test.ts']", out)
+            self.assertNotIn("вне слияния", out)
+
+    def test_a_test_file_not_in_utf8_is_read_not_a_crash(self):
+        """Review 0.9.6 F5: a latin-1 line in `git diff` raised UnicodeDecodeError — exit 1, read as «return»."""
+        self.git("add", "src/a.test.ts")
+        self.git("commit", "-q", "-m", "tests")
+        (self.root / "src" / "a.test.ts").write_bytes(TEST_FILE.encode() + b"it('t\xe2che', () => {})\n")
+        self.write(text=REPORT.format(tree="   M src/a.ts\n   M src/a.test.ts\n   M .tasks/T-1/state.yaml",
+                                      mutations=MUTATION_LINES))
+        code, out = self.check("--also", "build")
+        self.assertEqual(code, 1, out)       # the file is read: the replaced byte is non-ASCII, BYTES CHECK n/a returned
+        self.assertIn("BYTES CHECK: n/a, а в диффе не-ASCII строки: ['src/a.test.ts']", out)
+
+    def test_every_test_case_of_a_parametrised_test_is_a_test(self):
+        """G-72 mewria MEW-34: 22 MUTATIONS lines for 31 declarations — a line per method, while the
+        csharp adapter counts every `[TestCase(…)]`; the error shows the declarations it counted."""
+        (self.root / "src" / "MathTests.cs").write_text(
+            "public class MathTests {\n  [TestCase(1, 2, 3)]\n  [TestCase(2, 2, 4)]\n  [TestCase(0, 0, 0)]\n"
+            "  public void Adds(int a, int b, int sum) { }\n}\n")
+        cs = ("--test-glob", "**/*.cs", "--declaration", r"^\s*\[(Test|TestCase|TestCaseSource|UnityTest)\b")
+        tree = {"   M .tasks/T-1/state.yaml": "   M .tasks/T-1/state.yaml\n  ?? src/MathTests.cs"}
+        self.write(mutations="  - MathTests.Adds ← M1 a.ts: `a + b` → `a - b` → RED\n", **tree)
+        code, out = self.check("--also", "build", *cs)
+        self.assertEqual(code, 1, out)
+        self.assertIn("новых тестов 3 (src/MathTests.cs: новых тестов 3 — `[TestCase(1, 2, 3)]`; "
+                      "`[TestCase(2, 2, 4)]`; `[TestCase(0, 0, 0)]`), строк с исходом 1", out)
+        self.assertIn("где он считает случаи параметризованного теста ([TestCase]), — на случай", out)
+        self.write(mutations="".join(f"  - MathTests.Adds({c}) ← M1 a.ts: `a + b` → `a - b` → RED\n"
+                                     for c in ("1, 2, 3", "2, 2, 4", "0, 0, 0")), **tree)
+        code, out = self.check("--also", "build", *cs)
+        self.assertEqual(code, 0, out)
+        self.assertIn("MUTATIONS: новых тестов 3, строк с исходом 3 (src/MathTests.cs: новых тестов 3)", out)
 
     def test_conflicts_after_the_merge_is_committed_say_so(self):
         self.write()

@@ -32,7 +32,8 @@ gate in backticks and every gate named is one the project declares in `verify`; 
 checkpoint asks for a manual check an agent cannot run («вручную», «by hand», «headed
 Chrome» — a heuristic: the architect may answer «agent-runnable: …» and the skill passes
 the line to the reviewer); no step touches a read-only submodule, in Files or in a
-checkpoint; every scenario of spec.md (ranges `S1–S3` expanded, `~~S3~~ removed` left
+checkpoint; a step Implement committed (state.yaml `steps_done`) is not checked against the
+tree; every scenario of spec.md (ranges `S1–S3` expanded, `~~S3~~ removed` left
 out) is in some step's Covers and every contract is quoted in some step's Covers, Design
 or Files (`add()` and `Foo<T>` match `add` and `Foo`); a contract marked `project spec:
 {path}` has that path in «Project Specs to Update»; MODIFY and DELETE paths exist in the
@@ -337,11 +338,16 @@ def readonly_prefixes(cfg: Dict[str, Any]) -> List[str]:
     return out
 
 
-def check_plan(text: str, spec_text: Optional[str], cfg: Dict[str, Any], root: Path, tier: Optional[str]) -> List[str]:
+def check_plan(text: str, spec_text: Optional[str], cfg: Dict[str, Any], root: Path, tier: Optional[str],
+               done: Optional[set] = None) -> List[str]:
     """The problems of a plan, each a line the architect can act on; empty when the plan
     passes every mechanical check (the docstring of this module lists them). The file and
     step thresholds are `files`' business: a developer may have decided to continue over
-    them, and this check must not reopen that."""
+    them, and this check must not reopen that. DONE — the numbers of the steps Implement has
+    committed (state.yaml `steps_done`): their paths are not checked against the tree — the files
+    they create are there because they created them (SwAIS T-16: 9 and 17 false «already exists»
+    in the middle of Implement) — and the later steps see the tree, not the done steps' Files."""
+    done = done or set()
     problems: List[str] = []
     steps = split_steps(text)
     if not steps:
@@ -396,6 +402,8 @@ def check_plan(text: str, spec_text: Optional[str], cfg: Dict[str, Any], root: P
             for pref in readonly:
                 if path.startswith(pref):
                     problems.append(f"{label}: `{path}` is inside the read-only submodule `{pref}`")
+            if str(st["n"]) in done:    # a committed step: the tree shows its result, not its premise, and the
+                continue                # later steps see the tree — a file it made elsewhere is «not in the tree» there
             exists = ((root / path).exists() or path in created) and path not in deleted
             if kind == "create" and exists:
                 problems.append(f"{label}: CREATE `{path}` — the file already exists (MODIFY?)")
@@ -450,15 +458,21 @@ def cmd_check(ns: argparse.Namespace) -> int:
     except Exception as e:
         print(f"plan.py: {e}", file=sys.stderr)
         return NOT_READ
-    problems = check_plan(text, spec_text, cfg, root, tier)
+    done = {str(n) for n in (state.get("steps_done") or []) if n is not None}
+    problems = check_plan(text, spec_text, cfg, root, tier, done)
+    # the done steps of the current iteration, as the plan numbers them and in its order
+    plan_done = [st["n"] for st in split_steps(text) if st["current"] and st["n"] in done]
     if ns.json:
-        print(json.dumps({"plan": str(source), "problems": problems}, ensure_ascii=False))
+        print(json.dumps({"plan": str(source), "problems": problems,
+                          "done_steps": [int(n) if n.isdigit() else n for n in plan_done]}, ensure_ascii=False))
     elif problems:
         print(f"PLAN CHECK: {len(problems)} problems in {source}")
         for p in problems:
             print(f"- {p}")
     else:
         print(f"PLAN CHECK: ok — {source}")
+    if plan_done and not ns.json:
+        print(f"(steps {', '.join(plan_done)} are done: their paths were not checked against the tree)")
     return OVER if problems else OK
 
 

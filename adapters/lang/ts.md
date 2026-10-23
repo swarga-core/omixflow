@@ -57,6 +57,13 @@ tests:                                   # test_conventions machine-readable (re
 - Один файл: `pnpm test {Name}` или `pnpm exec vitest run {Name}`; один тест:
   `pnpm test -t "{name}"`. **Никогда `pnpm test -- {X}`**: с `--` pnpm искажает
   аргументы, и vitest тихо прогоняет всё. **Никогда `--filter={X}`** для vitest.
+- Машиночитаемый вывод (`--reporter=json`, `junit`, `blob`, `--coverage`) — только с явным путём
+  в `SCRATCH_DIR`: `--outputFile={SCRATCH_DIR}/{метка}/vitest.json`; при нескольких файловых
+  репортерах — по одному на каждый (`--outputFile.json=…/vitest.json --outputFile.junit=…/junit.xml`:
+  строковый путь получают все, и отчёты затирают друг друга); у покрытия
+  `--coverage.reportsDirectory={SCRATCH_DIR}/{метка}/coverage`. Без пути отчёт ложится в пакет
+  (Swarga AI Studio T-16: `packages/catalog/.vitest/json/output.json` в `git status` после
+  `--reporter=json`).
 
 ## suppressions
 

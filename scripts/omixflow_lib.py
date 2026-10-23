@@ -54,7 +54,7 @@ def require_yaml() -> None:
 def git(root: Path, *args: str) -> Optional[str]:
     try:
         out = subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+            ["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace", check=True
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
@@ -915,9 +915,11 @@ def git_paths(root: Path, *args: str) -> Optional[List[str]]:
 
 
 def git_raw(root: Path, *args: str) -> Optional[str]:
-    """git output as is (no strip): NUL-separated lists keep their last entry."""
+    """git output as is (no strip): NUL-separated lists keep their last entry. Bytes that are not
+    UTF-8 (a latin-1 test file, a file name) come back replaced, not as a UnicodeDecodeError."""
     try:
-        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True)
+        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, errors="replace",
+                             check=True)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return out.stdout
